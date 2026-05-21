@@ -76,8 +76,14 @@ trap cleanup EXIT
 deadline=$(( $(date +%s) + TIMEOUT ))
 while [ "$(date +%s)" -lt "$deadline" ]; do
     if tr -d '\r' < "$LOG" 2>/dev/null | grep -q '^ok$'; then
+        stripped="$(tr -d '\r' < "$LOG")"
+        if ! grep -q 'canboot: framebuffer painted\|canboot: fb = ' <<<"$stripped"; then
+            echo "smoke test FAILED: 'ok' seen but unified boot_info path didn't run" >&2
+            echo "$stripped" | sed 's/^/  | /' >&2
+            exit 1
+        fi
         echo "smoke test passed; serial log:"
-        tr -d '\r' < "$LOG" | sed 's/^/  | /'
+        echo "$stripped" | sed 's/^/  | /'
         exit 0
     fi
     sleep 1

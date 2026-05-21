@@ -15,15 +15,25 @@ if(NOT CANBOOT_ARCH IN_LIST CANBOOT_SUPPORTED_ARCHS)
     message(FATAL_ERROR "Unsupported CANBOOT_ARCH '${CANBOOT_ARCH}'. Supported: ${CANBOOT_SUPPORTED_ARCHS}")
 endif()
 
+# Sources shared between the BIOS kernel and the UEFI loader. These get
+# compiled twice with different flags (kernel-model vs PIC EFI) and linked
+# into each target separately.
+set(CANBOOT_KERNEL_COMMON
+    kernel/kmain.c
+    kernel/fb.c
+    hal/console/serial_x86.c
+)
+
 set(KERNEL_NAME "canboot-${CANBOOT_ARCH}")
 set(KERNEL_LINKER_SCRIPT "${CMAKE_SOURCE_DIR}/linker/kernel.${CANBOOT_ARCH}.ld")
 
 if(CANBOOT_ARCH STREQUAL "x86_64")
     set(KERNEL_SOURCES
         arch/x86_64/bootstrap.S
-        arch/x86_64/kmain.c
+        arch/x86_64/bios_entry.c
+        arch/x86_64/mb2_parse.c
         boot/multiboot2/header.S
-        hal/console/serial_x86.c
+        ${CANBOOT_KERNEL_COMMON}
     )
 else()
     message(FATAL_ERROR "Arch ${CANBOOT_ARCH} bring-up lands in a later milestone")
@@ -39,6 +49,7 @@ set_source_files_properties(
 
 target_include_directories(${KERNEL_NAME} PRIVATE
     hal/include
+    kernel/include
 )
 
 target_compile_options(${KERNEL_NAME} PRIVATE
@@ -71,16 +82,16 @@ set_target_properties(${KERNEL_NAME} PROPERTIES
     LINK_DEPENDS ${KERNEL_LINKER_SCRIPT}
 )
 
-# Convenience target: print artifact location
 add_custom_target(canboot-info ALL
     COMMAND ${CMAKE_COMMAND} -E echo "Kernel ELF: $<TARGET_FILE:${KERNEL_NAME}>"
     DEPENDS ${KERNEL_NAME}
 )
 
 # ---------------------------------------------------------------------------
-# UEFI loader (gnu-efi). Built as a separate PE/COFF binary; in milestone 2
-# it stands alone, in milestone 3 it will load the kernel ELF and hand off
-# to kmain() with a normalised boot_info.
+# UEFI loader (gnu-efi). Compiles boot/uefi/efi_main.c plus the shared
+# kernel/ sources with PIC + short-wchar + EFI include path, links them
+# with gnu-efi's crt0 and elf_x86_64_efi.lds, then objcopies to a PE32+
+# EFI application. Calls into the same kmain as the BIOS kernel.
 # ---------------------------------------------------------------------------
 if(CANBOOT_ARCH STREQUAL "x86_64")
     find_path(GNUEFI_INCLUDE_DIR efi.h
@@ -106,34 +117,45 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
        AND GNUEFI_CRT0 AND GNUEFI_LDS AND GNUEFI_LIB AND EFI_LIB)
 
         set(EFI_NAME "canboot-${CANBOOT_ARCH}-uefi")
-        set(EFI_SRC "${CMAKE_SOURCE_DIR}/boot/uefi/efi_main.c")
-        set(EFI_OBJ "${CMAKE_BINARY_DIR}/${EFI_NAME}.o")
         set(EFI_SO  "${CMAKE_BINARY_DIR}/${EFI_NAME}.so")
         set(EFI_OUT "${CMAKE_BINARY_DIR}/${EFI_NAME}.efi")
 
-        add_custom_command(
-            OUTPUT ${EFI_OBJ}
-            COMMAND ${CMAKE_C_COMPILER}
-                -I${GNUEFI_INCLUDE_DIR}
-                -I${GNUEFI_ARCH_INCLUDE_DIR}
-                -ffreestanding -fpic -fshort-wchar -mno-red-zone
-                -fno-stack-protector -fno-stack-check
-                -Wall -Wextra
-                -c ${EFI_SRC} -o ${EFI_OBJ}
-            DEPENDS ${EFI_SRC}
-            COMMENT "CC  ${EFI_NAME}.o"
-            VERBATIM
+        set(EFI_SOURCES
+            boot/uefi/efi_main.c
+            ${CANBOOT_KERNEL_COMMON}
         )
+
+        set(EFI_OBJS "")
+        foreach(src ${EFI_SOURCES})
+            get_filename_component(_name ${src} NAME_WE)
+            set(_obj "${CMAKE_BINARY_DIR}/efi_${_name}.o")
+            add_custom_command(
+                OUTPUT ${_obj}
+                COMMAND ${CMAKE_C_COMPILER}
+                    -I${GNUEFI_INCLUDE_DIR}
+                    -I${GNUEFI_ARCH_INCLUDE_DIR}
+                    -I${CMAKE_SOURCE_DIR}/hal/include
+                    -I${CMAKE_SOURCE_DIR}/kernel/include
+                    -ffreestanding -fpic -fshort-wchar -mno-red-zone
+                    -fno-stack-protector -fno-stack-check
+                    -Wall -Wextra
+                    -c ${CMAKE_SOURCE_DIR}/${src} -o ${_obj}
+                DEPENDS ${CMAKE_SOURCE_DIR}/${src}
+                COMMENT "CC  efi/${_name}.o"
+                VERBATIM
+            )
+            list(APPEND EFI_OBJS ${_obj})
+        endforeach()
 
         add_custom_command(
             OUTPUT ${EFI_SO}
             COMMAND ld -nostdlib -znocombreloc
                 -T ${GNUEFI_LDS}
                 -shared -Bsymbolic
-                ${GNUEFI_CRT0} ${EFI_OBJ}
+                ${GNUEFI_CRT0} ${EFI_OBJS}
                 -o ${EFI_SO}
                 ${EFI_LIB} ${GNUEFI_LIB}
-            DEPENDS ${EFI_OBJ} ${GNUEFI_LDS} ${GNUEFI_CRT0}
+            DEPENDS ${EFI_OBJS} ${GNUEFI_LDS} ${GNUEFI_CRT0}
             COMMENT "LD  ${EFI_NAME}.so"
             VERBATIM
         )
