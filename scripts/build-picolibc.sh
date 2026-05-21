@@ -34,6 +34,7 @@ OPTS=(
     -Dfake-semihost=false
     -Dposix-console=true
     -Dnewlib-global-errno=true
+    -Dspecsdir=none
 )
 
 if [ -f "$BUILD/build.ninja" ]; then
