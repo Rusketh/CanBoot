@@ -21,9 +21,16 @@ Landed so far:
   gnu-efi: boots under QEMU + OVMF, prints firmware vendor + UEFI revision,
   mirrors `ok` on COM1, packaged as a UEFI-only ISO with an embedded ESP
   containing `/EFI/BOOT/BOOTX64.EFI`.
+- **Milestone 3.** Unified `kmain(struct boot_info *)`. Both the BIOS and
+  UEFI loaders populate the same `boot_info` (framebuffer descriptor, memory
+  map, ACPI RSDP, command line) before dispatching the shared kernel code.
+  BIOS path parses Multiboot2 tags; UEFI path queries GOP, walks the
+  configuration table for the ACPI RSDP, harvests the memory map, and calls
+  `ExitBootServices` before transferring control. `kmain` paints the
+  framebuffer on both paths to prove access. BIOS bootstrap now
+  identity-maps the full 4 GiB so the framebuffer BAR is reachable.
 
-Upcoming milestones unify the BIOS and UEFI paths on a single `kmain` with a
-normalised `boot_info`, bring up the HAL surface (display, input, disk, net,
+Upcoming milestones bring up the HAL surface (display, input, disk, net,
 time, console, fs, entropy), integrate picolibc + lwIP + Mbed TLS, vendor the
 CanDo submodule with its patch series, and ship the full set of release
 artifacts (hybrid ISO, single-firmware ISOs, PXE bundle, raw `.img`,
@@ -56,9 +63,10 @@ Host build tools required: `gcc`, `cmake`, `ninja-build`, `grub-pc-bin`,
 
 | Path | Purpose |
 | --- | --- |
-| `arch/<arch>/` | Architecture entry, mode transition, low-level helpers |
-| `boot/multiboot2/` | Multiboot2 header for BIOS GRUB |
-| `boot/uefi/` | PE/COFF EFI loader (gnu-efi) |
+| `arch/<arch>/` | Architecture entry, mode transition, MB2 parser, BIOS trampoline |
+| `boot/multiboot2/` | Multiboot2 header (requests framebuffer) for BIOS GRUB |
+| `boot/uefi/` | PE/COFF EFI loader (gnu-efi); ExitBootServices handoff |
+| `kernel/` | Unified `kmain`, `boot_info` schema, framebuffer driver |
 | `hal/` | Hardware Abstraction Layer headers + drivers |
 | `fs/`, `net/`, `rt/` | VFS, lwIP/Mbed TLS ports, picolibc/pthread shim |
 | `vendor/` | Git submodules (CanDo, picolibc, mbedtls, lwip, gnu-efi) |
