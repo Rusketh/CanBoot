@@ -26,7 +26,7 @@
 
 /* ---- Static heap for malloc -------------------------------------------- */
 
-#define CANBOOT_HEAP_SIZE (4u * 1024u * 1024u)
+#define CANBOOT_HEAP_SIZE (16u * 1024u * 1024u)
 static __attribute__((aligned(16))) unsigned char canboot_heap[CANBOOT_HEAP_SIZE];
 static size_t canboot_heap_used;
 

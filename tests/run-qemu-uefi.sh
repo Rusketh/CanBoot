@@ -8,7 +8,7 @@ set -euo pipefail
 
 ISO="${1:-build/canboot-x86_64-uefi.iso}"
 LOG="${LOG:-build/qemu-uefi.log}"
-TIMEOUT="${TIMEOUT:-150}"
+TIMEOUT="${TIMEOUT:-210}"
 
 if [ ! -f "$ISO" ]; then
     echo "error: iso not found at $ISO" >&2
@@ -47,11 +47,15 @@ HTTP_PORT="${HTTP_PORT:-8080}"
 mkdir -p "$(dirname "$LOG")"
 : > "$LOG"
 
-python3 "$ROOT/tests/sidecars/udp_echo.py"   127.0.0.1 "$UDP_PORT"  >"$WORK/udp.log"  2>&1 &
+HTTPS_PORT="${HTTPS_PORT:-8443}"
+
+python3 "$ROOT/tests/sidecars/udp_echo.py"    127.0.0.1 "$UDP_PORT"   >"$WORK/udp.log"   2>&1 &
 UDP_PID=$!
-python3 "$ROOT/tests/sidecars/http_hello.py" 127.0.0.1 "$HTTP_PORT" >"$WORK/http.log" 2>&1 &
+python3 "$ROOT/tests/sidecars/http_hello.py"  127.0.0.1 "$HTTP_PORT"  >"$WORK/http.log"  2>&1 &
 HTTP_PID=$!
-sleep 0.4
+python3 "$ROOT/tests/sidecars/https_secure.py" 127.0.0.1 "$HTTPS_PORT" >"$WORK/https.log" 2>&1 &
+HTTPS_PID=$!
+sleep 0.5
 
 QEMU_ARGS=(
     -machine q35
@@ -107,7 +111,7 @@ PY
 INJECTOR_PID=$!
 
 cleanup() {
-    for pid in "$INJECTOR_PID" "$QEMU_PID" "$UDP_PID" "$HTTP_PID"; do
+    for pid in "$INJECTOR_PID" "$QEMU_PID" "$UDP_PID" "$HTTP_PID" "$HTTPS_PID"; do
         if [ -n "${pid:-}" ] && kill -0 "$pid" 2>/dev/null; then
             kill "$pid" 2>/dev/null || true
             wait "$pid" 2>/dev/null || true
@@ -139,6 +143,7 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'milestone 6: udp echo ok'
         check 'milestone 6: http get ok'
         check 'milestone 6: net test ok'
+        check 'milestone 7: tls test skipped on uefi'
 
         echo "smoke test passed; serial log:"
         echo "$stripped" | sed 's/^/  | /'

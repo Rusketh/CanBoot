@@ -23,6 +23,8 @@ set(CANBOOT_KERNEL_COMMON
     kernel/fb.c
     kernel/m5_selftest.c
     kernel/m6_nettest.c
+    kernel/m7_tlstest.c
+    kernel/canboot_test_ca.c
     hal/console/serial_x86.c
     hal/input/input_queue.c
     hal/input/ps2.c
@@ -31,6 +33,9 @@ set(CANBOOT_KERNEL_COMMON
     hal/pci/pci_x86.c
     hal/virtio/virtio_pci.c
     net/lwip_port/sys_arch.c
+    net/mbedtls_port/entropy.c
+    net/mbedtls_port/inet_pton.c
+    net/mbedtls_port/lwip_bio.c
     rt/picolibc_port/syscalls.c
     rt/pthread_stub/pthread.c
 )
@@ -110,8 +115,11 @@ target_include_directories(${KERNEL_NAME} PRIVATE
     kernel/include
     rt/pthread_stub/include
     net/lwip_port/include
+    net/mbedtls_port/include
+    net/mbedtls_port
     ${LWIP_DIR}/src/include
     ${PICOLIBC_INCLUDE}
+    ${CMAKE_SOURCE_DIR}/vendor/mbedtls/include
 )
 
 target_compile_options(${KERNEL_NAME} PRIVATE
@@ -144,8 +152,10 @@ target_link_options(${KERNEL_NAME} PRIVATE
 # malloc -> sbrk; printf -> write) resolve in one pass.
 target_link_libraries(${KERNEL_NAME} PRIVATE
     -Wl,--start-group
+    mbedtls mbedx509 mbedcrypto
     ${PICOLIBC_LIB}
     -Wl,--end-group
+    -lgcc
 )
 
 set_target_properties(${KERNEL_NAME} PROPERTIES
@@ -159,7 +169,34 @@ add_custom_target(canboot-info ALL
 )
 
 # ---------------------------------------------------------------------------
-# UEFI loader (gnu-efi). Compiles boot/uefi/efi_main.c plus the shared
+# Mbed TLS 3.6.x: vendored at vendor/mbedtls and brought in via
+# add_subdirectory(EXCLUDE_FROM_ALL). We pre-apply our freestanding cross
+# flags through add_compile_options() so they reach Mbed TLS's targets
+# (mbedtls / mbedx509 / tfpsacrypto) automatically. -Werror is disabled
+# (MBEDTLS_FATAL_WARNINGS=OFF) because freestanding flags trip a few of
+# Mbed TLS's own warnings that we have no business fixing.
+# ---------------------------------------------------------------------------
+if(CANBOOT_ARCH STREQUAL "x86_64")
+    set(MBEDTLS_DIR ${CMAKE_SOURCE_DIR}/vendor/mbedtls)
+    set(MBEDTLS_CONFIG_FILE "" CACHE STRING "" FORCE)
+    set(MBEDTLS_USER_CONFIG_FILE
+        "${CMAKE_SOURCE_DIR}/net/mbedtls_port/include/canboot_mbedtls_user_config.h"
+        CACHE STRING "" FORCE)
+
+    set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
+    set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+    set(USE_STATIC_MBEDTLS_LIBRARY ON CACHE BOOL "" FORCE)
+    set(USE_SHARED_MBEDTLS_LIBRARY OFF CACHE BOOL "" FORCE)
+    set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
+    set(DISABLE_PACKAGE_CONFIG_AND_INSTALL ON CACHE BOOL "" FORCE)
+    set(GEN_FILES ON CACHE BOOL "" FORCE)
+
+    add_compile_options(
+        -ffreestanding -fno-stack-protector -fno-stack-check
+        -mno-red-zone -fPIC
+    )
+    add_subdirectory(${MBEDTLS_DIR} ${CMAKE_BINARY_DIR}/mbedtls EXCLUDE_FROM_ALL)
+endif()
 # kernel/ sources with PIC + short-wchar + EFI include path, links them
 # with gnu-efi's crt0 and elf_x86_64_efi.lds, then objcopies to a PE32+
 # EFI application. Calls into the same kmain as the BIOS kernel.
@@ -217,7 +254,10 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
                     -I${CMAKE_SOURCE_DIR}/kernel/include
                     -I${CMAKE_SOURCE_DIR}/rt/pthread_stub/include
                     -I${CMAKE_SOURCE_DIR}/net/lwip_port/include
+                    -I${CMAKE_SOURCE_DIR}/net/mbedtls_port/include
+                    -I${CMAKE_SOURCE_DIR}/net/mbedtls_port
                     -I${LWIP_DIR}/src/include
+                    -I${MBEDTLS_DIR}/include
                     -I${PICOLIBC_INCLUDE}
                     -std=c11
                     -ffreestanding -fpic -fshort-wchar -mno-red-zone
@@ -244,8 +284,12 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
                 --allow-multiple-definition
                 ${GNUEFI_CRT0} ${EFI_OBJS}
                 -o ${EFI_SO}
-                --start-group ${PICOLIBC_LIB} ${EFI_LIB} ${GNUEFI_LIB} --end-group
+                --start-group
+                $<TARGET_FILE:mbedtls> $<TARGET_FILE:mbedx509> $<TARGET_FILE:mbedcrypto>
+                ${PICOLIBC_LIB} ${EFI_LIB} ${GNUEFI_LIB}
+                --end-group
             DEPENDS ${EFI_OBJS} ${GNUEFI_LDS} ${GNUEFI_CRT0} picolibc_ext
+                    mbedtls mbedx509 mbedcrypto
             COMMENT "LD  ${EFI_NAME}.so"
             VERBATIM
         )
