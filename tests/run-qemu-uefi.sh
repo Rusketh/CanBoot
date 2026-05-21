@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# Boot the UEFI ISO under QEMU + OVMF and assert "ok" appears on COM1.
-# OVMF_VARS is copied to a writable temp file because OVMF expects to be
-# able to mutate it (boot variables) even when no settings change.
+# Boot the UEFI ISO under QEMU + OVMF with both a PS/2 keyboard and a
+# virtio-keyboard attached, inject keystrokes via the HMP monitor once
+# kmain has reached its polling input loop, and assert the unified
+# boot-info path, both input drivers, and at least one received
+# keystroke before "ok".
 
 set -euo pipefail
 
 ISO="${1:-build/canboot-x86_64-uefi.iso}"
 LOG="${LOG:-build/qemu-uefi.log}"
-TIMEOUT="${TIMEOUT:-90}"
+TIMEOUT="${TIMEOUT:-120}"
 
 if [ ! -f "$ISO" ]; then
     echo "error: iso not found at $ISO" >&2
@@ -38,17 +40,19 @@ do
 done
 
 WORK="$(mktemp -d)"
+MON_SOCK="$WORK/mon.sock"
 mkdir -p "$(dirname "$LOG")"
 : > "$LOG"
 
 QEMU_ARGS=(
     -machine q35
     -cdrom "$ISO"
+    -device virtio-keyboard-pci
     -serial "file:$LOG"
+    -monitor "unix:$MON_SOCK,server,nowait"
     -display none
     -no-reboot
     -m 256M
-    -monitor none
 )
 
 if [ -n "$OVMF_VARS_SRC" ]; then
@@ -64,7 +68,38 @@ fi
 qemu-system-x86_64 "${QEMU_ARGS[@]}" >/dev/null 2>&1 &
 QEMU_PID=$!
 
+(
+    for _ in $(seq 1 30); do
+        [ -S "$MON_SOCK" ] && break
+        sleep 0.2
+    done
+    for _ in $(seq 1 100); do
+        if grep -q 'canboot: input loop start' "$LOG" 2>/dev/null; then
+            break
+        fi
+        sleep 0.2
+    done
+    python3 - "$MON_SOCK" <<'PY' 2>/dev/null || true
+import socket, sys, time
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+try:
+    sock.connect(sys.argv[1])
+except Exception:
+    sys.exit(0)
+time.sleep(0.2)
+for k in ("a", "b", "ret"):
+    sock.sendall(("sendkey " + k + "\n").encode())
+    time.sleep(0.3)
+sock.close()
+PY
+) &
+INJECTOR_PID=$!
+
 cleanup() {
+    if kill -0 "$INJECTOR_PID" 2>/dev/null; then
+        kill "$INJECTOR_PID" 2>/dev/null || true
+        wait "$INJECTOR_PID" 2>/dev/null || true
+    fi
     if kill -0 "$QEMU_PID" 2>/dev/null; then
         kill "$QEMU_PID" 2>/dev/null || true
         wait "$QEMU_PID" 2>/dev/null || true
@@ -77,11 +112,20 @@ deadline=$(( $(date +%s) + TIMEOUT ))
 while [ "$(date +%s)" -lt "$deadline" ]; do
     if tr -d '\r' < "$LOG" 2>/dev/null | grep -q '^ok$'; then
         stripped="$(tr -d '\r' < "$LOG")"
-        if ! grep -q 'canboot: framebuffer painted\|canboot: fb = ' <<<"$stripped"; then
-            echo "smoke test FAILED: 'ok' seen but unified boot_info path didn't run" >&2
-            echo "$stripped" | sed 's/^/  | /' >&2
-            exit 1
-        fi
+
+        check() {
+            local needle="$1"
+            if ! grep -q -- "$needle" <<<"$stripped"; then
+                echo "smoke test FAILED: missing '$needle'" >&2
+                echo "$stripped" | sed 's/^/  | /' >&2
+                exit 1
+            fi
+        }
+        check 'canboot: framebuffer painted\|canboot: fb = '
+        check 'canboot: ps/2 input ready'
+        check 'canboot: virtio-input ready'
+        check 'canboot: rx '
+
         echo "smoke test passed; serial log:"
         echo "$stripped" | sed 's/^/  | /'
         exit 0

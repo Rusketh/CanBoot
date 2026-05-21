@@ -29,12 +29,21 @@ Landed so far:
   `ExitBootServices` before transferring control. `kmain` paints the
   framebuffer on both paths to prove access. BIOS bootstrap now
   identity-maps the full 4 GiB so the framebuffer BAR is reachable.
+- **Milestone 4.** HAL input surface (`hal/include/hal/input.h`) backed by
+  a polling pump that drains a shared event ring buffer.
+  PS/2 polling driver (`hal/input/ps2.c`) handles the i8042 controller;
+  PCI enumeration (`hal/pci/pci_x86.c`) plus the modern virtio-pci
+  transport (`hal/virtio/virtio_pci.c`) discover and drive virtio-input
+  (`hal/input/virtio_input.c`). `kmain` runs a TSC-bounded pump loop that
+  echoes received keystrokes. CI smoke tests attach a virtio-keyboard,
+  inject `a b enter` via the QEMU HMP monitor, and assert the full data
+  path before `ok`.
 
-Upcoming milestones bring up the HAL surface (display, input, disk, net,
-time, console, fs, entropy), integrate picolibc + lwIP + Mbed TLS, vendor the
-CanDo submodule with its patch series, and ship the full set of release
-artifacts (hybrid ISO, single-firmware ISOs, PXE bundle, raw `.img`,
-standalone `.efi`).
+Upcoming milestones bring up the rest of the HAL surface (display modes
+beyond the loader-provided one, disk, net, time, fs, entropy), integrate
+picolibc + lwIP + Mbed TLS, vendor the CanDo submodule with its patch
+series, and ship the full set of release artifacts (hybrid ISO,
+single-firmware ISOs, PXE bundle, raw `.img`, standalone `.efi`).
 
 ## Building locally
 
