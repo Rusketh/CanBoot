@@ -194,6 +194,21 @@ void canboot_virtq_publish_writable(struct canboot_virtq *q,
     q->avail->idx = avail_idx + 1u;
 }
 
+void canboot_virtq_publish_readable(struct canboot_virtq *q,
+                                    uint16_t desc_id,
+                                    void *buf, uint32_t len) {
+    if (desc_id >= q->size) return;
+    q->desc[desc_id].addr  = (uint64_t)(uintptr_t)buf;
+    q->desc[desc_id].len   = len;
+    q->desc[desc_id].flags = 0;  /* device reads from this buffer */
+    q->desc[desc_id].next  = 0;
+
+    uint16_t avail_idx = q->avail->idx;
+    q->avail->ring[avail_idx % q->size] = desc_id;
+    __asm__ volatile ("" ::: "memory");
+    q->avail->idx = avail_idx + 1u;
+}
+
 void canboot_virtq_kick(struct canboot_virtq *q, uint16_t qidx) {
     __asm__ volatile ("" ::: "memory");
     /* Modern virtio-pci notify: the byte/word value we write is the

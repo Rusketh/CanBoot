@@ -22,14 +22,28 @@ set(CANBOOT_KERNEL_COMMON
     kernel/kmain.c
     kernel/fb.c
     kernel/m5_selftest.c
+    kernel/m6_nettest.c
     hal/console/serial_x86.c
     hal/input/input_queue.c
     hal/input/ps2.c
     hal/input/virtio_input.c
+    hal/net/virtio_net.c
     hal/pci/pci_x86.c
     hal/virtio/virtio_pci.c
+    net/lwip_port/sys_arch.c
     rt/picolibc_port/syscalls.c
     rt/pthread_stub/pthread.c
+)
+
+# lwIP source files brought in via the vendored Filelists.cmake. The list
+# below mirrors what kernel + UEFI link in; it's appended to the common
+# source set for each target.
+set(LWIP_DIR ${CMAKE_SOURCE_DIR}/vendor/lwip)
+include(${LWIP_DIR}/src/Filelists.cmake)
+set(CANBOOT_LWIP_SOURCES
+    ${lwipcore_SRCS}
+    ${lwipcore4_SRCS}
+    ${lwipnetif_SRCS}
 )
 
 # ---------------------------------------------------------------------------
@@ -76,6 +90,7 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
         arch/x86_64/mb2_parse.c
         boot/multiboot2/header.S
         ${CANBOOT_KERNEL_COMMON}
+        ${CANBOOT_LWIP_SOURCES}
     )
 else()
     message(FATAL_ERROR "Arch ${CANBOOT_ARCH} bring-up lands in a later milestone")
@@ -94,6 +109,8 @@ target_include_directories(${KERNEL_NAME} PRIVATE
     hal/include
     kernel/include
     rt/pthread_stub/include
+    net/lwip_port/include
+    ${LWIP_DIR}/src/include
     ${PICOLIBC_INCLUDE}
 )
 
@@ -177,12 +194,20 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
         set(EFI_SOURCES
             boot/uefi/efi_main.c
             ${CANBOOT_KERNEL_COMMON}
+            ${CANBOOT_LWIP_SOURCES}
         )
 
         set(EFI_OBJS "")
+        set(_efi_obj_seq 0)
         foreach(src ${EFI_SOURCES})
+            if(IS_ABSOLUTE ${src})
+                set(_src_abs ${src})
+            else()
+                set(_src_abs ${CMAKE_SOURCE_DIR}/${src})
+            endif()
             get_filename_component(_name ${src} NAME_WE)
-            set(_obj "${CMAKE_BINARY_DIR}/efi_${_name}.o")
+            math(EXPR _efi_obj_seq "${_efi_obj_seq} + 1")
+            set(_obj "${CMAKE_BINARY_DIR}/efi_${_efi_obj_seq}_${_name}.o")
             add_custom_command(
                 OUTPUT ${_obj}
                 COMMAND ${CMAKE_C_COMPILER}
@@ -191,12 +216,15 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
                     -I${CMAKE_SOURCE_DIR}/hal/include
                     -I${CMAKE_SOURCE_DIR}/kernel/include
                     -I${CMAKE_SOURCE_DIR}/rt/pthread_stub/include
+                    -I${CMAKE_SOURCE_DIR}/net/lwip_port/include
+                    -I${LWIP_DIR}/src/include
                     -I${PICOLIBC_INCLUDE}
+                    -std=c11
                     -ffreestanding -fpic -fshort-wchar -mno-red-zone
                     -fno-stack-protector -fno-stack-check
                     -Wall -Wextra
-                    -c ${CMAKE_SOURCE_DIR}/${src} -o ${_obj}
-                DEPENDS ${CMAKE_SOURCE_DIR}/${src} picolibc_ext
+                    -c ${_src_abs} -o ${_obj}
+                DEPENDS ${_src_abs} picolibc_ext
                 COMMENT "CC  efi/${_name}.o"
                 VERBATIM
             )

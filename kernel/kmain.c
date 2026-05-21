@@ -90,7 +90,25 @@ static void halt_forever(void) {
     }
 }
 
+static void enable_sse_fpu(void) {
+    /* Enable SSE/SSE2 state save/restore so picolibc + lwIP code that
+     * uses SSE registers (memcpy, math, struct copies) doesn't trip #UD
+     * on first SSE instruction. Idempotent. */
+    uint64_t cr0, cr4;
+    __asm__ volatile ("mov %%cr0, %0" : "=r"(cr0));
+    cr0 &= ~(1ull << 2);   /* CR0.EM = 0 (no x87 emulation) */
+    cr0 |=  (1ull << 1);   /* CR0.MP = 1 */
+    cr0 |=  (1ull << 5);   /* CR0.NE = 1 (native FP error) */
+    __asm__ volatile ("mov %0, %%cr0" : : "r"(cr0));
+
+    __asm__ volatile ("mov %%cr4, %0" : "=r"(cr4));
+    cr4 |=  (1ull << 9);   /* CR4.OSFXSR */
+    cr4 |=  (1ull << 10);  /* CR4.OSXMMEXCPT */
+    __asm__ volatile ("mov %0, %%cr4" : : "r"(cr4));
+}
+
 void kmain(struct boot_info *bi) {
+    enable_sse_fpu();
     hal_console_init();
     hal_console_write("canboot: kmain reached\n");
 
@@ -247,6 +265,10 @@ void kmain(struct boot_info *bi) {
     extern void canboot_m5_selftest(void);
     canboot_pthread_init();
     canboot_m5_selftest();
+
+    /* Milestone 6: lwIP + virtio-net + DHCP + UDP echo + HTTP GET. */
+    extern void canboot_m6_nettest(void);
+    canboot_m6_nettest();
 
     hal_console_write("ok\n");
 

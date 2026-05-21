@@ -50,9 +50,20 @@ Landed so far:
   stack switch. `kernel/m5_selftest.c` exercises printf + malloc +
   string + a 4-worker mutex-protected counter; smoke tests assert
   `milestone 5: self-test ok` before `ok` on both BIOS and UEFI.
+- **Milestone 6.** lwIP 2.2.1 vendored at `vendor/lwip` and compiled
+  into the kernel from its `Filelists.cmake` source lists. NO_SYS=1
+  mode with `net/lwip_port/sys_arch.c` providing `sys_now()` backed by
+  rdtsc + an i8254-PIT TSC calibration. Modern virtio-net driver
+  (`hal/net/virtio_net.c`, transitional and non-transitional device
+  IDs supported) wires into lwIP as a `NETIF_FLAG_ETHARP` netif.
+  `kernel/m6_nettest.c` runs DHCP (10.0.2.x lease from QEMU SLIRP) +
+  UDP echo + HTTP GET against sidecar Python servers spawned by the
+  smoke test on the host's loopback. `kmain` enables SSE/SSE2 state
+  bits in CR0/CR4 so picolibc + lwIP can use SSE-emitting paths
+  without tripping #UD.
 
-Upcoming milestones bring up the rest of the HAL surface (disk, net,
-time, fs, entropy), integrate lwIP + Mbed TLS, vendor the CanDo
+Upcoming milestones bring up the rest of the HAL surface (disk, fs,
+time, entropy), integrate Mbed TLS for HTTPS, vendor the CanDo
 submodule with its patch series, and ship the full set of release
 artifacts (hybrid ISO, single-firmware ISOs, PXE bundle, raw `.img`,
 standalone `.efi`).
