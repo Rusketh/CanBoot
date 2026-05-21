@@ -130,6 +130,12 @@ void canboot_virtq_publish_writable(struct canboot_virtq *q,
                                     uint16_t desc_id,
                                     void *buf, uint32_t len);
 
+/* Same shape but the buffer is device-readable (no F_WRITE flag). Used
+ * by virtio-net to publish a TX frame the device should drain. */
+void canboot_virtq_publish_readable(struct canboot_virtq *q,
+                                    uint16_t desc_id,
+                                    void *buf, uint32_t len);
+
 /* Kick the device for queue `q` (writes to the per-queue notify slot). */
 void canboot_virtq_kick(struct canboot_virtq *q, uint16_t qidx);
 

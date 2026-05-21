@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
-# Boot the UEFI ISO under QEMU + OVMF with both a PS/2 keyboard and a
-# virtio-keyboard attached, inject keystrokes via the HMP monitor once
-# kmain has reached its polling input loop, and assert the unified
-# boot-info path, both input drivers, and at least one received
-# keystroke before "ok".
+# Boot the UEFI ISO under QEMU + OVMF with PS/2, virtio-keyboard, and
+# virtio-net. Inject keystrokes via HMP, run sidecar UDP echo + HTTP
+# servers reachable via the SLIRP gateway, and assert the full
+# milestone 1-6 chain before "ok".
 
 set -euo pipefail
 
 ISO="${1:-build/canboot-x86_64-uefi.iso}"
 LOG="${LOG:-build/qemu-uefi.log}"
-TIMEOUT="${TIMEOUT:-120}"
+TIMEOUT="${TIMEOUT:-150}"
 
 if [ ! -f "$ISO" ]; then
     echo "error: iso not found at $ISO" >&2
@@ -39,15 +38,27 @@ do
     if [ -f "$v" ]; then OVMF_VARS_SRC="$v"; break; fi
 done
 
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$(mktemp -d)"
 MON_SOCK="$WORK/mon.sock"
+UDP_PORT="${UDP_PORT:-7777}"
+HTTP_PORT="${HTTP_PORT:-8080}"
+
 mkdir -p "$(dirname "$LOG")"
 : > "$LOG"
+
+python3 "$ROOT/tests/sidecars/udp_echo.py"   127.0.0.1 "$UDP_PORT"  >"$WORK/udp.log"  2>&1 &
+UDP_PID=$!
+python3 "$ROOT/tests/sidecars/http_hello.py" 127.0.0.1 "$HTTP_PORT" >"$WORK/http.log" 2>&1 &
+HTTP_PID=$!
+sleep 0.4
 
 QEMU_ARGS=(
     -machine q35
     -cdrom "$ISO"
     -device virtio-keyboard-pci
+    -netdev user,id=n0
+    -device virtio-net-pci,netdev=n0
     -serial "file:$LOG"
     -monitor "unix:$MON_SOCK,server,nowait"
     -display none
@@ -96,14 +107,12 @@ PY
 INJECTOR_PID=$!
 
 cleanup() {
-    if kill -0 "$INJECTOR_PID" 2>/dev/null; then
-        kill "$INJECTOR_PID" 2>/dev/null || true
-        wait "$INJECTOR_PID" 2>/dev/null || true
-    fi
-    if kill -0 "$QEMU_PID" 2>/dev/null; then
-        kill "$QEMU_PID" 2>/dev/null || true
-        wait "$QEMU_PID" 2>/dev/null || true
-    fi
+    for pid in "$INJECTOR_PID" "$QEMU_PID" "$UDP_PID" "$HTTP_PID"; do
+        if [ -n "${pid:-}" ] && kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+        fi
+    done
     rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -126,6 +135,10 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'canboot: virtio-input ready'
         check 'canboot: rx '
         check 'milestone 5: self-test ok'
+        check 'milestone 6: dhcp lease'
+        check 'milestone 6: udp echo ok'
+        check 'milestone 6: http get ok'
+        check 'milestone 6: net test ok'
 
         echo "smoke test passed; serial log:"
         echo "$stripped" | sed 's/^/  | /'
