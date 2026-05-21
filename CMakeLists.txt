@@ -76,3 +76,85 @@ add_custom_target(canboot-info ALL
     COMMAND ${CMAKE_COMMAND} -E echo "Kernel ELF: $<TARGET_FILE:${KERNEL_NAME}>"
     DEPENDS ${KERNEL_NAME}
 )
+
+# ---------------------------------------------------------------------------
+# UEFI loader (gnu-efi). Built as a separate PE/COFF binary; in milestone 2
+# it stands alone, in milestone 3 it will load the kernel ELF and hand off
+# to kmain() with a normalised boot_info.
+# ---------------------------------------------------------------------------
+if(CANBOOT_ARCH STREQUAL "x86_64")
+    find_path(GNUEFI_INCLUDE_DIR efi.h
+        HINTS /usr/include/efi /usr/local/include/efi
+    )
+    find_path(GNUEFI_ARCH_INCLUDE_DIR efibind.h
+        HINTS /usr/include/efi/x86_64 /usr/local/include/efi/x86_64
+    )
+    find_file(GNUEFI_CRT0 crt0-efi-x86_64.o
+        HINTS /usr/lib /usr/lib/x86_64-linux-gnu /usr/local/lib
+    )
+    find_file(GNUEFI_LDS elf_x86_64_efi.lds
+        HINTS /usr/lib /usr/lib/x86_64-linux-gnu /usr/local/lib
+    )
+    find_library(GNUEFI_LIB gnuefi
+        HINTS /usr/lib /usr/lib/x86_64-linux-gnu /usr/local/lib
+    )
+    find_library(EFI_LIB efi
+        HINTS /usr/lib /usr/lib/x86_64-linux-gnu /usr/local/lib
+    )
+
+    if(GNUEFI_INCLUDE_DIR AND GNUEFI_ARCH_INCLUDE_DIR
+       AND GNUEFI_CRT0 AND GNUEFI_LDS AND GNUEFI_LIB AND EFI_LIB)
+
+        set(EFI_NAME "canboot-${CANBOOT_ARCH}-uefi")
+        set(EFI_SRC "${CMAKE_SOURCE_DIR}/boot/uefi/efi_main.c")
+        set(EFI_OBJ "${CMAKE_BINARY_DIR}/${EFI_NAME}.o")
+        set(EFI_SO  "${CMAKE_BINARY_DIR}/${EFI_NAME}.so")
+        set(EFI_OUT "${CMAKE_BINARY_DIR}/${EFI_NAME}.efi")
+
+        add_custom_command(
+            OUTPUT ${EFI_OBJ}
+            COMMAND ${CMAKE_C_COMPILER}
+                -I${GNUEFI_INCLUDE_DIR}
+                -I${GNUEFI_ARCH_INCLUDE_DIR}
+                -ffreestanding -fpic -fshort-wchar -mno-red-zone
+                -fno-stack-protector -fno-stack-check
+                -Wall -Wextra
+                -c ${EFI_SRC} -o ${EFI_OBJ}
+            DEPENDS ${EFI_SRC}
+            COMMENT "CC  ${EFI_NAME}.o"
+            VERBATIM
+        )
+
+        add_custom_command(
+            OUTPUT ${EFI_SO}
+            COMMAND ld -nostdlib -znocombreloc
+                -T ${GNUEFI_LDS}
+                -shared -Bsymbolic
+                ${GNUEFI_CRT0} ${EFI_OBJ}
+                -o ${EFI_SO}
+                ${EFI_LIB} ${GNUEFI_LIB}
+            DEPENDS ${EFI_OBJ} ${GNUEFI_LDS} ${GNUEFI_CRT0}
+            COMMENT "LD  ${EFI_NAME}.so"
+            VERBATIM
+        )
+
+        add_custom_command(
+            OUTPUT ${EFI_OUT}
+            COMMAND objcopy
+                -j .text -j .sdata -j .data -j .dynamic
+                -j .dynsym -j .rel -j .rela -j .rel.* -j .rela.*
+                -j .reloc
+                --target efi-app-x86_64
+                ${EFI_SO} ${EFI_OUT}
+            DEPENDS ${EFI_SO}
+            COMMENT "EFI ${EFI_NAME}.efi"
+            VERBATIM
+        )
+
+        add_custom_target(canboot-uefi ALL DEPENDS ${EFI_OUT})
+    else()
+        message(WARNING
+            "gnu-efi not found; UEFI target disabled. "
+            "Install the `gnu-efi` package to enable it.")
+    endif()
+endif()
