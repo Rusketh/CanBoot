@@ -241,6 +241,13 @@ void kmain(struct boot_info *bi) {
     put_dec(canboot_input_dropped_events());
     hal_console_write("\n");
 
+    /* Milestone 5: stand up the cooperative scheduler and run the
+     * picolibc + pthread self-test. */
+    extern void canboot_pthread_init(void);
+    extern void canboot_m5_selftest(void);
+    canboot_pthread_init();
+    canboot_m5_selftest();
+
     hal_console_write("ok\n");
 
     halt_forever();
