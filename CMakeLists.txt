@@ -22,6 +22,11 @@ set(CANBOOT_KERNEL_COMMON
     kernel/kmain.c
     kernel/fb.c
     hal/console/serial_x86.c
+    hal/input/input_queue.c
+    hal/input/ps2.c
+    hal/input/virtio_input.c
+    hal/pci/pci_x86.c
+    hal/virtio/virtio_pci.c
 )
 
 set(KERNEL_NAME "canboot-${CANBOOT_ARCH}")
