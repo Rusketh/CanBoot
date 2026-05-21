@@ -1,0 +1,19 @@
+[binaries]
+c = '@CMAKE_C_COMPILER@'
+ar = 'ar'
+as = 'as'
+strip = 'strip'
+
+[host_machine]
+system = 'none'
+cpu_family = 'x86_64'
+cpu = 'x86_64'
+endian = 'little'
+
+[properties]
+skip_sanity_check = true
+needs_exe_wrapper = true
+
+[built-in options]
+c_args = ['-ffreestanding', '-fno-stack-protector', '-fno-stack-check', '-mno-red-zone', '-fpic']
+c_link_args = ['-nostdlib']

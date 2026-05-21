@@ -21,12 +21,49 @@ endif()
 set(CANBOOT_KERNEL_COMMON
     kernel/kmain.c
     kernel/fb.c
+    kernel/m5_selftest.c
     hal/console/serial_x86.c
     hal/input/input_queue.c
     hal/input/ps2.c
     hal/input/virtio_input.c
     hal/pci/pci_x86.c
     hal/virtio/virtio_pci.c
+    rt/picolibc_port/syscalls.c
+    rt/pthread_stub/pthread.c
+)
+
+# ---------------------------------------------------------------------------
+# picolibc: vendored at vendor/picolibc, built via meson at our build time.
+# Provides full libc (stdio, stdlib, string, setjmp, errno) for the kernel +
+# UEFI. posix-console=true routes stdin/stdout/stderr through our syscall
+# stubs in rt/picolibc_port/.
+# ---------------------------------------------------------------------------
+include(ExternalProject)
+
+set(PICOLIBC_SRC       "${CMAKE_SOURCE_DIR}/vendor/picolibc")
+set(PICOLIBC_PREFIX    "${CMAKE_BINARY_DIR}/picolibc")
+set(PICOLIBC_BUILD     "${PICOLIBC_PREFIX}/build")
+set(PICOLIBC_INSTALL   "${PICOLIBC_PREFIX}/install")
+set(PICOLIBC_CROSS_IN  "${CMAKE_SOURCE_DIR}/cmake/picolibc-${CANBOOT_ARCH}.cross.in")
+set(PICOLIBC_CROSS     "${PICOLIBC_PREFIX}/picolibc-${CANBOOT_ARCH}.cross")
+set(PICOLIBC_INCLUDE   "${PICOLIBC_INSTALL}/include")
+set(PICOLIBC_LIB       "${PICOLIBC_INSTALL}/lib/libc.a")
+
+configure_file(${PICOLIBC_CROSS_IN} ${PICOLIBC_CROSS} @ONLY)
+
+ExternalProject_Add(picolibc_ext
+    SOURCE_DIR        ${PICOLIBC_SRC}
+    BINARY_DIR        ${PICOLIBC_BUILD}
+    PREFIX            ${PICOLIBC_PREFIX}
+    CONFIGURE_COMMAND ${CMAKE_SOURCE_DIR}/scripts/build-picolibc.sh
+                          ${PICOLIBC_SRC}
+                          ${PICOLIBC_BUILD}
+                          ${PICOLIBC_INSTALL}
+                          ${PICOLIBC_CROSS}
+    BUILD_COMMAND     ""
+    INSTALL_COMMAND   ""
+    BUILD_BYPRODUCTS  ${PICOLIBC_LIB}
+    USES_TERMINAL_BUILD TRUE
 )
 
 set(KERNEL_NAME "canboot-${CANBOOT_ARCH}")
@@ -45,6 +82,7 @@ else()
 endif()
 
 add_executable(${KERNEL_NAME} ${KERNEL_SOURCES})
+add_dependencies(${KERNEL_NAME} picolibc_ext)
 
 set_source_files_properties(
     arch/x86_64/bootstrap.S
@@ -55,6 +93,8 @@ set_source_files_properties(
 target_include_directories(${KERNEL_NAME} PRIVATE
     hal/include
     kernel/include
+    rt/pthread_stub/include
+    ${PICOLIBC_INCLUDE}
 )
 
 target_compile_options(${KERNEL_NAME} PRIVATE
@@ -80,6 +120,15 @@ target_link_options(${KERNEL_NAME} PRIVATE
     -Wl,-T,${KERNEL_LINKER_SCRIPT}
     -Wl,-z,noexecstack
     -Wl,-z,max-page-size=0x1000
+)
+
+# Link picolibc as the kernel's libc. Put it inside a --start-group/end-group
+# pair so circular references between picolibc and our syscall stubs (e.g.
+# malloc -> sbrk; printf -> write) resolve in one pass.
+target_link_libraries(${KERNEL_NAME} PRIVATE
+    -Wl,--start-group
+    ${PICOLIBC_LIB}
+    -Wl,--end-group
 )
 
 set_target_properties(${KERNEL_NAME} PROPERTIES
@@ -141,26 +190,34 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
                     -I${GNUEFI_ARCH_INCLUDE_DIR}
                     -I${CMAKE_SOURCE_DIR}/hal/include
                     -I${CMAKE_SOURCE_DIR}/kernel/include
+                    -I${CMAKE_SOURCE_DIR}/rt/pthread_stub/include
+                    -I${PICOLIBC_INCLUDE}
                     -ffreestanding -fpic -fshort-wchar -mno-red-zone
                     -fno-stack-protector -fno-stack-check
                     -Wall -Wextra
                     -c ${CMAKE_SOURCE_DIR}/${src} -o ${_obj}
-                DEPENDS ${CMAKE_SOURCE_DIR}/${src}
+                DEPENDS ${CMAKE_SOURCE_DIR}/${src} picolibc_ext
                 COMMENT "CC  efi/${_name}.o"
                 VERBATIM
             )
             list(APPEND EFI_OBJS ${_obj})
         endforeach()
 
+        # --allow-multiple-definition: gnu-efi's libefi ships its own
+        # tiny memset/memcpy/memmove/strlen for EFI apps that link no
+        # libc; picolibc supplies the same symbols. With picolibc listed
+        # first in --start-group, its optimised x86 versions win and
+        # the libefi copies are tolerated as harmless duplicates.
         add_custom_command(
             OUTPUT ${EFI_SO}
             COMMAND ld -nostdlib -znocombreloc
                 -T ${GNUEFI_LDS}
                 -shared -Bsymbolic
+                --allow-multiple-definition
                 ${GNUEFI_CRT0} ${EFI_OBJS}
                 -o ${EFI_SO}
-                ${EFI_LIB} ${GNUEFI_LIB}
-            DEPENDS ${EFI_OBJS} ${GNUEFI_LDS} ${GNUEFI_CRT0}
+                --start-group ${PICOLIBC_LIB} ${EFI_LIB} ${GNUEFI_LIB} --end-group
+            DEPENDS ${EFI_OBJS} ${GNUEFI_LDS} ${GNUEFI_CRT0} picolibc_ext
             COMMENT "LD  ${EFI_NAME}.so"
             VERBATIM
         )

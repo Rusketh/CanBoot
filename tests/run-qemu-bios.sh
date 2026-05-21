@@ -95,6 +95,7 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'canboot: ps/2 input ready'
         check 'canboot: virtio-input ready'
         check 'canboot: rx '
+        check 'milestone 5: self-test ok'
 
         echo "smoke test passed; serial log:"
         echo "$stripped" | sed 's/^/  | /'

@@ -38,12 +38,24 @@ Landed so far:
   echoes received keystrokes. CI smoke tests attach a virtio-keyboard,
   inject `a b enter` via the QEMU HMP monitor, and assert the full data
   path before `ok`.
+- **Milestone 5.** picolibc 1.8.11 vendored at `vendor/picolibc` and
+  built via meson + `ExternalProject_Add` with a cross-file targeting
+  freestanding x86_64 (`scripts/build-picolibc.sh`,
+  `cmake/picolibc-x86_64.cross.in`). POSIX syscall stubs in
+  `rt/picolibc_port/syscalls.c` route `write`/`read` through the HAL
+  console + input queue and back `sbrk` with a 4 MiB static heap.
+  Cooperative pthread stub in `rt/pthread_stub/` provides
+  `pthread_create/join/yield/exit`, mutexes, condition variables, and
+  `pthread_once` via setjmp/longjmp fibers with a custom first-run
+  stack switch. `kernel/m5_selftest.c` exercises printf + malloc +
+  string + a 4-worker mutex-protected counter; smoke tests assert
+  `milestone 5: self-test ok` before `ok` on both BIOS and UEFI.
 
-Upcoming milestones bring up the rest of the HAL surface (display modes
-beyond the loader-provided one, disk, net, time, fs, entropy), integrate
-picolibc + lwIP + Mbed TLS, vendor the CanDo submodule with its patch
-series, and ship the full set of release artifacts (hybrid ISO,
-single-firmware ISOs, PXE bundle, raw `.img`, standalone `.efi`).
+Upcoming milestones bring up the rest of the HAL surface (disk, net,
+time, fs, entropy), integrate lwIP + Mbed TLS, vendor the CanDo
+submodule with its patch series, and ship the full set of release
+artifacts (hybrid ISO, single-firmware ISOs, PXE bundle, raw `.img`,
+standalone `.efi`).
 
 ## Building locally
 
@@ -64,9 +76,9 @@ bash scripts/mkiso-uefi.sh build/canboot-x86_64-uefi.efi build/canboot-x86_64-ue
 bash tests/run-qemu-uefi.sh build/canboot-x86_64-uefi.iso
 ```
 
-Host build tools required: `gcc`, `cmake`, `ninja-build`, `grub-pc-bin`,
-`grub-common`, `gnu-efi`, `ovmf`, `xorriso`, `mtools`, `dosfstools`,
-`qemu-system-x86`.
+Host build tools required: `gcc`, `cmake`, `ninja-build`, `meson`,
+`python3`, `grub-pc-bin`, `grub-common`, `gnu-efi`, `ovmf`, `xorriso`,
+`mtools`, `dosfstools`, `qemu-system-x86`.
 
 ## Layout
 
@@ -77,8 +89,8 @@ Host build tools required: `gcc`, `cmake`, `ninja-build`, `grub-pc-bin`,
 | `boot/uefi/` | PE/COFF EFI loader (gnu-efi); ExitBootServices handoff |
 | `kernel/` | Unified `kmain`, `boot_info` schema, framebuffer driver |
 | `hal/` | Hardware Abstraction Layer headers + drivers |
-| `fs/`, `net/`, `rt/` | VFS, lwIP/Mbed TLS ports, picolibc/pthread shim |
-| `vendor/` | Git submodules (CanDo, picolibc, mbedtls, lwip, gnu-efi) |
+| `fs/`, `net/`, `rt/` | VFS (later), lwIP/Mbed TLS ports (later), picolibc syscall stubs, cooperative pthread stub |
+| `vendor/` | Git submodules — picolibc today; CanDo, mbedtls, lwip, gnu-efi to come |
 | `cando_port/` | Patch series + canboot-native CanDo modules |
 | `scripts/` | Image-building helpers (ISO, raw, PXE, EFI) |
 | `tests/` | QEMU smoke tests |
