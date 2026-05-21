@@ -11,10 +11,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-x86_64-bios:
-    name: x86_64 BIOS
+  build:
+    name: ${{ matrix.arch }} ${{ matrix.firmware }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            firmware: bios
+          - arch: x86_64
+            firmware: uefi
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,36 +33,74 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             cmake ninja-build gcc binutils \
-            grub-pc-bin grub-common xorriso mtools \
+            grub-pc-bin grub-common \
+            gnu-efi ovmf \
+            xorriso mtools dosfstools \
             qemu-system-x86
 
       - name: Configure
-        run: cmake -B build -G Ninja -DCANBOOT_ARCH=x86_64
+        run: cmake -B build -G Ninja -DCANBOOT_ARCH=${{ matrix.arch }}
 
-      - name: Build kernel
-        run: cmake --build build --verbose
+      - name: Build kernel ELF
+        if: matrix.firmware == 'bios'
+        run: cmake --build build --target canboot-${{ matrix.arch }} --verbose
+
+      - name: Build UEFI binary
+        if: matrix.firmware == 'uefi'
+        run: cmake --build build --target canboot-uefi --verbose
 
       - name: Inspect kernel ELF
+        if: matrix.firmware == 'bios'
         run: |
-          file build/canboot-x86_64.elf
-          readelf -h build/canboot-x86_64.elf
-          readelf -lS build/canboot-x86_64.elf
+          file build/canboot-${{ matrix.arch }}.elf
+          readelf -h build/canboot-${{ matrix.arch }}.elf
+          readelf -lS build/canboot-${{ matrix.arch }}.elf
+
+      - name: Inspect UEFI PE
+        if: matrix.firmware == 'uefi'
+        run: |
+          file build/canboot-${{ matrix.arch }}-uefi.efi
+          objdump -h build/canboot-${{ matrix.arch }}-uefi.efi
 
       - name: Build BIOS ISO
-        run: bash scripts/mkiso-bios.sh build/canboot-x86_64.elf build/canboot-x86_64-bios.iso
+        if: matrix.firmware == 'bios'
+        run: bash scripts/mkiso-bios.sh
+              build/canboot-${{ matrix.arch }}.elf
+              build/canboot-${{ matrix.arch }}-bios.iso
 
-      - name: QEMU smoke test
-        run: bash tests/run-qemu-bios.sh build/canboot-x86_64-bios.iso
+      - name: Build UEFI ISO
+        if: matrix.firmware == 'uefi'
+        run: bash scripts/mkiso-uefi.sh
+              build/canboot-${{ matrix.arch }}-uefi.efi
+              build/canboot-${{ matrix.arch }}-uefi.iso
 
-      - uses: actions/upload-artifact@v4
+      - name: QEMU smoke test (BIOS)
+        if: matrix.firmware == 'bios'
+        run: bash tests/run-qemu-bios.sh build/canboot-${{ matrix.arch }}-bios.iso
+
+      - name: QEMU smoke test (UEFI)
+        if: matrix.firmware == 'uefi'
+        run: bash tests/run-qemu-uefi.sh build/canboot-${{ matrix.arch }}-uefi.iso
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: canboot-x86_64-bios-iso
-          path: build/canboot-x86_64-bios.iso
+          name: canboot-${{ matrix.arch }}-${{ matrix.firmware }}
+          path: |
+            build/canboot-${{ matrix.arch }}.elf
+            build/canboot-${{ matrix.arch }}-uefi.efi
+            build/canboot-${{ matrix.arch }}-bios.iso
+            build/canboot-${{ matrix.arch }}-uefi.iso
+          if-no-files-found: ignore
           retention-days: 14
 
-      - uses: actions/upload-artifact@v4
-        if: always()
+      - name: Upload serial log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
         with:
-          name: qemu-bios-serial-log
-          path: build/qemu-bios.log
+          name: qemu-${{ matrix.firmware }}-log-${{ matrix.arch }}
+          path: |
+            build/qemu-bios.log
+            build/qemu-uefi.log
+          if-no-files-found: ignore
           retention-days: 7
