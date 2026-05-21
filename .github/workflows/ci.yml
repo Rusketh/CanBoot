@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-x86_64-bios:
+    name: x86_64 BIOS
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build gcc binutils \
+            grub-pc-bin grub-common xorriso mtools \
+            qemu-system-x86
+
+      - name: Configure
+        run: cmake -B build -G Ninja -DCANBOOT_ARCH=x86_64
+
+      - name: Build kernel
+        run: cmake --build build --verbose
+
+      - name: Inspect kernel ELF
+        run: |
+          file build/canboot-x86_64.elf
+          readelf -h build/canboot-x86_64.elf
+          readelf -lS build/canboot-x86_64.elf
+
+      - name: Build BIOS ISO
+        run: bash scripts/mkiso-bios.sh build/canboot-x86_64.elf build/canboot-x86_64-bios.iso
+
+      - name: QEMU smoke test
+        run: bash tests/run-qemu-bios.sh build/canboot-x86_64-bios.iso
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: canboot-x86_64-bios-iso
+          path: build/canboot-x86_64-bios.iso
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qemu-bios-serial-log
+          path: build/qemu-bios.log
+          retention-days: 7

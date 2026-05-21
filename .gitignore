@@ -1,0 +1,12 @@
+/build/
+/build-*/
+*.o
+*.a
+*.elf
+*.iso
+*.img
+*.bin
+.cache/
+.vscode/
+.idea/
+compile_commands.json
