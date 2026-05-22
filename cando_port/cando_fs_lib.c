@@ -192,20 +192,9 @@ static int f_mkfs(CandoVM *vm, int argc, CandoValue *args) {
     if (strcmp(type, "fat32") == 0) {
         ok = canboot_fat32_format(d, p.start_lba, p.size_lba, label) == 0;
     } else if (strcmp(type, "ntfs") == 0) {
-        /* mkntfs from vendored ntfsprogs is LINKED but not yet
-         * RUNTIME-SAFE - the format path hits ENOSYS stubs in our
-         * POSIX surface and triggers a synchronous exception. Until
-         * the unimplemented POSIX calls are auditied + stubbed
-         * correctly, fs.mkfs("ntfs") returns false. The plumbing is
-         * already wired so the next session can flip a single flag
-         * once the call surface is safe.
-         *
-         *   uint64_t bs = d->block_size;
-         *   ok = canboot_ntfs_format(d, p.start_lba * bs,
-         *                            p.size_lba * bs, label) == 0;
-         */
-        (void)label;
-        ok = false;
+        uint64_t bs = d->block_size;
+        ok = canboot_ntfs_format(d, p.start_lba * bs,
+                                 p.size_lba * bs, label) == 0;
     } else if (strcmp(type, "ext4") == 0 || strcmp(type, "ext3") == 0) {
         /* Future: vendor lwext4 and replace this with its mkfs. */
         ok = false;

@@ -31,6 +31,38 @@ static void pl011_write(const char *s) {
 
 void kmain(struct boot_info *bi);
 
+/* AAVMF hands us a relatively small (~128 KiB) boot-services stack.
+ * Cando + mkntfs + libntfs (volume bring-up, $Bitmap walk, $UpCase
+ * generation, MFT record assembly) all need substantial stack. Since
+ * cando is the only thread of execution after kmain we give it as
+ * much as the machine reasonably can. We allocate it at runtime via
+ * AllocatePages so the stack does NOT inflate the PE/COFF .data
+ * section by 32 MiB - that pushed the image past AAVMF's load
+ * envelope and left late stack pages unmapped, which manifested as
+ * a spurious data abort the moment any deep call (mkntfs -> srandom)
+ * pushed beyond what AAVMF actually mapped. */
+#define CANBOOT_AARCH64_STACK_BYTES (32u * 1024u * 1024u)
+#define CANBOOT_AARCH64_STACK_PAGES (CANBOOT_AARCH64_STACK_BYTES / 4096u)
+
+static unsigned long g_main_stack_top;
+
+static __attribute__((noreturn))
+void switch_to_main_stack(struct boot_info *bi) {
+    unsigned long top = g_main_stack_top;
+    top &= ~(unsigned long)15;
+    __asm__ volatile (
+        "mov sp, %0\n\t"
+        "mov x0, %1\n\t"
+        "bl  kmain\n\t"
+        "1: wfe\n\t"
+        "b   1b\n\t"
+        :
+        : "r"(top), "r"(bi)
+        : "memory", "x0", "x30"
+    );
+    __builtin_unreachable();
+}
+
 static struct boot_info g_boot_info;
 
 /* DEVICE_TREE_GUID per UEFI spec (b1b621d5-f19c-41a5-830b-d9152c69aae0) */
@@ -176,6 +208,19 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st) {
     populate_fb(st, &g_boot_info);
     populate_platform_tables(st, &g_boot_info);
 
+    /* Allocate the main stack from boot services so it does not
+     * bloat the PE/COFF image. AllocatePages of EfiLoaderData is
+     * preserved across ExitBootServices. */
+    EFI_PHYSICAL_ADDRESS stack_phys = 0;
+    EFI_STATUS as = uefi_call_wrapper(st->BootServices->AllocatePages, 4,
+                                      AllocateAnyPages, EfiLoaderData,
+                                      CANBOOT_AARCH64_STACK_PAGES, &stack_phys);
+    if (EFI_ERROR(as) || stack_phys == 0) {
+        pl011_write("canboot: FATAL AllocatePages for main stack\n");
+        for (;;) __asm__ volatile ("wfe");
+    }
+    g_main_stack_top = (unsigned long)stack_phys + CANBOOT_AARCH64_STACK_BYTES;
+
     UINTN map_size = 0, map_key = 0, desc_size = 0;
     UINT32 desc_version = 0;
     EFI_MEMORY_DESCRIPTOR *map = NULL;
@@ -217,7 +262,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st) {
         }
     }
 
-    kmain(&g_boot_info);
+    switch_to_main_stack(&g_boot_info);
 
     for (;;) __asm__ volatile ("wfe");
     return EFI_SUCCESS;

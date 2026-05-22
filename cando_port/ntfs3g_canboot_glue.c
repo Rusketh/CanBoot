@@ -45,6 +45,21 @@ static int canboot_ntfs_log(const char *function, const char *file,
     return n;
 }
 
+/* Override the vendored ntfs_log_handler_outerr because mkntfs's
+ * main() unconditionally sets the log handler to it. The vendored
+ * implementation routes through stdio which isn't reliably set up on
+ * freestanding picolibc; ours just dispatches to printf. Marked
+ * weak so the EFI link (which uses --allow-multiple-definition) and
+ * the kernel ELF link (which does not) both accept it - the kernel
+ * link picks libntfs's strong definition; the EFI link prefers ours
+ * because of link order. */
+__attribute__((weak))
+int ntfs_log_handler_outerr(const char *function, const char *file,
+                             int line, uint32_t level, void *data,
+                             const char *format, va_list args) {
+    return canboot_ntfs_log(function, file, line, level, data, format, args);
+}
+
 #include "hal/disk.h"
 
 struct ntfs_device *canboot_ntfs_device_alloc(struct canboot_disk *d,
@@ -61,7 +76,8 @@ int canboot_ntfs3g_open(struct canboot_disk *d,
     if (!log_set) {
         ntfs_log_set_handler(canboot_ntfs_log);
         ntfs_log_set_levels(NTFS_LOG_LEVEL_ERROR | NTFS_LOG_LEVEL_WARNING |
-                            NTFS_LOG_LEVEL_PERROR);
+                            NTFS_LOG_LEVEL_PERROR | NTFS_LOG_LEVEL_INFO |
+                            NTFS_LOG_LEVEL_QUIET | NTFS_LOG_LEVEL_PROGRESS);
         log_set = 1;
     }
     for (int i = 0; i < HSLOTS; i++) {
@@ -267,19 +283,26 @@ int canboot_ntfs_format(struct canboot_disk *d, uint64_t byte_offset,
     g_format_priv.cache_lba   = (uint64_t)-1;
     g_format_priv.writable    = 1;
 
-    /* The cb_open hook in ntfs3g_canboot_io.c reads this on first call. */
     canboot_ntfs_pending_priv = (struct canboot_ntfs_priv *)&g_format_priv;
 
-    /* mkntfs argv: just the device path. Defaults pick auto cluster
-     * size + quick format. Label injection through getopt_long would
-     * need real parsing; for the first cut volumes get the default
-     * name and the caller renames via a separate write step. */
     (void)label;
+
+    /* Reset getopt's index counters before mkntfs's argv parse. */
+    extern int   optind;
+    extern char *optarg;
+    optind = 1;
+    optarg = (char *)0;
+
+    /* -f: quick format. Skip the full-device zero pass mkntfs would
+     * otherwise do as its first action; on virtio-blk emulated devices
+     * that walk takes many minutes per MB and adds no value when we
+     * are the only writer. */
     static char dev_name[] = "/dev/canboot-vblk";
-    char *argv[] = { (char *)"mkntfs", dev_name, NULL };
-    int rc = mkntfs_main_canboot(2, argv);
+    static char fast_flag[] = "-f";
+    char *argv[] = { (char *)"mkntfs", fast_flag, dev_name, NULL };
+
+    int rc = mkntfs_main_canboot(3, argv);
     canboot_ntfs_pending_priv = NULL;
-    /* mkntfs returns 0 on success, 1 on failure. Normalize. */
     return rc == 0 ? 0 : -1;
 }
 
