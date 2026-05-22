@@ -16,3 +16,6 @@
 [submodule "vendor/ntfs-3g"]
 	path = vendor/ntfs-3g
 	url = https://github.com/tuxera/ntfs-3g.git
+[submodule "vendor/lwext4"]
+	path = vendor/lwext4
+	url = https://github.com/gkostka/lwext4.git

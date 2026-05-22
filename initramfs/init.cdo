@@ -207,4 +207,29 @@ IF (disk.count() >= 2) {
     print("cando disk1 absent");
 }
 
+// Disk 2: ext4 test volume. Same shape as the NTFS exercise above:
+// detect, label, read marker, write, delete, re-read; then format
+// via lwext4's mkfs and re-write a fresh marker for the host-side
+// e2fsck / mount validation in the smoke test runner.
+IF (disk.count() >= 3) {
+    print("cando disk2 name =", disk.name(2));
+    print("cando disk2 blockSize =", disk.blockSize(2));
+    print("cando disk2 blocks =", disk.blocks(2));
+    print("cando fs.detect(2,0) =", fs.detect(2, 0));
+    print("cando fs.label(2,0) =", fs.label(2, 0));
+    print("cando fs.read(2,0,probe.txt) =", fs.read(2, 0, "/probe.txt"));
+    print("cando fs.write(2,0,probe.txt) =", fs.write(2, 0, "/probe.txt", "canboot-ext4-write-2026"));
+    print("cando fs.read(2,0,probe.txt) after write =", fs.read(2, 0, "/probe.txt"));
+    print("cando fs.write create new.txt =", fs.write(2, 0, "/new.txt", "freshly-created-by-canboot-ext4"));
+    print("cando fs.read ext4 new.txt =", fs.read(2, 0, "/new.txt"));
+    print("cando fs.delete ext4 new.txt =", fs.delete(2, 0, "/new.txt"));
+    print("cando fs.read ext4 new.txt after delete =", fs.read(2, 0, "/new.txt"));
+    print("cando fs.mkfs ext4 =", fs.mkfs(2, 0, "ext4", "CANBOOTEXT4"));
+    print("cando fs.detect ext4 after mkfs =", fs.detect(2, 0));
+    print("cando fs.write ext4 after mkfs =", fs.write(2, 0, "/postfmt.txt", "canboot-ext4-postformat-2026"));
+    print("cando fs.read ext4 after mkfs =", fs.read(2, 0, "/postfmt.txt"));
+} ELSE {
+    print("cando disk2 absent");
+}
+
 print("cando part libs end");

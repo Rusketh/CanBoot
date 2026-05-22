@@ -52,6 +52,8 @@ set(CANBOOT_KERNEL_COMMON
     cando_port/cando_fs_lib.c
     cando_port/ntfs3g_canboot_io.c
     cando_port/ntfs3g_canboot_glue.c
+    cando_port/lwext4_canboot_io.c
+    cando_port/lwext4_canboot_glue.c
     fs/partition.c
     fs/ntfs.c
     fs/iso9660.c
@@ -206,6 +208,39 @@ set(CANBOOT_NTFS3G_MKFS_SOURCES
 )
 
 # ---------------------------------------------------------------------------
+# lwext4 - vendored ext2/3/4 filesystem. We pull in the standard library
+# source set against vendor/lwext4/include/ext4_config.h's defaults
+# (CONFIG_USE_DEFAULT_CFG=1). The block-device bridge to canboot's HAL
+# disk lives in cando_port/lwext4_canboot_io.c; the canboot_ext4_*
+# wrappers (open/read/write/delete/mkfs) live in
+# cando_port/lwext4_canboot_glue.c.
+# ---------------------------------------------------------------------------
+set(LWEXT4_DIR ${CMAKE_SOURCE_DIR}/vendor/lwext4)
+set(CANBOOT_LWEXT4_SOURCES
+    ${LWEXT4_DIR}/src/ext4.c
+    ${LWEXT4_DIR}/src/ext4_balloc.c
+    ${LWEXT4_DIR}/src/ext4_bcache.c
+    ${LWEXT4_DIR}/src/ext4_bitmap.c
+    ${LWEXT4_DIR}/src/ext4_block_group.c
+    ${LWEXT4_DIR}/src/ext4_blockdev.c
+    ${LWEXT4_DIR}/src/ext4_crc32.c
+    ${LWEXT4_DIR}/src/ext4_debug.c
+    ${LWEXT4_DIR}/src/ext4_dir.c
+    ${LWEXT4_DIR}/src/ext4_dir_idx.c
+    ${LWEXT4_DIR}/src/ext4_extent.c
+    ${LWEXT4_DIR}/src/ext4_fs.c
+    ${LWEXT4_DIR}/src/ext4_hash.c
+    ${LWEXT4_DIR}/src/ext4_ialloc.c
+    ${LWEXT4_DIR}/src/ext4_inode.c
+    ${LWEXT4_DIR}/src/ext4_journal.c
+    ${LWEXT4_DIR}/src/ext4_mbr.c
+    ${LWEXT4_DIR}/src/ext4_mkfs.c
+    ${LWEXT4_DIR}/src/ext4_super.c
+    ${LWEXT4_DIR}/src/ext4_trans.c
+    ${LWEXT4_DIR}/src/ext4_xattr.c
+)
+
+# ---------------------------------------------------------------------------
 # picolibc - cross-built for the current arch via ExternalProject. The
 # x86_64 build has used this since milestone 5; aarch64 m5 hooks into
 # the same machinery via cmake/picolibc-aarch64.cross.in.
@@ -254,6 +289,7 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
         ${CANBOOT_CANDO_SOURCES}
         ${CANBOOT_NTFS3G_SOURCES}
         ${CANBOOT_NTFS3G_MKFS_SOURCES}
+        ${CANBOOT_LWEXT4_SOURCES}
     )
 elseif(CANBOOT_ARCH STREQUAL "aarch64")
     # Minimal first-cut aarch64 build: bootstrap + entry trampoline +
@@ -304,6 +340,17 @@ set_source_files_properties(${CANBOOT_NTFS3G_MKFS_SOURCES} PROPERTIES
 )
 set_source_files_properties(cando_port/ntfs3g_canboot_io.c cando_port/ntfs3g_canboot_glue.c PROPERTIES
     COMPILE_FLAGS "-include ${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_canboot_shim.h -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g -DHAVE_CONFIG_H=1 -w"
+)
+
+# lwext4 per-source compile flags. CONFIG_USE_DEFAULT_CFG=1 makes the
+# library pick up vendor/lwext4/include/ext4_config.h's defaults
+# without needing a generated config file. CONFIG_DEBUG_PRINTF=0
+# silences the per-block trace prints; otherwise the serial console
+# would be flooded during mount + every mkfs. Both source sets
+# (vendored lwext4 + our two glue files) share the same include
+# layout. -w suppresses upstream warnings we have no business policing.
+set_source_files_properties(${CANBOOT_LWEXT4_SOURCES} cando_port/lwext4_canboot_io.c cando_port/lwext4_canboot_glue.c PROPERTIES
+    COMPILE_FLAGS "-I${CMAKE_SOURCE_DIR}/vendor/lwext4/include -I${CMAKE_SOURCE_DIR}/vendor/lwext4_canboot -I${CMAKE_SOURCE_DIR}/cando_port -DCONFIG_USE_DEFAULT_CFG=1 -DCONFIG_DEBUG_PRINTF=0 -w"
 )
 
 if(CANBOOT_ARCH STREQUAL "x86_64")
@@ -549,6 +596,8 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
             ${CANBOOT_LWIP_SOURCES}
             ${CANBOOT_CANDO_SOURCES}
             ${CANBOOT_NTFS3G_SOURCES}
+            ${CANBOOT_NTFS3G_MKFS_SOURCES}
+            ${CANBOOT_LWEXT4_SOURCES}
         )
 
         set(EFI_OBJS "")
@@ -585,6 +634,15 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
                     -fvisibility=hidden
                     -fcommon
                     -DHAVE_CONFIG_H=1
+                    -w
+                )
+            elseif(_src_abs MATCHES "/lwext4/" OR _src_abs MATCHES "/lwext4_canboot_")
+                set(_extra_flags
+                    -I${CMAKE_SOURCE_DIR}/vendor/lwext4/include
+                    -I${CMAKE_SOURCE_DIR}/vendor/lwext4_canboot
+                    -I${CMAKE_SOURCE_DIR}/cando_port
+                    -DCONFIG_USE_DEFAULT_CFG=1
+                    -DCONFIG_DEBUG_PRINTF=0
                     -w
                 )
             endif()
@@ -800,12 +858,15 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
         cando_port/cando_fs_lib.c
         cando_port/ntfs3g_canboot_io.c
         cando_port/ntfs3g_canboot_glue.c
+        cando_port/lwext4_canboot_io.c
+        cando_port/lwext4_canboot_glue.c
         cando_port/jit_codegen_stub_aarch64.c
         fs/partition.c
         fs/ntfs.c
         kernel/env.c
         ${CANBOOT_NTFS3G_SOURCES}
         ${CANBOOT_NTFS3G_MKFS_SOURCES}
+        ${CANBOOT_LWEXT4_SOURCES}
         ${CANBOOT_LWIP_SOURCES}
         ${CANBOOT_CANDO_AARCH64_SOURCES}
     )
@@ -844,6 +905,15 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
                 -fvisibility=hidden
                 -fcommon
                 -DHAVE_CONFIG_H=1
+                -w
+            )
+        elseif(_src_abs MATCHES "/lwext4/" OR _src_abs MATCHES "/lwext4_canboot_")
+            set(_extra_flags
+                -I${CMAKE_SOURCE_DIR}/vendor/lwext4/include
+                -I${CMAKE_SOURCE_DIR}/vendor/lwext4_canboot
+                -I${CMAKE_SOURCE_DIR}/cando_port
+                -DCONFIG_USE_DEFAULT_CFG=1
+                -DCONFIG_DEBUG_PRINTF=0
                 -w
             )
         endif()

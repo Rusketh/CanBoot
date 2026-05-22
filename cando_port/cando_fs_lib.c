@@ -11,8 +11,10 @@
  *   fs.usedBytes(diskIdx, partIdx)     0 if unknown
  *
  *   fs.mkfs(diskIdx, partIdx, "fat32") -> bool
- *   fs.mkfs(diskIdx, partIdx, "ntfs")  -> false (stubbed; see ntfs-3g PR)
- *   fs.mkfs(diskIdx, partIdx, "ext4")  -> false (stubbed; see lwext4 PR)
+ *   fs.mkfs(diskIdx, partIdx, "ntfs")  -> bool (via vendored libntfs-3g)
+ *   fs.mkfs(diskIdx, partIdx, "ext4")  -> bool (via vendored lwext4)
+ *   fs.mkfs(diskIdx, partIdx, "ext3")  -> bool (lwext4, journal-enabled)
+ *   fs.mkfs(diskIdx, partIdx, "ext2")  -> bool (lwext4, no-journal)
  *
  *   fs.read(diskIdx, partIdx, name)    string contents or null
  *   fs.write(diskIdx, partIdx, name, data)  bool; FAT32 only for now
@@ -45,6 +47,17 @@ int canboot_ntfs3g_create(int handle, const char *path, const void *buf, int len
 int canboot_ntfs3g_delete(int handle, const char *path);
 int canboot_ntfs3g_label (int handle, char *out, int cap);
 int canboot_ntfs_format  (struct canboot_disk *d, uint64_t off, uint64_t sz, const char *label);
+
+/* lwext4 glue (cando_port/lwext4_canboot_glue.c). Block offsets here
+ * are in 512-byte sectors, matching the underlying canboot_disk LBA. */
+int canboot_ext4_open  (struct canboot_disk *d, uint64_t lba_off, uint64_t lba_cnt);
+int canboot_ext4_close (int handle);
+int canboot_ext4_read  (int handle, const char *path, void *buf, int len);
+int canboot_ext4_write (int handle, const char *path, const void *buf, int len);
+int canboot_ext4_delete(int handle, const char *path);
+int canboot_ext4_label (int handle, char *out, int cap);
+int canboot_ext4_format(struct canboot_disk *d, uint64_t lba_off, uint64_t lba_cnt,
+                        const char *label, int fs_type);
 
 #include "core/value.h"
 #include "vm/vm.h"
@@ -154,6 +167,12 @@ static int f_label(CandoVM *vm, int argc, CandoValue *args) {
             }
             label = out;
         }
+    } else if (strcmp(t, "ext4") == 0) {
+        int h = canboot_ext4_open(d, p.start_lba, p.size_lba);
+        if (h >= 0) {
+            if (canboot_ext4_label(h, out, sizeof(out)) == 0) label = out;
+            canboot_ext4_close(h);
+        }
     }
     CandoString *s = cando_string_new(label, (uint32_t)strlen(label));
     cando_vm_push(vm, cando_string_value(s));
@@ -195,9 +214,12 @@ static int f_mkfs(CandoVM *vm, int argc, CandoValue *args) {
         uint64_t bs = d->block_size;
         ok = canboot_ntfs_format(d, p.start_lba * bs,
                                  p.size_lba * bs, label) == 0;
-    } else if (strcmp(type, "ext4") == 0 || strcmp(type, "ext3") == 0) {
-        /* Future: vendor lwext4 and replace this with its mkfs. */
-        ok = false;
+    } else if (strcmp(type, "ext4") == 0 || strcmp(type, "ext3") == 0
+            || strcmp(type, "ext2") == 0) {
+        int fs_type = 4;
+        if (type[3] == '3') fs_type = 3;
+        else if (type[3] == '2') fs_type = 2;
+        ok = canboot_ext4_format(d, p.start_lba, p.size_lba, label, fs_type) == 0;
     }
     cando_vm_push(vm, cando_bool(ok));
     return 1;
@@ -269,8 +291,19 @@ static int f_read(CandoVM *vm, int argc, CandoValue *args) {
                 return 1;
             }
         }
+    } else if (strcmp(t, "ext4") == 0) {
+        int h = canboot_ext4_open(d, p.start_lba, p.size_lba);
+        if (h >= 0) {
+            int n = canboot_ext4_read(h, name, buf, sizeof(buf) - 1);
+            canboot_ext4_close(h);
+            if (n > 0) {
+                buf[n] = '\0';
+                CandoString *s = cando_string_new(buf, (uint32_t)n);
+                cando_vm_push(vm, cando_string_value(s));
+                return 1;
+            }
+        }
     }
-    /* ext4 lands when we vendor lwext4. */
 fail:
     cando_vm_push(vm, cando_null());
     return 1;
@@ -309,8 +342,16 @@ static int f_write(CandoVM *vm, int argc, CandoValue *args) {
             cando_vm_push(vm, cando_bool(n > 0));
             return 1;
         }
+    } else if (strcmp(t, "ext4") == 0) {
+        int h = canboot_ext4_open(d, p.start_lba, p.size_lba);
+        if (h >= 0) {
+            int len = (int)strlen(data);
+            int n = canboot_ext4_write(h, name, data, len);
+            canboot_ext4_close(h);
+            cando_vm_push(vm, cando_bool(n > 0));
+            return 1;
+        }
     }
-    /* ext4 writes deferred. */
     cando_vm_push(vm, cando_bool(false));
     return 1;
 }
@@ -358,6 +399,14 @@ static int f_delete(CandoVM *vm, int argc, CandoValue *args) {
         if (h >= 0) {
             int rc = canboot_ntfs3g_delete(h, name);
             canboot_ntfs3g_close(h);
+            cando_vm_push(vm, cando_bool(rc == 0));
+            return 1;
+        }
+    } else if (strcmp(t, "ext4") == 0) {
+        int h = canboot_ext4_open(d, p.start_lba, p.size_lba);
+        if (h >= 0) {
+            int rc = canboot_ext4_delete(h, name);
+            canboot_ext4_close(h);
             cando_vm_push(vm, cando_bool(rc == 0));
             return 1;
         }
