@@ -76,8 +76,7 @@ Landed so far:
   `kernel/canboot_test_ca.c`, regenerable with
   `scripts/embed-test-ca.sh`), validates the chain, issues an HTTPS
   GET, then reconnects to verify session-ticket resumption (~25x
-  faster handshake). Currently BIOS-only; UEFI Mbed TLS link tracks a
-  separate followup issue.
+  faster handshake). Runs on both BIOS and UEFI.
 - **Milestone 9.** CanDo vendored at `vendor/cando` (submodule of
   `Rusketh/CanDo`). A curated subset of `vendor/cando/source/*.c`
   (~50 files; everything except the OpenSSL/socket/HTTP libs we'll
@@ -96,12 +95,11 @@ Landed so far:
   `cando_open` → `cando_openlibs` → `cando_dostring(/init.cdo
   contents)` → `cando_close`. `/init.cdo` is loaded via milestone 8's
   FAT32+ISO9660 path and executes inside the VM; its `print()` lands
-  on serial via picolibc → `hal_console`. BIOS smoke test asserts the
-  `canboot-cando-runtime-marker` line came from cando. UEFI tracks
-  the same EFI shared-object PIC-relocation followup as milestone 7's
-  Mbed TLS: cando_open's first function-pointer call jumps into the
-  `.data` section; the runtime is stubbed there until we add a
-  dedicated UEFI-mbedtls/cando link milestone.
+  on serial via picolibc → `hal_console`. Runs on both BIOS and UEFI.
+  The UEFI link was unblocked by `-D_Thread_local=` (defangs cando's
+  four `_Thread_local` statics so we don't get General-Dynamic TLS
+  relocations needing `__tls_get_addr`) plus adding `libgcc.a` to the
+  EFI link so picolibc/Mbed TLS's 128-bit-divide builtins resolve.
 - **Milestone 8.** HAL disk surface (`hal/include/hal/disk.h`,
   `hal/disk/disk.c`) plus three drivers wired underneath: virtio-blk
   (`hal/disk/virtio_blk.c`, reuses milestone 4's virtio-pci
