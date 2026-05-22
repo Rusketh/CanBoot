@@ -1,9 +1,19 @@
 // CanBoot default init.cdo
 // canboot-init-marker
 //
-// Loaded by kmain at boot from /init.cdo on the first writable disk,
-// falling back to the boot ISO9660 image if no disk carries one.
-// Executed by libcando via cando_dostring once milestone 10 stands
-// the VM up on bare metal.
+// Drives the milestone-11 display surface end-to-end: three coloured
+// rectangles whose colours we read back from kmain to prove cando is
+// painting through to the framebuffer, a connecting diagonal, and a
+// text label.
 
 print("canboot-cando-runtime-marker init.cdo executed inside vm");
+
+// cando lexer accepts decimal only; comment shows the 0xRRGGBB form.
+display.clear(2105376);                                // 0x202020 - bg
+display.fillRect(0,   0, 100, 100, 16711680);         // 0xFF0000 - red
+display.fillRect(150, 50, 100, 100, 65280);           // 0x00FF00 - green
+display.fillRect(300, 100, 100, 100, 255);            // 0x0000FF - blue
+display.line(0, 0, 400, 200, 16777215);               // 0xFFFFFF - white
+display.text(160, 220, "CanBoot init.cdo", 16777215, 0);
+
+print("init.cdo painted display");

@@ -96,8 +96,30 @@ cleanup() {
 }
 trap cleanup EXIT
 
+SCREENDUMP_DONE=""
 deadline=$(( $(date +%s) + TIMEOUT ))
 while [ "$(date +%s)" -lt "$deadline" ]; do
+    # Once init.cdo finishes painting, grab a screendump for the
+    # milestone-11 sha256 compare. We do this once, on the first
+    # iteration after the paint marker appears.
+    if [ -z "$SCREENDUMP_DONE" ] && \
+       tr -d '\r' < "$LOG" 2>/dev/null | grep -q 'init.cdo painted display'; then
+        python3 - "$MON_SOCK" "$WORK/screen.ppm" <<'PY' 2>/dev/null || true
+import socket, sys, time
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+try:
+    s.connect(sys.argv[1])
+except Exception:
+    sys.exit(0)
+time.sleep(0.2)
+s.sendall(("screendump " + sys.argv[2] + "\n").encode())
+time.sleep(0.5)
+s.close()
+PY
+        sleep 1
+        SCREENDUMP_DONE=1
+    fi
+
     if tr -d '\r' < "$LOG" 2>/dev/null | grep -q '^ok$'; then
         stripped="$(tr -d '\r' < "$LOG")"
 
@@ -131,6 +153,26 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'canboot-cando-runtime-marker'
         check 'milestone 10: cando_dostring ok'
         check 'milestone 10: init.cdo executed ok'
+        check 'milestone 11: display lib registered'
+        check 'milestone 11: display test ok'
+
+        # Milestone 11 screenshot sha256 compare.
+        if [ -f "$WORK/screen.ppm" ]; then
+            EXPECTED=$(cat "$ROOT/tests/refs/m11-bios.ppm.sha256" 2>/dev/null | head -1)
+            GOT=$(sha256sum "$WORK/screen.ppm" | awk '{print $1}')
+            if [ "$EXPECTED" = "$GOT" ]; then
+                echo "milestone 11: screendump sha256 matches reference ($GOT)"
+            else
+                echo "smoke test FAILED: m11 screendump sha256 mismatch" >&2
+                echo "  expected: $EXPECTED" >&2
+                echo "  got     : $GOT" >&2
+                cp "$WORK/screen.ppm" build/m11-bios-actual.ppm 2>/dev/null || true
+                exit 1
+            fi
+        else
+            echo "smoke test FAILED: m11 screendump missing" >&2
+            exit 1
+        fi
 
         echo "smoke test passed; serial log:"
         echo "$stripped" | sed 's/^/  | /'

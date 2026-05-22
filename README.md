@@ -85,6 +85,20 @@ Landed so far:
   shims in `cando_port/shims/` (openssl, netdb, netinet, sys/mman,
   sys/socket, sys/ioctl, sys/utsname, sys/sysinfo, dirent, dlfcn,
   termios) and POSIX function stubs in `cando_port/cando_stubs.c`.
+- **Milestone 11.** CanDo-facing display module. `hal/include/hal/display.h`
+  + `hal/display/display.c` extend the milestone-3 framebuffer painter
+  with pixel/line/text/image/copyRect/getPixel primitives and an 8x8
+  ASCII bitmap font. `cando_port/cando_display_lib.c` registers them
+  as a `display.*` cando namespace via `cando_bridge_new_object` +
+  `libutil_register_methods` + `cando_vm_set_global`. `init.cdo` now
+  drives the framebuffer through cando, painting three RGB rectangles
+  + a diagonal line + a text label; kmain reads back known pixel
+  coordinates and asserts exact colours. CI smoke tests additionally
+  `screendump` the QEMU framebuffer over HMP after the paint marker
+  and assert the full PPM's SHA256 matches a checked-in reference
+  (`tests/refs/m11-{bios,uefi}.ppm.sha256`). Different references per
+  firmware because GOP gives UEFI 1280x800 while GRUB hands BIOS
+  1024x768.
 - **Milestone 10 (plan's primary milestone).** The CanDo VM runs on
   bare metal. `kmain` now installs a minimal IDT
   (`arch/x86_64/idt.{c,h}`, `arch/x86_64/idt_stubs.S`) that prints

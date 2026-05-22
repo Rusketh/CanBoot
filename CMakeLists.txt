@@ -30,11 +30,13 @@ set(CANBOOT_KERNEL_COMMON
     kernel/m9_candotest.c
     kernel/canboot_test_ca.c
     cando_port/cando_stubs.c
+    cando_port/cando_display_lib.c
     fs/iso9660.c
     fs/fat32.c
     hal/disk/disk.c
     hal/disk/virtio_blk.c
     hal/disk/ahci.c
+    hal/display/display.c
     hal/console/serial_x86.c
     hal/input/input_queue.c
     hal/input/ps2.c
