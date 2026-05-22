@@ -103,9 +103,13 @@ jobs:
           retention-days: 7
 
   build-aarch64:
-    name: aarch64 virt
+    name: aarch64 ${{ matrix.firmware }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        firmware: [direct, uefi]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -115,9 +119,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            cmake ninja-build \
+            cmake ninja-build make \
             gcc-aarch64-linux-gnu \
-            qemu-system-arm qemu-system-misc
+            qemu-system-arm qemu-system-misc \
+            qemu-efi-aarch64 \
+            mtools dosfstools
           # Sanity-check the aarch64 emulator is on PATH; fail loudly if not.
           which qemu-system-aarch64
           qemu-system-aarch64 --version
@@ -128,30 +134,59 @@ jobs:
                 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-aarch64.cmake
 
       - name: Build kernel ELF
+        if: matrix.firmware == 'direct'
         run: cmake --build build-aarch64 --target canboot-aarch64 --verbose
 
+      - name: Build UEFI binary
+        if: matrix.firmware == 'uefi'
+        run: cmake --build build-aarch64 --target canboot-uefi --verbose
+
       - name: Inspect kernel ELF
+        if: matrix.firmware == 'direct'
         run: |
           file build-aarch64/canboot-aarch64.elf
           aarch64-linux-gnu-readelf -h build-aarch64/canboot-aarch64.elf
 
-      - name: QEMU smoke test (virt)
+      - name: Inspect UEFI PE
+        if: matrix.firmware == 'uefi'
+        run: |
+          file build-aarch64/canboot-aarch64-uefi.efi
+          aarch64-linux-gnu-objdump -h build-aarch64/canboot-aarch64-uefi.efi
+
+      - name: Build UEFI ESP image
+        if: matrix.firmware == 'uefi'
+        run: bash scripts/mkdisk-aarch64-uefi.sh
+              build-aarch64/canboot-aarch64-uefi.efi
+              build-aarch64/canboot-aarch64-uefi.img
+
+      - name: QEMU smoke test (virt direct -kernel)
+        if: matrix.firmware == 'direct'
         run: bash tests/run-qemu-aarch64.sh build-aarch64/canboot-aarch64.elf
 
-      - name: Upload artifact
+      - name: QEMU smoke test (virt AAVMF UEFI)
+        if: matrix.firmware == 'uefi'
+        run: bash tests/run-qemu-aarch64-uefi.sh build-aarch64/canboot-aarch64-uefi.img
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: canboot-aarch64
-          path: build-aarch64/canboot-aarch64.elf
+          name: canboot-aarch64-${{ matrix.firmware }}
+          path: |
+            build-aarch64/canboot-aarch64.elf
+            build-aarch64/canboot-aarch64-uefi.efi
+            build-aarch64/canboot-aarch64-uefi.img
+          if-no-files-found: ignore
           retention-days: 14
 
       - name: Upload serial log on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: qemu-aarch64-log
+          name: qemu-aarch64-${{ matrix.firmware }}-log
           path: |
             build-aarch64/qemu-aarch64.log
             build-aarch64/qemu-aarch64.stderr.log
+            build-aarch64/qemu-aarch64-uefi.log
+            build-aarch64/qemu-aarch64-uefi.stderr.log
           if-no-files-found: ignore
           retention-days: 7

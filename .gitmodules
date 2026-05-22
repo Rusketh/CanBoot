@@ -10,3 +10,6 @@
 [submodule "vendor/cando"]
 	path = vendor/cando
 	url = https://github.com/Rusketh/CanDo.git
+[submodule "vendor/gnu-efi"]
+	path = vendor/gnu-efi
+	url = https://github.com/ncroxon/gnu-efi.git

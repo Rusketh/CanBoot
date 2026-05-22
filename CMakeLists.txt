@@ -487,3 +487,123 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
             "Install the `gnu-efi` package to enable it.")
     endif()
 endif()
+
+# ---------------------------------------------------------------------------
+# aarch64 UEFI loader (milestone 14): cross-builds vendor/gnu-efi for
+# aarch64, then links boot/uefi/efi_main_aarch64.c against it to produce
+# canboot-aarch64-uefi.efi - a PE32+ EFI application that AAVMF loads,
+# collects boot_info from, ExitBootServices, and hands off to the same
+# stub aarch64 kmain the direct -kernel path uses.
+#
+# We vendor gnu-efi because the Ubuntu `gnu-efi` package only ships its
+# host arch (x86_64); the aarch64 crt0/lds/libs would otherwise require
+# arm64 multiarch which is brittle to bring up in CI.
+# ---------------------------------------------------------------------------
+if(CANBOOT_ARCH STREQUAL "aarch64")
+    include(ExternalProject)
+
+    set(GNUEFI_SRC     "${CMAKE_SOURCE_DIR}/vendor/gnu-efi")
+    set(GNUEFI_PREFIX  "${CMAKE_BINARY_DIR}/gnu-efi")
+    set(GNUEFI_BUILD   "${GNUEFI_PREFIX}/build")
+    set(GNUEFI_INSTALL "${GNUEFI_PREFIX}/install")
+
+    set(GNUEFI_AARCH64_CRT0  "${GNUEFI_INSTALL}/lib/crt0-efi-aarch64.o")
+    set(GNUEFI_AARCH64_LDS   "${GNUEFI_INSTALL}/lib/elf_aarch64_efi.lds")
+    set(GNUEFI_AARCH64_LIBE  "${GNUEFI_INSTALL}/lib/libefi.a")
+    set(GNUEFI_AARCH64_LIBG  "${GNUEFI_INSTALL}/lib/libgnuefi.a")
+    set(GNUEFI_INCLUDE       "${GNUEFI_INSTALL}/include/efi")
+    set(GNUEFI_ARCH_INCLUDE  "${GNUEFI_INSTALL}/include/efi/aarch64")
+
+    ExternalProject_Add(gnu_efi_ext
+        SOURCE_DIR         ${GNUEFI_SRC}
+        PREFIX             ${GNUEFI_PREFIX}
+        BUILD_IN_SOURCE    FALSE
+        CONFIGURE_COMMAND  ""
+        BUILD_COMMAND      ${CMAKE_COMMAND} -E env
+                               make -C ${GNUEFI_SRC}
+                                   ARCH=aarch64
+                                   CROSS_COMPILE=aarch64-linux-gnu-
+                                   PREFIX=${GNUEFI_INSTALL}
+        INSTALL_COMMAND    ${CMAKE_COMMAND} -E env
+                               make -C ${GNUEFI_SRC}
+                                   ARCH=aarch64
+                                   CROSS_COMPILE=aarch64-linux-gnu-
+                                   PREFIX=${GNUEFI_INSTALL}
+                                   install
+        BUILD_BYPRODUCTS   ${GNUEFI_AARCH64_CRT0}
+                           ${GNUEFI_AARCH64_LDS}
+                           ${GNUEFI_AARCH64_LIBE}
+                           ${GNUEFI_AARCH64_LIBG}
+        USES_TERMINAL_BUILD TRUE
+    )
+
+    set(EFI_NAME "canboot-${CANBOOT_ARCH}-uefi")
+    set(EFI_SO   "${CMAKE_BINARY_DIR}/${EFI_NAME}.so")
+    set(EFI_OUT  "${CMAKE_BINARY_DIR}/${EFI_NAME}.efi")
+
+    # EFI app shares the kmain stub + serial driver with the direct-kernel
+    # path. We recompile them here with -fpic so they're position-
+    # independent inside the PE image. Each source becomes a separate
+    # custom command producing a .o with EFI-flavoured flags.
+    set(EFI_AARCH64_SOURCES
+        boot/uefi/efi_main_aarch64.c
+        kernel/kmain_aarch64_stub.c
+        hal/console/serial_aarch64.c
+    )
+
+    set(EFI_AARCH64_OBJS "")
+    set(_efi_obj_seq 0)
+    foreach(src ${EFI_AARCH64_SOURCES})
+        set(_src_abs ${CMAKE_SOURCE_DIR}/${src})
+        get_filename_component(_name ${src} NAME_WE)
+        math(EXPR _efi_obj_seq "${_efi_obj_seq} + 1")
+        set(_obj "${CMAKE_BINARY_DIR}/efi_aarch64_${_efi_obj_seq}_${_name}.o")
+        add_custom_command(
+            OUTPUT ${_obj}
+            COMMAND aarch64-linux-gnu-gcc
+                -I${GNUEFI_INCLUDE}
+                -I${GNUEFI_ARCH_INCLUDE}
+                -I${CMAKE_SOURCE_DIR}/hal/include
+                -I${CMAKE_SOURCE_DIR}/kernel/include
+                -I${CMAKE_SOURCE_DIR}
+                -ffreestanding -fpic -fno-stack-protector -fno-stack-check
+                -fno-strict-aliasing -mgeneral-regs-only -fshort-wchar
+                -Wall -Wextra
+                -c ${_src_abs} -o ${_obj}
+            DEPENDS ${_src_abs} gnu_efi_ext
+            COMMENT "CC  efi-aarch64/${_name}.o"
+            VERBATIM
+        )
+        list(APPEND EFI_AARCH64_OBJS ${_obj})
+    endforeach()
+
+    add_custom_command(
+        OUTPUT ${EFI_SO}
+        COMMAND aarch64-linux-gnu-ld -nostdlib -znocombreloc
+            -T ${GNUEFI_AARCH64_LDS}
+            -shared -Bsymbolic
+            ${GNUEFI_AARCH64_CRT0} ${EFI_AARCH64_OBJS}
+            -o ${EFI_SO}
+            -L${GNUEFI_INSTALL}/lib
+            --start-group -lefi -lgnuefi --end-group
+        DEPENDS ${EFI_AARCH64_OBJS} gnu_efi_ext
+        COMMENT "LD  ${EFI_NAME}.so"
+        VERBATIM
+    )
+
+    add_custom_command(
+        OUTPUT ${EFI_OUT}
+        COMMAND aarch64-linux-gnu-objcopy
+            -j .text -j .sdata -j .data -j .dynamic
+            -j .rodata
+            -j .dynsym -j .rel -j .rela -j .rel.* -j .rela.*
+            -j .areloc -j .reloc
+            --target efi-app-aarch64
+            ${EFI_SO} ${EFI_OUT}
+        DEPENDS ${EFI_SO}
+        COMMENT "EFI ${EFI_NAME}.efi"
+        VERBATIM
+    )
+
+    add_custom_target(canboot-uefi ALL DEPENDS ${EFI_OUT})
+endif()
