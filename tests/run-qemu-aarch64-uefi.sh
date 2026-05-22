@@ -88,6 +88,8 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'canboot: mmap entries='
         check 'canboot: platform-tables='
         check 'canboot: handshake confirmed (aarch64 milestone-3)'
+        check 'milestone 5: starting self-test'
+        check 'milestone 5: self-test ok'
 
         # Framebuffer path: Debian/Ubuntu AAVMF ships a stripped firmware
         # build with no GOP-producing drivers, so the loader's

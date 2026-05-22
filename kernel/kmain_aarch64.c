@@ -27,6 +27,9 @@ void fb_fill_rect(const struct canboot_fb *fb,
                   int32_t w, int32_t h,
                   uint32_t pixel);
 
+void canboot_pthread_init(void);
+void canboot_m5_selftest(void);
+
 static void put_hex64(uint64_t v) {
     static const char digits[] = "0123456789abcdef";
     char buf[19];
@@ -146,6 +149,12 @@ void kmain(struct boot_info *bi) {
     }
 
     hal_console_write("canboot: handshake confirmed (aarch64 milestone-3)\n");
+
+    /* Milestone 5: picolibc + pthread shim self-test. Same harness the
+     * x86_64 kmain runs, links against the same libc.a. */
+    canboot_pthread_init();
+    canboot_m5_selftest();
+
     hal_console_write("canboot: aarch64 hello world boot complete\n");
     hal_console_write("ok\n");
 

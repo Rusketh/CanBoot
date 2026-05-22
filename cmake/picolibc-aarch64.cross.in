@@ -1,0 +1,19 @@
+[binaries]
+c = '@CMAKE_C_COMPILER@'
+ar = 'aarch64-linux-gnu-ar'
+as = 'aarch64-linux-gnu-as'
+strip = 'aarch64-linux-gnu-strip'
+
+[host_machine]
+system = 'none'
+cpu_family = 'aarch64'
+cpu = 'aarch64'
+endian = 'little'
+
+[properties]
+skip_sanity_check = true
+needs_exe_wrapper = true
+
+[built-in options]
+c_args = ['-ffreestanding', '-fno-stack-protector', '-fno-stack-check', '-fpic']
+c_link_args = ['-nostdlib']
