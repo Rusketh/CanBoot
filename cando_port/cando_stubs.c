@@ -213,3 +213,47 @@ long times(struct tms *buf) {
     if (buf) memset(buf, 0, sizeof(*buf));
     return 0;
 }
+
+/* ---- libntfs-3g POSIX surface stubs ----------------------------------- */
+/* libntfs-3g pulls in a small set of POSIX functions for the parts of
+ * the driver that interact with the host kernel/userspace (mtab, ACL
+ * lookups, file descriptor ioctls). We don't drive any of those code
+ * paths from canboot - the call sites are reachable but only when
+ * features we explicitly disabled in vendor/ntfs-3g_canboot/config.h
+ * fire. Stubbing them to ENOSYS keeps the link clean. */
+
+#include <sys/types.h>
+
+int fsync(int fd) { (void)fd; return 0; }
+int fcntl(int fd, int cmd, ...) { (void)fd; (void)cmd; errno = ENOSYS; return -1; }
+
+ssize_t pread(int fd, void *buf, size_t count, off_t offset) {
+    (void)fd; (void)buf; (void)count; (void)offset;
+    errno = ENOSYS; return -1;
+}
+ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset) {
+    (void)fd; (void)buf; (void)count; (void)offset;
+    errno = ENOSYS; return -1;
+}
+
+pid_t setsid(void) { errno = ENOSYS; return -1; }
+
+unsigned int major(dev_t dev) { return (unsigned int)((dev >> 8) & 0xFF); }
+unsigned int minor(dev_t dev) { return (unsigned int)(dev & 0xFF); }
+dev_t makedev(unsigned int ma, unsigned int mi) {
+    return ((dev_t)ma << 8) | (dev_t)mi;
+}
+
+struct group;
+struct passwd *getpwnam(const char *name) { (void)name; return NULL; }
+struct group  *getgrnam(const char *name) { (void)name; return NULL; }
+struct group  *getgrgid(gid_t gid)        { (void)gid;  return NULL; }
+/* getuid is already defined earlier in this file. */
+gid_t getgid(void) { return 0; }
+uid_t geteuid(void) { return 0; }
+gid_t getegid(void) { return 0; }
+
+/* libntfs-3g volume init calls syslog through openlog. No-ops. */
+void openlog(const char *ident, int option, int facility) { (void)ident; (void)option; (void)facility; }
+void closelog(void) { }
+void syslog(int priority, const char *format, ...) { (void)priority; (void)format; }

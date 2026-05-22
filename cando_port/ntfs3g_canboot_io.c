@@ -56,7 +56,7 @@ static int cb_open(struct ntfs_device *dev, int flags) {
 }
 
 static int cb_close(struct ntfs_device *dev) {
-    struct canboot_ntfs_priv *p = ntfs_device_get_data(dev);
+    struct canboot_ntfs_priv *p = (struct canboot_ntfs_priv *)dev->d_private;
     if (p) {
         memset(p, 0, sizeof(*p));
     }
@@ -64,7 +64,7 @@ static int cb_close(struct ntfs_device *dev) {
 }
 
 static int64_t cb_seek(struct ntfs_device *dev, int64_t offset, int whence) {
-    struct canboot_ntfs_priv *p = ntfs_device_get_data(dev);
+    struct canboot_ntfs_priv *p = (struct canboot_ntfs_priv *)dev->d_private;
     if (!p) { errno = EINVAL; return -1; }
     int64_t new_off;
     if (whence == 0)      new_off = offset;
@@ -110,13 +110,13 @@ static int64_t pread_inner(struct canboot_ntfs_priv *p, void *buf,
 }
 
 static int64_t cb_pread(struct ntfs_device *dev, void *buf, int64_t count, int64_t offset) {
-    struct canboot_ntfs_priv *p = ntfs_device_get_data(dev);
+    struct canboot_ntfs_priv *p = (struct canboot_ntfs_priv *)dev->d_private;
     if (!p) { errno = EBADF; return -1; }
     return pread_inner(p, buf, count, offset);
 }
 
 static int64_t cb_read(struct ntfs_device *dev, void *buf, int64_t count) {
-    struct canboot_ntfs_priv *p = ntfs_device_get_data(dev);
+    struct canboot_ntfs_priv *p = (struct canboot_ntfs_priv *)dev->d_private;
     if (!p) { errno = EBADF; return -1; }
     int64_t n = pread_inner(p, buf, count, (int64_t)p->cursor);
     if (n > 0) p->cursor += (uint64_t)n;
@@ -160,13 +160,13 @@ static int64_t pwrite_inner(struct canboot_ntfs_priv *p, const void *buf,
 }
 
 static int64_t cb_pwrite(struct ntfs_device *dev, const void *buf, int64_t count, int64_t offset) {
-    struct canboot_ntfs_priv *p = ntfs_device_get_data(dev);
+    struct canboot_ntfs_priv *p = (struct canboot_ntfs_priv *)dev->d_private;
     if (!p) { errno = EBADF; return -1; }
     return pwrite_inner(p, buf, count, offset);
 }
 
 static int64_t cb_write(struct ntfs_device *dev, const void *buf, int64_t count) {
-    struct canboot_ntfs_priv *p = ntfs_device_get_data(dev);
+    struct canboot_ntfs_priv *p = (struct canboot_ntfs_priv *)dev->d_private;
     if (!p) { errno = EBADF; return -1; }
     int64_t n = pwrite_inner(p, buf, count, (int64_t)p->cursor);
     if (n > 0) p->cursor += (uint64_t)n;

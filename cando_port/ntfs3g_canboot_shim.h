@@ -16,6 +16,8 @@
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
+#include <sys/types.h>
+#include <time.h>
 
 /* Locale: libntfs-3g calls setlocale(LC_ALL, "") at mount time to
  * pick up the system Unicode codepage. We're freestanding - the
