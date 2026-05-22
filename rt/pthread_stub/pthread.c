@@ -87,6 +87,7 @@ static __attribute__((noreturn)) void first_run(int tid) {
     uintptr_t sp = (uintptr_t)&g_threads[tid].stack[CANBOOT_PTHREAD_STACK_SIZE];
     sp &= ~(uintptr_t)0xF;   /* 16-byte align; call pushes 8 -> ABI-correct */
 
+#if defined(__x86_64__)
     __asm__ volatile (
         "movq %0, %%rsp\n\t"
         "xorq %%rbp, %%rbp\n\t"
@@ -95,6 +96,20 @@ static __attribute__((noreturn)) void first_run(int tid) {
         : : "r"(sp), "r"((void *)&thread_trampoline)
         : "memory"
     );
+#elif defined(__aarch64__)
+    /* AAPCS64: x29 = fp, x30 = lr. Zero the frame pointer so the
+     * unwinder stops at this synthetic root, then branch to the
+     * trampoline with sp set as if it were just called. brk #0
+     * forces a fault if the trampoline ever returns. */
+    __asm__ volatile (
+        "mov sp, %0\n\t"
+        "mov x29, xzr\n\t"
+        "blr %1\n\t"
+        "brk #0\n\t"
+        : : "r"(sp), "r"((void *)&thread_trampoline)
+        : "memory", "x29", "x30"
+    );
+#endif
     __builtin_unreachable();
 }
 
@@ -146,7 +161,13 @@ void pthread_exit(void *retval) {
     g_threads[g_current].retval = retval;
     g_threads[g_current].state  = PTH_EXITED;
     pthread_yield();
-    for (;;) __asm__ volatile ("hlt");
+    for (;;) {
+#if defined(__x86_64__)
+        __asm__ volatile ("hlt");
+#elif defined(__aarch64__)
+        __asm__ volatile ("wfe");
+#endif
+    }
 }
 
 int pthread_join(pthread_t t, void **retval) {

@@ -76,7 +76,11 @@ ssize_t read(int fd, void *buf, size_t count) {
             if (got > 0) return (ssize_t)got;
             /* Cooperative spin: pump devices until we get a char. */
             while ((c = hal_input_getc()) < 0) {
+#if defined(__x86_64__)
                 __asm__ volatile ("pause");
+#elif defined(__aarch64__)
+                __asm__ volatile ("yield");
+#endif
             }
         }
         out[got++] = (unsigned char)c;
@@ -106,5 +110,11 @@ int gettimeofday(struct timeval *tv, void *tz) {
 
 void _exit(int code) {
     (void)code;
-    for (;;) __asm__ volatile ("cli; hlt");
+    for (;;) {
+#if defined(__x86_64__)
+        __asm__ volatile ("cli; hlt");
+#elif defined(__aarch64__)
+        __asm__ volatile ("wfe");
+#endif
+    }
 }

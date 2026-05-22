@@ -58,18 +58,34 @@ _boot_entry:
     msr     elr_el2, x0
 
     // Set EL1 stack pointer before eret.
-    adr     x0, __stack_top
+    adrp    x0, __stack_top
+    add     x0, x0, #:lo12:__stack_top
     msr     sp_el1, x0
     eret
 
 1:
-    // EL1 path - set SP, zero BSS, restore FDT, jump to C.
-    adr     x0, __stack_top
+    // EL1 path - enable FP/SIMD access, set SP, zero BSS, restore FDT,
+    // jump to C.
+    //
+    // CPACR_EL1.FPEN bits [21:20] = 0b11 disables EL0/EL1 FP/SIMD traps.
+    // We don't otherwise touch FP regs in the kernel (-mgeneral-regs-only),
+    // but picolibc internally uses NEON/FP and would otherwise trap on
+    // first FP instruction.
+    mrs     x0, cpacr_el1
+    orr     x0, x0, #(3 << 20)
+    msr     cpacr_el1, x0
+    isb
+
+    adrp    x0, __stack_top
+    add     x0, x0, #:lo12:__stack_top
     mov     sp, x0
 
-    // Zero out .bss.
-    adr     x0, __bss_start
-    adr     x1, __bss_end
+    // Zero out .bss. Use adrp+add since the bss now spans more than the
+    // ±1 MiB adr range once picolibc's static heap is linked in.
+    adrp    x0, __bss_start
+    add     x0, x0, #:lo12:__bss_start
+    adrp    x1, __bss_end
+    add     x1, x1, #:lo12:__bss_end
 zero_bss:
     cmp     x0, x1
     b.eq    bss_done

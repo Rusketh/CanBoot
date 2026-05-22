@@ -129,11 +129,11 @@ set(CANBOOT_CANDO_SOURCES
 )
 
 # ---------------------------------------------------------------------------
-# picolibc (x86_64 only for now; aarch64 first-cut uses a freestanding
-# kernel with no libc - subsequent aarch64 milestones add the cross-
-# build).
+# picolibc - cross-built for the current arch via ExternalProject. The
+# x86_64 build has used this since milestone 5; aarch64 m5 hooks into
+# the same machinery via cmake/picolibc-aarch64.cross.in.
 # ---------------------------------------------------------------------------
-if(CANBOOT_ARCH STREQUAL "x86_64")
+if(CANBOOT_ARCH STREQUAL "x86_64" OR CANBOOT_ARCH STREQUAL "aarch64")
     include(ExternalProject)
 
     set(PICOLIBC_SRC       "${CMAKE_SOURCE_DIR}/vendor/picolibc")
@@ -187,7 +187,11 @@ elseif(CANBOOT_ARCH STREQUAL "aarch64")
         arch/aarch64/fdt.c
         kernel/kmain_aarch64.c
         kernel/fb.c
+        kernel/m5_selftest.c
         hal/console/serial_aarch64.c
+        hal/input/input_stub_aarch64.c
+        rt/picolibc_port/syscalls.c
+        rt/pthread_stub/pthread.c
     )
 else()
     message(FATAL_ERROR "Arch ${CANBOOT_ARCH} bring-up lands in a later milestone")
@@ -268,6 +272,8 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
     )
 
 elseif(CANBOOT_ARCH STREQUAL "aarch64")
+    add_dependencies(${KERNEL_NAME} picolibc_ext)
+
     set_source_files_properties(
         arch/aarch64/bootstrap.S
         PROPERTIES LANGUAGE ASM
@@ -276,7 +282,9 @@ elseif(CANBOOT_ARCH STREQUAL "aarch64")
     target_include_directories(${KERNEL_NAME} PRIVATE
         hal/include
         kernel/include
+        rt/pthread_stub/include
         ${CMAKE_SOURCE_DIR}
+        ${PICOLIBC_INCLUDE}
     )
 
     target_compile_options(${KERNEL_NAME} PRIVATE
@@ -298,6 +306,11 @@ elseif(CANBOOT_ARCH STREQUAL "aarch64")
         -Wl,-T,${KERNEL_LINKER_SCRIPT}
         -Wl,-z,noexecstack
         -Wl,-z,max-page-size=0x1000
+    )
+
+    target_link_libraries(${KERNEL_NAME} PRIVATE
+        ${PICOLIBC_LIB}
+        -lgcc
     )
 endif()
 
@@ -569,7 +582,11 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
         boot/uefi/efi_main_aarch64.c
         kernel/kmain_aarch64.c
         kernel/fb.c
+        kernel/m5_selftest.c
         hal/console/serial_aarch64.c
+        hal/input/input_stub_aarch64.c
+        rt/picolibc_port/syscalls.c
+        rt/pthread_stub/pthread.c
     )
 
     set(EFI_AARCH64_OBJS "")
@@ -586,17 +603,28 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
                 -I${GNUEFI_ARCH_INCLUDE}
                 -I${CMAKE_SOURCE_DIR}/hal/include
                 -I${CMAKE_SOURCE_DIR}/kernel/include
+                -I${CMAKE_SOURCE_DIR}/rt/pthread_stub/include
                 -I${CMAKE_SOURCE_DIR}
+                -I${PICOLIBC_INCLUDE}
                 -ffreestanding -fpic -fno-stack-protector -fno-stack-check
-                -fno-strict-aliasing -mgeneral-regs-only -fshort-wchar
+                -fno-strict-aliasing -fshort-wchar
                 -Wall -Wextra
                 -c ${_src_abs} -o ${_obj}
-            DEPENDS ${_src_abs} gnu_efi_ext
+            DEPENDS ${_src_abs} gnu_efi_ext picolibc_ext
             COMMENT "CC  efi-aarch64/${_name}.o"
             VERBATIM
         )
         list(APPEND EFI_AARCH64_OBJS ${_obj})
     endforeach()
+
+    # Resolve aarch64 libgcc.a path (provides __divti3 etc. that picolibc
+     # may reference but doesn't ship). gcc -print-libgcc-file-name gives
+     # us the right copy for the cross toolchain.
+    execute_process(
+        COMMAND aarch64-linux-gnu-gcc -print-libgcc-file-name
+        OUTPUT_VARIABLE CANBOOT_AARCH64_LIBGCC
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
 
     add_custom_command(
         OUTPUT ${EFI_SO}
@@ -606,8 +634,8 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
             ${GNUEFI_AARCH64_CRT0} ${EFI_AARCH64_OBJS}
             -o ${EFI_SO}
             -L${GNUEFI_INSTALL}/lib
-            --start-group -lefi -lgnuefi --end-group
-        DEPENDS ${EFI_AARCH64_OBJS} gnu_efi_ext
+            --start-group -lefi -lgnuefi ${PICOLIBC_LIB} ${CANBOOT_AARCH64_LIBGCC} --end-group
+        DEPENDS ${EFI_AARCH64_OBJS} gnu_efi_ext picolibc_ext
         COMMENT "LD  ${EFI_NAME}.so"
         VERBATIM
     )
