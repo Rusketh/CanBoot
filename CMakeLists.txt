@@ -376,12 +376,14 @@ if(CANBOOT_ARCH STREQUAL "x86_64" OR CANBOOT_ARCH STREQUAL "aarch64")
             -D_Thread_local= -D__thread=
         )
     else()
-        # On aarch64-cross, /usr/include is the host glibc's amd64
-        # tree - which references arch-specific headers like
-        # bits/libc-header-start.h that only exist via the aarch64
-        # multiarch dir we don't install. Route mbedtls through
-        # picolibc's headers instead, ahead of the system search path.
-        include_directories(BEFORE SYSTEM ${PICOLIBC_INCLUDE})
+        # On aarch64-cross gcc, /usr/include/limits.h pulls in
+        # bits/libc-header-start.h which only exists if
+        # libc6-dev-arm64-cross is installed. picolibc has the same
+        # headers in a self-contained form; we route mbedtls through
+        # them by prepending -I (BEFORE without SYSTEM emits a plain
+        # -I, which gcc searches *before* its internal include-fixed
+        # tree - the only way to win against /usr/include/limits.h).
+        include_directories(BEFORE ${PICOLIBC_INCLUDE})
         add_compile_options(
             -ffreestanding -fno-stack-protector -fno-stack-check
             -fPIC
@@ -389,6 +391,19 @@ if(CANBOOT_ARCH STREQUAL "x86_64" OR CANBOOT_ARCH STREQUAL "aarch64")
         )
     endif()
     add_subdirectory(${MBEDTLS_DIR} ${CMAKE_BINARY_DIR}/mbedtls EXCLUDE_FROM_ALL)
+
+    # On aarch64 mbedtls includes picolibc's <limits.h> (its own pulls
+    # /usr/include/limits.h -> bits/libc-header-start.h which only
+    # exists with libc6-dev-arm64-cross). Force the mbedtls targets to
+    # wait for picolibc_ext so the install/include tree exists before
+    # any mbedtls source compiles.
+    if(CANBOOT_ARCH STREQUAL "aarch64")
+        foreach(_t mbedtls mbedx509 mbedcrypto everest p256m)
+            if(TARGET ${_t})
+                add_dependencies(${_t} picolibc_ext)
+            endif()
+        endforeach()
+    endif()
 endif()
 # kernel/ sources with PIC + short-wchar + EFI include path, links them
 # with gnu-efi's crt0 and elf_x86_64_efi.lds, then objcopies to a PE32+
