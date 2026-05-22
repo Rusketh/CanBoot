@@ -33,6 +33,8 @@ qemu-system-aarch64 \
     -machine virt \
     -cpu cortex-a72 \
     -m 256M \
+    -nodefaults \
+    -net none \
     -display none \
     -no-reboot \
     -kernel "$ELF" \
