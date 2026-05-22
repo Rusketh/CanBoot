@@ -22,6 +22,9 @@ void        cando_openlibs(CandoVM *vm);
 void        cando_close(CandoVM *vm);
 int         cando_dostring(CandoVM *vm, const char *src, const char *name);
 const char *cando_errmsg(CandoVM *vm);
+void        canboot_cando_open_displaylib(CandoVM *vm);
+
+#include "hal/display.h"
 
 static int load_init_cdo(char *out, uint32_t out_size, uint32_t *out_len) {
     uint32_t nd = hal_disk_count();
@@ -73,6 +76,10 @@ void canboot_m9_candotest(void) {
     cando_openlibs(vm);
     printf("milestone 9: cando_openlibs ok\n");
 
+    canboot_cando_open_displaylib(vm);
+    printf("milestone 11: display lib registered (%dx%d)\n",
+           hal_display_width(), hal_display_height());
+
     /* Milestone 10: load /init.cdo from disk and run it through cando_dostring. */
     static char init_src[8192];
     uint32_t init_len = 0;
@@ -94,6 +101,35 @@ void canboot_m9_candotest(void) {
         return;
     }
     printf("milestone 10: cando_dostring ok rc=%d\n", rc);
+
+    /* Milestone 11: assert known pixel colours match what init.cdo painted.
+     * The script paints three rects + a line + a text label; we sample
+     * three points and verify the colour matches. */
+    struct {
+        int32_t x, y;
+        uint32_t want;
+        const char *what;
+    } probes[] = {
+        {  10,   10, 0x00FF0000u, "red top-left rect"    },
+        { 160,   60, 0x0000FF00u, "green middle rect"    },
+        { 310,  110, 0x000000FFu, "blue bottom-right rect" },
+    };
+    int probe_fails = 0;
+    for (size_t i = 0; i < sizeof(probes)/sizeof(probes[0]); i++) {
+        uint32_t got = hal_display_get_pixel(probes[i].x, probes[i].y);
+        if (got == probes[i].want) {
+            printf("milestone 11: probe %s @ (%d,%d) ok = 0x%06x\n",
+                   probes[i].what, probes[i].x, probes[i].y, (unsigned)got);
+        } else {
+            printf("milestone 11: FAIL probe %s @ (%d,%d) got=0x%06x want=0x%06x\n",
+                   probes[i].what, probes[i].x, probes[i].y,
+                   (unsigned)got, (unsigned)probes[i].want);
+            probe_fails++;
+        }
+    }
+    if (probe_fails == 0) {
+        printf("milestone 11: display test ok\n");
+    }
 
     printf("milestone 9: calling cando_close\n");
     cando_close(vm);

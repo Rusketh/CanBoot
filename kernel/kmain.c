@@ -21,6 +21,7 @@ void fb_fill_rect(const struct canboot_fb *fb,
                   int32_t x, int32_t y,
                   int32_t w, int32_t h,
                   uint32_t pixel);
+extern void canboot_display_bind(const struct canboot_fb *fb);
 
 static inline uint64_t rdtsc(void) {
     uint32_t lo, hi;
@@ -191,6 +192,7 @@ static void kmain_body(struct boot_info *bi) {
         put_dec(bi->fb.pitch);
         hal_console_write("\n");
 
+        canboot_display_bind(&bi->fb);
         fb_clear(&bi->fb, 0x00202020u);
         fb_fill_rect(&bi->fb, 16, 16, 256, 64, 0x00FFFFFFu);
         fb_fill_rect(&bi->fb,
