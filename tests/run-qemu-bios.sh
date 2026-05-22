@@ -211,6 +211,15 @@ PY
         check 'cando crypto.sha256Hex(empty) = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
         check 'cando crypto.hmacSha256Hex(k, m) = f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8'
         check 'cando crypto libs end'
+        check 'milestone 15: env+log libs registered'
+        check 'cando env.source = bios'
+        check 'INFO  info-level message from cando'
+        check 'INIT.CDO'
+        check 'cando intro libs end'
+        if grep -q 'THIS-SHOULD-BE-SUPPRESSED' <<<"$stripped"; then
+            echo "smoke test FAILED: log.setLevel(info) did not suppress debug message" >&2
+            exit 1
+        fi
 
         # Milestone 11 screenshot sha256 compare.
         if [ -f "$WORK/screen.ppm" ]; then

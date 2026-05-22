@@ -19,6 +19,7 @@
 #include <stddef.h>
 
 #include "canboot/boot_info.h"
+#include "canboot/env.h"
 #include "hal/console.h"
 
 #if CANBOOT_AARCH64_EFI_BUILD
@@ -81,6 +82,8 @@ static void halt_forever(void) {
 void kmain(struct boot_info *bi) {
     hal_console_init();
     hal_console_write("canboot: kmain reached (aarch64)\n");
+
+    canboot_env_set_boot_info(bi);
 
     if (!bi || bi->magic != CANBOOT_BOOT_INFO_MAGIC) {
         hal_console_write("canboot: FATAL bad boot_info magic = ");

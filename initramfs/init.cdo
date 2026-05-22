@@ -86,3 +86,32 @@ print("cando random.int(1,100) =", random.int(1, 100));
 print("cando random.uuid() =", random.uuid());
 
 print("cando crypto libs end");
+
+// ---- Milestone 15: env + log libs ------------------------------------
+
+print("cando intro libs begin");
+
+// env.* - boot environment introspection.
+print("cando env.source =", env.source());
+print("cando env.fbFormat =", env.fbFormat());
+print("cando env.fbWidth =", env.fbWidth());
+print("cando env.fbHeight =", env.fbHeight());
+print("cando env.mmapCount =", env.mmapCount());
+print("cando env.usableBytes =", env.usableBytes());
+
+// log.* - structured serial logging. Same UART as print(), but each
+// line carries a ms timestamp + severity prefix.
+log.setLevel("debug");
+log.debug("debug-level message from cando");
+log.info("info-level message from cando");
+log.warn("warn-level message from cando");
+log.error("error-level message from cando");
+log.setLevel("info");
+// This should NOT appear in the log:
+log.debug("THIS-SHOULD-BE-SUPPRESSED");
+
+// file.list() now backed by a real FAT32 directory iterator.
+print("cando file.list() =");
+print(file.list());
+
+print("cando intro libs end");

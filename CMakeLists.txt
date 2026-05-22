@@ -22,6 +22,7 @@ set(CANBOOT_KERNEL_COMMON
     arch/x86_64/idt.c
     arch/x86_64/idt_stubs.S
     kernel/kmain.c
+    kernel/env.c
     kernel/fb.c
     kernel/m5_selftest.c
     kernel/m6_nettest.c
@@ -39,6 +40,8 @@ set(CANBOOT_KERNEL_COMMON
     cando_port/cando_random_lib.c
     cando_port/cando_crypto_lib.c
     cando_port/cando_encoding_lib.c
+    cando_port/cando_log_lib.c
+    cando_port/cando_env_lib.c
     fs/iso9660.c
     fs/fat32.c
     hal/disk/disk.c
@@ -193,6 +196,7 @@ elseif(CANBOOT_ARCH STREQUAL "aarch64")
         arch/aarch64/aarch64_entry.c
         arch/aarch64/fdt.c
         kernel/kmain_aarch64.c
+        kernel/env.c
         kernel/fb.c
         kernel/m5_selftest.c
         hal/console/serial_aarch64.c
@@ -660,7 +664,10 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
         cando_port/cando_random_lib.c
         cando_port/cando_crypto_lib.c
         cando_port/cando_encoding_lib.c
+        cando_port/cando_log_lib.c
+        cando_port/cando_env_lib.c
         cando_port/jit_codegen_stub_aarch64.c
+        kernel/env.c
         ${CANBOOT_LWIP_SOURCES}
         ${CANBOOT_CANDO_AARCH64_SOURCES}
     )

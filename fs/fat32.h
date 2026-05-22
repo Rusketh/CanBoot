@@ -37,4 +37,16 @@ int  canboot_fat32_write_root_file(struct canboot_fat32 *fs,
                                     const char *name,
                                     const void *buf, uint32_t len);
 
+/* Iterate the root directory's file entries. The callback receives
+ * one entry at a time with its 8.3 name (newly null-terminated, e.g.
+ * "INIT.CDO") and byte size. Returning false stops iteration. The
+ * implementation skips LFN, volume labels, and subdirectories - it's
+ * a flat-file listing.
+ *
+ * Returns the number of entries reported on success, or -1 on disk
+ * error. */
+typedef bool (*canboot_fat32_iter_fn)(const char *name83, uint32_t size, void *user);
+int  canboot_fat32_list_root(struct canboot_fat32 *fs,
+                              canboot_fat32_iter_fn cb, void *user);
+
 #endif /* CANBOOT_FS_FAT32_H */

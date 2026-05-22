@@ -350,3 +350,48 @@ int canboot_fat32_write_root_file(struct canboot_fat32 *fs,
     }
     return -1;
 }
+
+int canboot_fat32_list_root(struct canboot_fat32 *fs,
+                            canboot_fat32_iter_fn cb, void *user) {
+    if (!fs || !cb) return -1;
+    uint32_t cluster = fs->root_cluster;
+    static __attribute__((aligned(8))) uint8_t buf[8192];
+    if (fs->bytes_per_cluster > sizeof(buf)) return -1;
+    int reported = 0;
+    while (cluster < 0x0FFFFFF8u) {
+        if (read_cluster(fs, cluster, buf) != 0) return -1;
+        uint32_t entries = fs->bytes_per_cluster / DIR_ENTRY_SIZE;
+        for (uint32_t i = 0; i < entries; i++) {
+            struct fat_dir *e = (struct fat_dir *)(buf + i * DIR_ENTRY_SIZE);
+            if ((uint8_t)e->name[0] == 0x00) return reported;  /* end-of-dir */
+            if ((uint8_t)e->name[0] == 0xE5) continue;
+            if (e->attr == ATTR_LFN) continue;
+            if (e->attr & (ATTR_VOLUME_ID | ATTR_DIRECTORY)) continue;
+            /* Build a NULL-terminated 8.3 string like "INIT.CDO" or
+             * "INIT" (no extension). Trims trailing spaces from each
+             * half of the on-disk 11-byte name. */
+            char name83[13];
+            int o = 0;
+            for (int k = 0; k < 8; k++) {
+                if (e->name[k] == ' ') break;
+                name83[o++] = e->name[k];
+            }
+            int has_ext = 0;
+            for (int k = 8; k < 11; k++) if (e->name[k] != ' ') { has_ext = 1; break; }
+            if (has_ext) {
+                name83[o++] = '.';
+                for (int k = 8; k < 11; k++) {
+                    if (e->name[k] == ' ') break;
+                    name83[o++] = e->name[k];
+                }
+            }
+            name83[o] = '\0';
+            if (!cb(name83, e->size, user)) return reported + 1;
+            reported++;
+        }
+        uint32_t next;
+        if (read_fat_entry(fs, cluster, &next) != 0) return -1;
+        cluster = next;
+    }
+    return reported;
+}
