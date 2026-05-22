@@ -124,7 +124,8 @@ jobs:
             gcc-aarch64-linux-gnu \
             qemu-system-arm qemu-system-misc \
             qemu-efi-aarch64 \
-            mtools dosfstools
+            mtools dosfstools \
+            ntfs-3g
           # Sanity-check the aarch64 emulator is on PATH; fail loudly if not.
           which qemu-system-aarch64
           qemu-system-aarch64 --version

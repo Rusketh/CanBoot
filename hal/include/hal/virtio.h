@@ -104,6 +104,12 @@ struct canboot_virtio_dev {
  * matches `pci_device_id`. Returns true and fills *out if found. */
 bool canboot_virtio_find(uint16_t pci_device_id, struct canboot_virtio_dev *out);
 
+/* Find the (skip+1)th matching virtio device on the PCI bus. skip=0
+ * is equivalent to canboot_virtio_find. Used by drivers like
+ * virtio-blk to bring up multiple devices of the same kind. */
+bool canboot_virtio_find_nth(uint16_t pci_device_id, uint32_t skip,
+                              struct canboot_virtio_dev *out);
+
 /* Reset device and walk to FEATURES_OK accepting the intersection of
  * `driver_features` and the device-offered set. */
 bool canboot_virtio_negotiate(struct canboot_virtio_dev *dev,

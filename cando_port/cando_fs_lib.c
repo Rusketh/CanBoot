@@ -59,7 +59,10 @@ static struct canboot_disk *get_disk(int idx) {
 }
 
 /* Resolve (diskIdx, partIdx) -> partition. Returns false if either
- * index is out of range. */
+ * index is out of range. When the disk has no partition table at
+ * all (CANBOOT_PART_SCHEME_NONE) and partIdx == 0, synthesise a
+ * partition spanning the entire disk - matches how util-linux and
+ * GPT-less FS tools treat whole-disk filesystems. */
 static bool get_part(int disk_idx, int part_idx,
                      struct canboot_disk **out_d,
                      struct canboot_partition *out_p) {
@@ -67,10 +70,21 @@ static bool get_part(int disk_idx, int part_idx,
     if (!d) return false;
     static struct canboot_partition list[LIST_CAP];
     int n = canboot_part_list(d, list, LIST_CAP);
-    if (n <= 0 || part_idx < 0 || part_idx >= n) return false;
-    *out_d = d;
-    *out_p = list[part_idx];
-    return true;
+    if (n > 0 && part_idx >= 0 && part_idx < n) {
+        *out_d = d;
+        *out_p = list[part_idx];
+        return true;
+    }
+    if (n == 0 && part_idx == 0 && d->block_count > 0) {
+        memset(out_p, 0, sizeof(*out_p));
+        out_p->scheme    = CANBOOT_PART_SCHEME_NONE;
+        out_p->start_lba = 0;
+        out_p->end_lba   = d->block_count - 1;
+        out_p->size_lba  = d->block_count;
+        *out_d = d;
+        return true;
+    }
+    return false;
 }
 
 static const char *detect_fs(struct canboot_disk *d, uint64_t start_lba) {

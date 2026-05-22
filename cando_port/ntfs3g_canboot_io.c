@@ -78,6 +78,7 @@ static int64_t cb_seek(struct ntfs_device *dev, int64_t offset, int whence) {
 static int64_t pread_inner(struct canboot_ntfs_priv *p, void *buf,
                            int64_t count, int64_t offset) {
     if (count <= 0) return 0;
+    if (offset < 0) return -1;
     if ((uint64_t)offset >= p->byte_size) return 0;
     if ((uint64_t)(offset + count) > p->byte_size) {
         count = (int64_t)(p->byte_size - (uint64_t)offset);
@@ -91,7 +92,7 @@ static int64_t pread_inner(struct canboot_ntfs_priv *p, void *buf,
         uint64_t in_lba = abs - lba * bs;
         if (in_lba == 0 && (count - done) >= (int64_t)bs) {
             uint32_t n = (uint32_t)((count - done) / bs);
-            if (n > 64) n = 64;
+            if (n > 32) n = 32;  /* virtio-blk caps at 32 sectors/request */
             if (p->disk->read(p->disk, lba, n, out + done) != 0) return -1;
             done += (int64_t)n * (int64_t)bs;
             continue;
@@ -139,7 +140,7 @@ static int64_t pwrite_inner(struct canboot_ntfs_priv *p, const void *buf,
         uint64_t in_lba = abs - lba * bs;
         if (in_lba == 0 && (count - done) >= (int64_t)bs) {
             uint32_t n = (uint32_t)((count - done) / bs);
-            if (n > 64) n = 64;
+            if (n > 32) n = 32;  /* virtio-blk caps at 32 sectors/request */
             if (p->disk->write(p->disk, lba, n, src + done) != 0) return -1;
             done += (int64_t)n * (int64_t)bs;
             /* invalidate cache for this range */

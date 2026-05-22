@@ -18,12 +18,31 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
+#include <errno.h>
 
 #include "ntfs-3g/volume.h"
 #include "ntfs-3g/dir.h"
 #include "ntfs-3g/inode.h"
 #include "ntfs-3g/attrib.h"
+#include "ntfs-3g/logging.h"
+
+#include <stdarg.h>
+
+static int canboot_ntfs_log(const char *function, const char *file,
+                             int line, uint32_t level, void *data,
+                             const char *format, va_list args) {
+    (void)data; (void)level;
+    char buf[256];
+    int n = vsnprintf(buf, sizeof(buf), format, args);
+    if (n < 0) return 0;
+    if ((size_t)n > sizeof(buf) - 1) n = sizeof(buf) - 1;
+    if (n > 0 && buf[n - 1] == '\n') buf[--n] = '\0';
+    printf("ntfs3g[%s:%d]: %s\n", function ? function : "?", line, buf);
+    (void)file;
+    return n;
+}
 
 #include "hal/disk.h"
 
@@ -37,12 +56,22 @@ static struct ntfs_device *g_devs[HSLOTS];
 
 int canboot_ntfs3g_open(struct canboot_disk *d,
                         uint64_t byte_offset, uint64_t byte_size) {
+    static int log_set;
+    if (!log_set) {
+        ntfs_log_set_handler(canboot_ntfs_log);
+        ntfs_log_set_levels(NTFS_LOG_LEVEL_ERROR | NTFS_LOG_LEVEL_WARNING |
+                            NTFS_LOG_LEVEL_PERROR);
+        log_set = 1;
+    }
     for (int i = 0; i < HSLOTS; i++) {
         if (g_vols[i] == NULL) {
             struct ntfs_device *dev = canboot_ntfs_device_alloc(d, byte_offset, byte_size);
             if (!dev) return -1;
             ntfs_volume *vol = ntfs_device_mount(dev, 0);
             if (!vol) {
+                printf("ntfs3g: mount disk=%s off=%llu failed (errno=%d)\n",
+                       d ? d->name : "(null)",
+                       (unsigned long long)byte_offset, errno);
                 ntfs_device_free(dev);
                 return -1;
             }
@@ -76,6 +105,10 @@ static int rw_helper(int handle, const char *path,
     }
     int64_t got;
     if (write_mode) {
+        /* Truncate first so writes don't leave stale tail bytes from
+         * the previous file content. Best-effort - if truncate fails
+         * we still attempt the write at offset 0. */
+        ntfs_attr_truncate(attr, len);
         got = ntfs_attr_pwrite(attr, 0, len, buf);
     } else {
         got = ntfs_attr_pread(attr, 0, len, buf);

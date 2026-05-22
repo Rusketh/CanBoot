@@ -35,6 +35,26 @@ fi
 mkdir -p "$(dirname "$LOG")"
 : > "$LOG"
 
+# Second disk: a 16 MiB NTFS volume with a known marker file. The
+# init script exercises libntfs-3g read against it via fs.read(1, 0,
+# "probe.txt") and asserts "canboot-ntfs-marker-2026" comes back.
+NTFS_IMG="$(dirname "$LOG")/ntfs-test.img"
+export PATH="/usr/sbin:$PATH"
+if command -v mkfs.ntfs >/dev/null 2>&1; then
+    # Always regenerate so the canboot write probe always starts from
+    # the known marker content; a stale image from a prior run would
+    # already have the post-write payload.
+    rm -f "$NTFS_IMG"
+    bash "$ROOT/scripts/mkdisk-ntfs.sh" "$NTFS_IMG" 16 >/dev/null 2>&1 || rm -f "$NTFS_IMG"
+fi
+NTFS_ARGS=()
+if [ -f "$NTFS_IMG" ]; then
+    NTFS_ARGS=(
+        -drive "if=none,id=hd1,format=raw,file=$NTFS_IMG"
+        -device "virtio-blk-pci,drive=hd1"
+    )
+fi
+
 python3 "$ROOT/tests/sidecars/udp_echo.py"    127.0.0.1 "$UDP_PORT"   >"$(dirname "$LOG")/udp.log"   2>&1 &
 UDP_PID=$!
 python3 "$ROOT/tests/sidecars/http_hello.py"  127.0.0.1 "$HTTP_PORT"  >"$(dirname "$LOG")/http.log"  2>&1 &
@@ -68,6 +88,7 @@ qemu-system-aarch64 \
     -drive if=pflash,format=raw,file="$AAVMF_VARS" \
     -drive if=none,id=hd0,format=raw,file="$IMG" \
     -device virtio-blk-pci,drive=hd0,bootindex=0 \
+    "${NTFS_ARGS[@]}" \
     -device virtio-keyboard-pci \
     -device virtio-gpu-pci \
     -netdev user,id=n0 \
@@ -235,8 +256,18 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'cando ext libs end'
         check 'milestone 17: partition+fs libs registered'
         check 'cando partition.scheme(0) = none'
-        check 'cando fs.detect(0,0) = unknown'
+        check 'cando fs.detect(0,0) = fat32'
         check 'cando part libs end'
+
+        # libntfs-3g end-to-end check, only when the NTFS test image
+        # was attached (host needs mkfs.ntfs + ntfs-3g installed).
+        if [ -f "$NTFS_IMG" ]; then
+            check 'cando fs.detect(1,0) = ntfs'
+            check 'cando fs.label(1,0) = CANNTFS'
+            check 'cando fs.read(1,0,probe.txt) = canboot-ntfs-marker-2026'
+            check 'cando fs.write(1,0,probe.txt) = true'
+            check 'cando fs.read(1,0,probe.txt) after write = canboot-ntfs-write-2026'
+        fi
         check 'cando input poll begin'
         check 'cando input poll end'
 
