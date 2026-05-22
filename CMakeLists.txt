@@ -896,6 +896,7 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
         cando_port/cando_audio_lib.c
         cando_port/minimp3_canboot.c
         hal/audio/audio_stub.c
+        hal/audio/virtio_snd.c
         cando_port/jit_codegen_stub_aarch64.c
         fs/partition.c
         fs/ntfs.c

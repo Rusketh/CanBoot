@@ -15,6 +15,7 @@
  * cando the same way milestones 4-12 did on x86_64.
  */
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
 
@@ -239,6 +240,17 @@ void kmain(struct boot_info *bi) {
      * /init.cdo on the boot disk and verifies the marker string. */
     extern void canboot_m8_disktest(void);
     canboot_m8_disktest();
+
+    /* Milestone 18: virtio-sound audio probe (aarch64 / QEMU virt). */
+    extern bool hal_audio_init(void);
+    extern const char *hal_audio_device_name(void);
+    if (hal_audio_init()) {
+        hal_console_write("canboot: audio device=");
+        hal_console_write(hal_audio_device_name());
+        hal_console_write("\n");
+    } else {
+        hal_console_write("canboot: audio device=none\n");
+    }
 
     /* If the firmware didn't hand us a framebuffer (Debian AAVMF
      * ships without graphics drivers), drive virtio-gpu ourselves so

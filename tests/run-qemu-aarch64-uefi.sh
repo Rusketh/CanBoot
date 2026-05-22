@@ -92,6 +92,9 @@ if ! command -v qemu-system-aarch64 >/dev/null 2>&1; then
 fi
 qemu-system-aarch64 --version >&2 || true
 
+AUDIO_WAV="${AUDIO_WAV:-build-aarch64/canboot-aarch64-uefi-audio.wav}"
+rm -f "$AUDIO_WAV"
+
 qemu-system-aarch64 \
     -machine virt \
     -cpu cortex-a72 \
@@ -109,6 +112,8 @@ qemu-system-aarch64 \
     -device virtio-gpu-pci \
     -netdev user,id=n0 \
     -device virtio-net-pci,netdev=n0,romfile= \
+    -audiodev "wav,id=snd,path=$AUDIO_WAV" \
+    -device virtio-sound-pci,audiodev=snd \
     -serial "file:$LOG" \
     -monitor "unix:$MON_SOCK,server,nowait" \
     >/dev/null 2>"$QEMU_STDERR" &
@@ -394,9 +399,32 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         # samples regardless so scripts work portably against the
         # stub backend.
         check 'cando audio libs begin'
-        check 'cando audio.deviceName ='
+        check 'cando audio.deviceName = virtio-snd'
+        check 'cando audio.present = true'
         check 'cando audio.play wav = true'
         check 'cando audio libs end'
+
+        # Audio capture validation: virtio-snd shovels canboot's
+        # synthesised sine into a host WAV file. The body must have
+        # at least 16 non-zero bytes for us to count it as audible.
+        if [ -f "$AUDIO_WAV" ] && [ "$(stat -c '%s' "$AUDIO_WAV")" -gt 4096 ]; then
+            if python3 -c "
+import sys
+with open('$AUDIO_WAV', 'rb') as f:
+    data = f.read()
+body = data[44:]
+nz = sum(1 for b in body if b != 0)
+sys.exit(0 if nz > 16 else 1)
+" 2>/dev/null; then
+                echo "milestone 18: audio capture has non-silent body ($(stat -c '%s' "$AUDIO_WAV") bytes)"
+            else
+                echo "smoke test FAILED: audio wav body is silent (no non-zero samples)" >&2
+                exit 1
+            fi
+        else
+            echo "smoke test FAILED: audio wav missing or empty" >&2
+            exit 1
+        fi
 
         check 'cando input poll begin'
         check 'cando input poll end'
