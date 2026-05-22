@@ -85,6 +85,17 @@ Landed so far:
   shims in `cando_port/shims/` (openssl, netdb, netinet, sys/mman,
   sys/socket, sys/ioctl, sys/utsname, sys/sysinfo, dirent, dlfcn,
   termios) and POSIX function stubs in `cando_port/cando_stubs.c`.
+- **Milestone 12.** CanDo-facing input module. `cando_port/cando_input_lib.c`
+  exposes `input.{poll, waitKey, flush, events}` on top of the
+  milestone-4 HAL input queue; `waitKey` cooperatively pumps the HAL
+  devices for up to the requested ms, returning the key's ASCII code
+  or null on timeout. `init.cdo` now extends past the display painting
+  into an input phase: it flushes any stale events, calls
+  `input.waitKey(8000)` three times, and prints each received key.
+  CI smoke tests already injected keystrokes for the milestone-4
+  pre-cando phase; a second injection wave triggered by the "cando
+  input poll begin" marker sends `x y z` so the cando script receives
+  them and the serial log carries `cando got key1: 120` / `121` / `122`.
 - **Milestone 11.** CanDo-facing display module. `hal/include/hal/display.h`
   + `hal/display/display.c` extend the milestone-3 framebuffer painter
   with pixel/line/text/image/copyRect/getPixel primitives and an 8x8

@@ -31,6 +31,7 @@ set(CANBOOT_KERNEL_COMMON
     kernel/canboot_test_ca.c
     cando_port/cando_stubs.c
     cando_port/cando_display_lib.c
+    cando_port/cando_input_lib.c
     fs/iso9660.c
     fs/fat32.c
     hal/disk/disk.c

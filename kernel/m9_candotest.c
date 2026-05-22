@@ -23,8 +23,10 @@ void        cando_close(CandoVM *vm);
 int         cando_dostring(CandoVM *vm, const char *src, const char *name);
 const char *cando_errmsg(CandoVM *vm);
 void        canboot_cando_open_displaylib(CandoVM *vm);
+void        canboot_cando_open_inputlib(CandoVM *vm);
 
 #include "hal/display.h"
+#include "hal/input.h"
 
 static int load_init_cdo(char *out, uint32_t out_size, uint32_t *out_len) {
     uint32_t nd = hal_disk_count();
@@ -79,6 +81,9 @@ void canboot_m9_candotest(void) {
     canboot_cando_open_displaylib(vm);
     printf("milestone 11: display lib registered (%dx%d)\n",
            hal_display_width(), hal_display_height());
+
+    canboot_cando_open_inputlib(vm);
+    printf("milestone 12: input lib registered\n");
 
     /* Milestone 10: load /init.cdo from disk and run it through cando_dostring. */
     static char init_src[8192];

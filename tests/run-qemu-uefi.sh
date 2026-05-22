@@ -114,6 +114,27 @@ for k in ("a", "b", "ret"):
     time.sleep(0.3)
 sock.close()
 PY
+
+    # Second wave for milestone 12: cando's input.waitKey loop.
+    for _ in $(seq 1 200); do
+        if grep -q 'cando input poll begin' "$LOG" 2>/dev/null; then
+            break
+        fi
+        sleep 0.2
+    done
+    python3 - "$MON_SOCK" <<'PY' 2>/dev/null || true
+import socket, sys, time
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+try:
+    sock.connect(sys.argv[1])
+except Exception:
+    sys.exit(0)
+time.sleep(0.3)
+for k in ("x", "y", "z"):
+    sock.sendall(("sendkey " + k + "\n").encode())
+    time.sleep(0.4)
+sock.close()
+PY
 ) &
 INJECTOR_PID=$!
 
@@ -133,19 +154,32 @@ deadline=$(( $(date +%s) + TIMEOUT ))
 while [ "$(date +%s)" -lt "$deadline" ]; do
     if [ -z "$SCREENDUMP_DONE" ] && \
        tr -d '\r' < "$LOG" 2>/dev/null | grep -q 'init.cdo painted display'; then
-        python3 - "$MON_SOCK" "$WORK/screen.ppm" <<'PY' 2>/dev/null || true
-import socket, sys, time
+        echo "smoke: paint marker seen, sending screendump"
+        python3 - "$MON_SOCK" "$WORK/screen.ppm" <<'PY' || true
+import socket, sys, time, os
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 try:
     s.connect(sys.argv[1])
+except Exception as e:
+    print("screendump connect failed:", e, file=sys.stderr); sys.exit(0)
+s.settimeout(5)
+time.sleep(0.3)
+try:
+    s.recv(4096)
 except Exception:
-    sys.exit(0)
-time.sleep(0.2)
+    pass
 s.sendall(("screendump " + sys.argv[2] + "\n").encode())
-time.sleep(0.5)
+for _ in range(40):
+    time.sleep(0.25)
+    if os.path.exists(sys.argv[2]) and os.path.getsize(sys.argv[2]) > 4096:
+        break
 s.close()
 PY
-        sleep 1
+        if [ -f "$WORK/screen.ppm" ]; then
+            echo "smoke: screendump $(stat -c '%s' "$WORK/screen.ppm") bytes"
+        else
+            echo "smoke: screendump file NOT created" >&2
+        fi
         SCREENDUMP_DONE=1
     fi
 
@@ -184,6 +218,12 @@ PY
         check 'milestone 10: init.cdo executed ok'
         check 'milestone 11: display lib registered'
         check 'milestone 11: display test ok'
+        check 'milestone 12: input lib registered'
+        check 'cando input poll begin'
+        check 'cando got key1: 120'
+        check 'cando got key2: 121'
+        check 'cando got key3: 122'
+        check 'cando input poll end'
 
         if [ -f "$WORK/screen.ppm" ]; then
             EXPECTED=$(cat "$ROOT/tests/refs/m11-uefi.ppm.sha256" 2>/dev/null | head -1)
