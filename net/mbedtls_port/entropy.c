@@ -1,7 +1,14 @@
 /*
  * Hardware entropy source for Mbed TLS.
  *
- * Tries RDSEED, then RDRAND, then falls back to a TSC-jitter bit-mixer.
+ * x86_64: tries RDSEED, then RDRAND, then falls back to a TSC-jitter
+ *   bit-mixer. RDRAND/RDSEED are CPUID-gated so we don't #UD on
+ *   QEMU's qemu64 CPU.
+ *
+ * aarch64: cortex-a72 (the QEMU virt default) predates FEAT_RNG
+ *   (ARMv8.5+), so RNDR/RNDRSS aren't available. We always use a
+ *   CNTVCT_EL0 jitter mixer; a future patch can probe ID_AA64ISAR0_EL1.
+ *
  * Mbed TLS's MBEDTLS_ENTROPY_HARDWARE_ALT path calls this until it has
  * enough bytes to seed CTR_DRBG; it's not the long-term RNG (CTR_DRBG
  * is) so even a modest mixer is acceptable for boot-time use.
@@ -13,8 +20,8 @@
 
 #include "mbedtls/entropy.h"
 
-/* CPUID-based feature detection so we don't #UD on QEMU's qemu64 CPU
- * (no RDRAND, no RDSEED). Detected once on first call. */
+#if defined(__x86_64__)
+
 static int g_features_probed;
 static int g_has_rdrand;
 static int g_has_rdseed;
@@ -34,11 +41,11 @@ static void probe_features(void) {
 
     if (max_leaf >= 1) {
         cpuid(1, 0, &a, &b, &c, &d);
-        g_has_rdrand = (c & (1u << 30)) != 0;   /* CPUID.1:ECX[30] */
+        g_has_rdrand = (c & (1u << 30)) != 0;
     }
     if (max_leaf >= 7) {
         cpuid(7, 0, &a, &b, &c, &d);
-        g_has_rdseed = (b & (1u << 18)) != 0;   /* CPUID.7.0:EBX[18] */
+        g_has_rdseed = (b & (1u << 18)) != 0;
     }
     g_features_probed = 1;
 }
@@ -63,21 +70,50 @@ static inline int rdrand64(uint64_t *out) {
     return 1;
 }
 
-static inline uint64_t rdtsc(void) {
+static inline uint64_t arch_clock(void) {
     uint32_t lo, hi;
     __asm__ volatile ("rdtsc" : "=a"(lo), "=d"(hi));
     return ((uint64_t)hi << 32) | lo;
 }
 
+static inline void arch_relax(void) {
+    __asm__ volatile ("pause");
+}
+
+#elif defined(__aarch64__)
+
+static int g_features_probed;
+/* RNDR / RNDRSS detection deferred; QEMU virt + cortex-a72 lacks
+ * FEAT_RNG so we always fall through to the jitter mixer. */
+
+static inline int rdseed64(uint64_t *out) { (void)out; return 0; }
+static inline int rdrand64(uint64_t *out) { (void)out; return 0; }
+
+static void probe_features(void) { g_features_probed = 1; }
+
+static inline uint64_t arch_clock(void) {
+    uint64_t v;
+    __asm__ volatile ("mrs %0, cntvct_el0" : "=r"(v));
+    return v;
+}
+
+static inline void arch_relax(void) {
+    __asm__ volatile ("yield");
+}
+
+#else
+#error "unsupported architecture for entropy"
+#endif
+
 static uint64_t jitter_word(void) {
-    /* Mix many short rdtsc deltas into a single uint64_t. The HLT-less
-     * "pause" loop varies subtly with cache/TLB/branch state, giving
-     * a few bits of entropy per iteration on real hardware. */
-    uint64_t acc = rdtsc();
+    /* Mix many short clock deltas into a single uint64_t. The relax
+     * loop varies subtly with cache/TLB/branch state, giving a few
+     * bits of entropy per iteration. */
+    uint64_t acc = arch_clock();
     for (int i = 0; i < 64; i++) {
-        uint64_t t0 = rdtsc();
-        for (volatile int j = 0; j < 100; j++) { __asm__ volatile ("pause"); }
-        uint64_t t1 = rdtsc();
+        uint64_t t0 = arch_clock();
+        for (volatile int j = 0; j < 100; j++) { arch_relax(); }
+        uint64_t t1 = arch_clock();
         acc = (acc << 1) ^ (acc >> 63) ^ (t1 - t0);
     }
     return acc;

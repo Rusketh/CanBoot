@@ -225,6 +225,12 @@ void kmain(struct boot_info *bi) {
      * handles virtio-net init and lwip_init internally. */
     extern void canboot_m6_nettest(void);
     canboot_m6_nettest();
+
+    /* Milestone 7: Mbed TLS over the now-running lwIP stack. Full
+     * TLS 1.2 handshake against the HTTPS sidecar plus a session-
+     * ticket resumption pass. */
+    extern void canboot_m7_tlstest(void);
+    canboot_m7_tlstest();
 #endif
 
     hal_console_write("canboot: aarch64 hello world boot complete\n");

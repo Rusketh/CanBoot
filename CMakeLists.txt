@@ -351,7 +351,7 @@ add_custom_target(canboot-info ALL
 # (MBEDTLS_FATAL_WARNINGS=OFF) because freestanding flags trip a few of
 # Mbed TLS's own warnings that we have no business fixing.
 # ---------------------------------------------------------------------------
-if(CANBOOT_ARCH STREQUAL "x86_64")
+if(CANBOOT_ARCH STREQUAL "x86_64" OR CANBOOT_ARCH STREQUAL "aarch64")
     set(MBEDTLS_DIR ${CMAKE_SOURCE_DIR}/vendor/mbedtls)
     set(MBEDTLS_CONFIG_FILE "" CACHE STRING "" FORCE)
     set(MBEDTLS_USER_CONFIG_FILE
@@ -367,18 +367,27 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
     set(GEN_FILES ON CACHE BOOL "" FORCE)
 
     # -D_Thread_local= flattens cando's four _Thread_local statics
-    # into plain globals. -fPIC defaults gcc to General Dynamic TLS,
-    # which requires a runtime __tls_get_addr resolver we don't ship
-    # and produces JUMP_SLOT/DTPMOD relocations the EFI loader can't
-    # process. local-exec (the obvious alternative) needs TPOFF32
-    # relocations that -shared rejects. We're single-threaded anyway -
-    # the cooperative scheduler will switch _Thread_local back on once
-    # preemption arrives, if it's even still needed.
-    add_compile_options(
-        -ffreestanding -fno-stack-protector -fno-stack-check
-        -mno-red-zone -fPIC -fcf-protection=none
-        -D_Thread_local= -D__thread=
-    )
+    # into plain globals (mbedtls doesn't use TLS itself in our config
+    # but we keep the same flags so the EFI link sees identical TUs).
+    if(CANBOOT_ARCH STREQUAL "x86_64")
+        add_compile_options(
+            -ffreestanding -fno-stack-protector -fno-stack-check
+            -mno-red-zone -fPIC -fcf-protection=none
+            -D_Thread_local= -D__thread=
+        )
+    else()
+        # On aarch64-cross, /usr/include is the host glibc's amd64
+        # tree - which references arch-specific headers like
+        # bits/libc-header-start.h that only exist via the aarch64
+        # multiarch dir we don't install. Route mbedtls through
+        # picolibc's headers instead, ahead of the system search path.
+        include_directories(BEFORE SYSTEM ${PICOLIBC_INCLUDE})
+        add_compile_options(
+            -ffreestanding -fno-stack-protector -fno-stack-check
+            -fPIC
+            -D_Thread_local= -D__thread=
+        )
+    endif()
     add_subdirectory(${MBEDTLS_DIR} ${CMAKE_BINARY_DIR}/mbedtls EXCLUDE_FROM_ALL)
 endif()
 # kernel/ sources with PIC + short-wchar + EFI include path, links them
@@ -588,6 +597,8 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
         kernel/fb.c
         kernel/m5_selftest.c
         kernel/m6_nettest.c
+        kernel/m7_tlstest.c
+        kernel/canboot_test_ca.c
         hal/console/serial_aarch64.c
         hal/pci/pci_aarch64.c
         hal/virtio/virtio_pci.c
@@ -595,6 +606,9 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
         hal/input/virtio_input.c
         hal/net/virtio_net.c
         net/lwip_port/sys_arch.c
+        net/mbedtls_port/entropy.c
+        net/mbedtls_port/inet_pton.c
+        net/mbedtls_port/lwip_bio.c
         rt/picolibc_port/syscalls.c
         rt/pthread_stub/pthread.c
         ${CANBOOT_LWIP_SOURCES}
@@ -620,8 +634,11 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
                 -I${CMAKE_SOURCE_DIR}/kernel/include
                 -I${CMAKE_SOURCE_DIR}/rt/pthread_stub/include
                 -I${CMAKE_SOURCE_DIR}/net/lwip_port/include
+                -I${CMAKE_SOURCE_DIR}/net/mbedtls_port/include
+                -I${CMAKE_SOURCE_DIR}/net/mbedtls_port
                 -I${CMAKE_SOURCE_DIR}
                 -I${LWIP_DIR}/src/include
+                -I${MBEDTLS_DIR}/include
                 -I${PICOLIBC_INCLUDE}
                 -DCANBOOT_AARCH64_EFI_BUILD=1
                 -D_GNU_SOURCE
@@ -655,8 +672,12 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
             ${GNUEFI_AARCH64_CRT0} ${EFI_AARCH64_OBJS}
             -o ${EFI_SO}
             -L${GNUEFI_INSTALL}/lib
-            --start-group -lefi -lgnuefi ${PICOLIBC_LIB} ${CANBOOT_AARCH64_LIBGCC} --end-group
+            --start-group
+                $<TARGET_FILE:mbedtls> $<TARGET_FILE:mbedx509> $<TARGET_FILE:mbedcrypto>
+                -lefi -lgnuefi ${PICOLIBC_LIB} ${CANBOOT_AARCH64_LIBGCC}
+            --end-group
         DEPENDS ${EFI_AARCH64_OBJS} gnu_efi_ext picolibc_ext
+                mbedtls mbedx509 mbedcrypto
         COMMENT "LD  ${EFI_NAME}.so"
         VERBATIM
     )

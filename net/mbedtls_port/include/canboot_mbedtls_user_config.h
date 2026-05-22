@@ -12,6 +12,15 @@
 #ifndef CANBOOT_MBEDTLS_USER_CONFIG_H
 #define CANBOOT_MBEDTLS_USER_CONFIG_H
 
+/* Hardware AES accelerators. On x86_64 AESNI compiles fine under the
+ * default freestanding flags; on aarch64 the AESCE path needs
+ * -march=armv8-a+crypto+sha2 which we don't pass (it'd cascade through
+ * the rest of the libc/kernel build). Disable AESCE on aarch64 so
+ * mbedtls falls back to the portable C AES implementation. */
+#if defined(__aarch64__)
+#undef MBEDTLS_AESCE_C
+#endif
+
 /* POSIX dependencies */
 #undef MBEDTLS_NET_C
 #undef MBEDTLS_FS_IO
