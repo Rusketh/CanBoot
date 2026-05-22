@@ -40,6 +40,8 @@ if [ ! -f "$DISK_IMG" ]; then
     "$ROOT/scripts/mkdisk-fat32.sh" "$DISK_IMG" >/dev/null
 fi
 
+AUDIO_WAV="${AUDIO_WAV:-build/canboot-bios-audio.wav}"
+rm -f "$AUDIO_WAV"
 qemu-system-x86_64 \
     -machine q35 \
     -boot order=dc \
@@ -49,6 +51,9 @@ qemu-system-x86_64 \
     -device virtio-keyboard-pci \
     -netdev user,id=n0 \
     -device virtio-net-pci,netdev=n0 \
+    -audiodev "wav,id=snd,path=$AUDIO_WAV" \
+    -device intel-hda \
+    -device hda-duplex,audiodev=snd \
     -serial "file:$LOG" \
     -monitor "unix:$MON_SOCK,server,nowait" \
     -display none \
@@ -245,6 +250,36 @@ PY
             fi
         else
             echo "smoke test FAILED: m11 screendump missing" >&2
+            exit 1
+        fi
+
+        # Milestone 18 audio assertions. canboot's HDA driver must
+        # bind successfully (cando reports the device name) and the
+        # captured WAV must contain non-silent samples (proof the
+        # kernel pushed our sine tone into the DMA ring and the
+        # device drained it through to the host wav backend).
+        check 'cando audio.deviceName = intel-hda'
+        check 'cando audio.present = true'
+        check 'cando audio.play wav = true'
+        if [ -f "$AUDIO_WAV" ] && [ "$(stat -c '%s' "$AUDIO_WAV")" -gt 4096 ]; then
+            # Skip the RIFF/WAVE header and look for at least one
+            # non-zero PCM sample in the body.
+            if python3 -c "
+import sys
+with open('$AUDIO_WAV', 'rb') as f:
+    data = f.read()
+# Header is at least 44 bytes; scan from offset 44 onwards.
+body = data[44:]
+nz = sum(1 for b in body if b != 0)
+sys.exit(0 if nz > 16 else 1)
+" 2>/dev/null; then
+                echo "milestone 18: audio capture has non-silent body ($(stat -c '%s' "$AUDIO_WAV") bytes)"
+            else
+                echo "smoke test FAILED: audio wav body is silent (no non-zero samples)" >&2
+                exit 1
+            fi
+        else
+            echo "smoke test FAILED: audio wav missing or empty" >&2
             exit 1
         fi
 

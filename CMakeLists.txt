@@ -295,6 +295,7 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
         ${CANBOOT_NTFS3G_SOURCES}
         ${CANBOOT_NTFS3G_MKFS_SOURCES}
         ${CANBOOT_LWEXT4_SOURCES}
+        hal/audio/intel_hda.c
     )
 elseif(CANBOOT_ARCH STREQUAL "aarch64")
     # Minimal first-cut aarch64 build: bootstrap + entry trampoline +
@@ -617,6 +618,7 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
             ${CANBOOT_NTFS3G_SOURCES}
             ${CANBOOT_NTFS3G_MKFS_SOURCES}
             ${CANBOOT_LWEXT4_SOURCES}
+            hal/audio/intel_hda.c
         )
 
         set(EFI_OBJS "")

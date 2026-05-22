@@ -62,6 +62,8 @@ if [ ! -f "$DISK_IMG" ]; then
     "$ROOT/scripts/mkdisk-fat32.sh" "$DISK_IMG" >/dev/null
 fi
 
+AUDIO_WAV="${AUDIO_WAV:-build/canboot-uefi-audio.wav}"
+rm -f "$AUDIO_WAV"
 QEMU_ARGS=(
     -machine q35
     -cdrom "$ISO"
@@ -70,6 +72,9 @@ QEMU_ARGS=(
     -device virtio-keyboard-pci
     -netdev user,id=n0
     -device virtio-net-pci,netdev=n0
+    -audiodev "wav,id=snd,path=$AUDIO_WAV"
+    -device intel-hda
+    -device hda-duplex,audiodev=snd
     -serial "file:$LOG"
     -monitor "unix:$MON_SOCK,server,nowait"
     -display none
@@ -272,6 +277,29 @@ PY
             fi
         else
             echo "smoke test FAILED: m11 screendump missing" >&2
+            exit 1
+        fi
+
+        # Milestone 18 audio assertions (same shape as the BIOS test).
+        check 'cando audio.deviceName = intel-hda'
+        check 'cando audio.present = true'
+        check 'cando audio.play wav = true'
+        if [ -f "$AUDIO_WAV" ] && [ "$(stat -c '%s' "$AUDIO_WAV")" -gt 4096 ]; then
+            if python3 -c "
+import sys
+with open('$AUDIO_WAV', 'rb') as f:
+    data = f.read()
+body = data[44:]
+nz = sum(1 for b in body if b != 0)
+sys.exit(0 if nz > 16 else 1)
+" 2>/dev/null; then
+                echo "milestone 18: audio capture has non-silent body ($(stat -c '%s' "$AUDIO_WAV") bytes)"
+            else
+                echo "smoke test FAILED: audio wav body is silent (no non-zero samples)" >&2
+                exit 1
+            fi
+        else
+            echo "smoke test FAILED: audio wav missing or empty" >&2
             exit 1
         fi
 
