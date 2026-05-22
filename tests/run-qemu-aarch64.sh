@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# Boot the aarch64 kernel ELF directly via QEMU virt's -kernel path
-# (no UEFI/ISO yet on aarch64) and assert the milestone-1-equivalent
-# 'ok' marker appears on PL011 serial within TIMEOUT seconds.
+# Boot the aarch64 raw kernel image via QEMU virt's -kernel path and
+# assert the milestone-3 chain ('kmain reached' -> boot_info dump ->
+# fdt-derived mmap -> handshake -> ok) appears on PL011 serial within
+# TIMEOUT seconds. The kernel must be the .bin (raw image carrying the
+# arm64 boot header) so QEMU loads us as a Linux-flavoured kernel and
+# passes the FDT phys addr in x0.
 
 set -euo pipefail
 
-ELF="${1:-build-aarch64/canboot-aarch64.elf}"
+ELF="${1:-build-aarch64/canboot-aarch64.bin}"
 LOG="${LOG:-build-aarch64/qemu-aarch64.log}"
 TIMEOUT="${TIMEOUT:-60}"
 
@@ -65,8 +68,19 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
             fi
         }
         check 'canboot: kmain reached (aarch64)'
-        check 'canboot: handshake confirmed (aarch64 milestone-1)'
+        check 'canboot: boot_info v1 source=direct-kernel'
+        check 'canboot: mmap entries='
+        check 'canboot: platform-tables='
+        check 'canboot: handshake confirmed (aarch64 milestone-3)'
         check 'canboot: aarch64 hello world boot complete'
+
+        # FDT walker must have found at least one usable mmap entry
+        # (QEMU virt always exposes the main RAM region).
+        if ! grep -qE 'canboot:   \[0\] base=0x[0-9a-f]+ len=0x[0-9a-f]+ type=usable' <<<"$stripped"; then
+            echo "smoke test FAILED: fdt walker produced no usable mmap entry" >&2
+            echo "$stripped" | sed 's/^/  | /' >&2
+            exit 1
+        fi
 
         echo "smoke test passed; serial log:"
         echo "$stripped" | sed 's/^/  | /'

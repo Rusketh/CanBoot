@@ -84,7 +84,27 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'canboot: uefi entry reached (aarch64)'
         check 'canboot: calling ExitBootServices (aarch64)'
         check 'canboot: kmain reached (aarch64)'
-        check 'canboot: handshake confirmed (aarch64 milestone-1)'
+        check 'canboot: boot_info v1 source=uefi'
+        check 'canboot: mmap entries='
+        check 'canboot: platform-tables='
+        check 'canboot: handshake confirmed (aarch64 milestone-3)'
+
+        # Framebuffer path: Debian/Ubuntu AAVMF ships a stripped firmware
+        # build with no GOP-producing drivers, so the loader's
+        # LocateProtocol(GOP) returns NOT_FOUND and the kmain reports
+        # "fb = none". We still verify the kmain's fb branch ran at all
+        # (one of the two messages must appear), and prefer the painted
+        # path when GOP is available.
+        if ! grep -qE 'canboot: (fb rgb addr=|fb = none)' <<<"$stripped"; then
+            echo "smoke test FAILED: kmain never entered the fb branch" >&2
+            echo "$stripped" | sed 's/^/  | /' >&2
+            exit 1
+        fi
+        if grep -q 'canboot: framebuffer painted' <<<"$stripped"; then
+            echo "(framebuffer was provided by AAVMF and painted)" >&2
+        else
+            echo "(AAVMF reported no GOP; framebuffer path validated only via 'fb = none' branch)" >&2
+        fi
 
         echo "smoke test passed; serial log:"
         echo "$stripped" | sed 's/^/  | /'
