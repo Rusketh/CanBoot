@@ -17,6 +17,10 @@
 
 #include "hal/input.h"
 
+/* Cando audio mixer pump - keep playback going while scripts are
+ * stuck inside input.waitKey loops. */
+extern void canboot_audio_pump_default(void);
+
 #include "core/value.h"
 #include "vm/vm.h"
 #include "vm/bridge.h"
@@ -62,6 +66,7 @@ static int in_wait_key(CandoVM *vm, int argc, CandoValue *args) {
     uint64_t deadline = rdtsc_local() + (hz * (uint64_t)timeout_ms) / 1000ull;
     while (rdtsc_local() < deadline) {
         hal_input_pump();
+        canboot_audio_pump_default();
         c = hal_input_getc();
         if (c >= 0) {
             cando_vm_push(vm, cando_number((f64)c));

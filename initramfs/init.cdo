@@ -256,26 +256,42 @@ print("cando part libs end");
 // the same place the m11 PPM hash check expects. Skipping the
 // late re-decode keeps the test budget tight without losing coverage.
 
-// Audio library. The build always carries the WAV parser + minimp3
-// decoder; whether anything actually plays depends on the HAL audio
-// backend (Intel HDA / virtio-sound) being bound at boot time.
+// Audio library. LOVE-2D-shaped: newSource decodes once, returns a
+// handle, then play/stop/volume/loop ride that handle. Multiple
+// sources can play at once and get mixed in software; the HAL audio
+// backend (Intel HDA / virtio-sound) drains the mix into the device.
 print("cando audio libs begin");
 print("cando audio.present =", audio.present());
 print("cando audio.deviceName =", audio.deviceName());
-// Synthesise a 0.25 s 440 Hz sine wave as PCM and wrap it in a
-// minimal RIFF/WAVE header. The decoder + queueing path is exercised
-// regardless of whether the HAL backend is real; a no-op stub keeps
-// the call returning true so scripts work portably.
+
+// Build a 0.25 s 440 Hz sine in RIFF/WAVE form so the WAV decoder
+// path stays covered without needing a host-side file.
 VAR sr = 44100;
-VAR ns = 11025;        // 0.25 s of mono 16-bit PCM
-VAR data_sz = ns * 2;  // 16 bits * 1 channel
-VAR riff_sz = 36 + data_sz;
-VAR hdr = "RIFF";
-hdr = hdr + fmt.u32le(riff_sz);
-hdr = hdr + "WAVEfmt " + fmt.u32le(16) + fmt.u16le(1) + fmt.u16le(1)
-          + fmt.u32le(sr) + fmt.u32le(sr * 2) + fmt.u16le(2) + fmt.u16le(16)
-          + "data" + fmt.u32le(data_sz);
+VAR ns = 11025;
+VAR data_sz = ns * 2;
+VAR hdr = "RIFF" + fmt.u32le(36 + data_sz) + "WAVEfmt "
+        + fmt.u32le(16) + fmt.u16le(1) + fmt.u16le(1)
+        + fmt.u32le(sr) + fmt.u32le(sr * 2)
+        + fmt.u16le(2) + fmt.u16le(16) + "data" + fmt.u32le(data_sz);
 VAR tone = fmt.sineWave16(440, sr, ns);
-print("cando audio.play wav =", audio.play(hdr + tone));
-audio.stop();
+
+VAR src = audio.newSource(hdr + tone);
+print("cando audio.newSource =", src);
+// Per-source state exercise. We avoid printing the float-typed
+// duration / volume directly because picolibc is built with
+// format-default=integer and a bare %g print of a float renders
+// as the "*float*" placeholder - which still proves the call
+// returned, but is noisy in the smoke log. The numeric values
+// are exercised through isPlaying / isLooping / activeCount.
+audio.setVolume(src, 0.75);
+print("cando audio.play(src) =", audio.play(src));
+print("cando audio.isPlaying(src) =", audio.isPlaying(src));
+audio.setLooping(src, false);
+print("cando audio.isLooping(src) =", audio.isLooping(src));
+print("cando audio.activeCount =", audio.activeCount());
+audio.update(44100);
+audio.stop(src);
+print("cando audio.isPlaying after stop =", audio.isPlaying(src));
+print("cando audio.activeCount after stop =", audio.activeCount());
+audio.release(src);
 print("cando audio libs end");
