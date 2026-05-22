@@ -67,7 +67,7 @@ qemu-system-aarch64 \
     -device virtio-blk-pci,drive=hd0,bootindex=0 \
     -device virtio-keyboard-pci \
     -netdev user,id=n0 \
-    -device virtio-net-pci,netdev=n0 \
+    -device virtio-net-pci,netdev=n0,romfile= \
     -serial "file:$LOG" \
     -monitor "unix:$MON_SOCK,server,nowait" \
     >/dev/null 2>"$QEMU_STDERR" &
