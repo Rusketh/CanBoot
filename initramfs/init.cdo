@@ -150,3 +150,28 @@ print("cando fb.flush ok");
 print("cando fmt.sprintf =", fmt.sprintf("hex=%x dec=%d str=%s", 4660, 42, "hi"));
 
 print("cando ext libs end");
+
+// ---- Milestone 17: partition tables + multi-FS ----------------------
+
+print("cando part libs begin");
+
+// The smoke disk is whole-disk FAT32 (no MBR/GPT). partition.scheme
+// reports "none" in that case but the lib being callable + correct
+// is the proof point. Future PRs that add a second blank disk will
+// exercise create/delete/resize end-to-end.
+print("cando partition.scheme(0) =", partition.scheme(0));
+print("cando partition.count(0) =", partition.count(0));
+
+// fs.* operates on (disk, partition). With no scheme, partIdx=0 has
+// no valid partition entry to point at - we get "unknown".
+print("cando fs.detect(0,0) =", fs.detect(0, 0));
+
+// Full lifecycle test (initGpt -> create -> mkfs -> resize -> delete)
+// requires a second blank disk. The current virtio-blk driver only
+// brings up one device per PCI ID; multi-disk support lands when we
+// extend the transport with a "find from PCI cursor" pass. Until
+// then, the partition + fs libs are exercised as callable APIs only.
+print("cando disk count =", disk.count());
+print("cando lifecycle test deferred (single virtio-blk)");
+
+print("cando part libs end");

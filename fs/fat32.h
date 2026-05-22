@@ -49,4 +49,13 @@ typedef bool (*canboot_fat32_iter_fn)(const char *name83, uint32_t size, void *u
 int  canboot_fat32_list_root(struct canboot_fat32 *fs,
                               canboot_fat32_iter_fn cb, void *user);
 
+/* Write a fresh FAT32 onto the disk region starting at start_lba and
+ * spanning size_lba sectors. Picks sectors-per-cluster automatically
+ * from the volume size table the FAT32 spec recommends. The fresh FS
+ * gets one empty cluster as the root directory; no files. Returns 0
+ * on success, -1 on failure (e.g. partition too small for FAT32). */
+int  canboot_fat32_format(struct canboot_disk *d,
+                           uint64_t start_lba, uint64_t size_lba,
+                           const char *label_or_null);
+
 #endif /* CANBOOT_FS_FAT32_H */
