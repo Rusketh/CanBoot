@@ -300,7 +300,7 @@ set_source_files_properties(${CANBOOT_NTFS3G_SOURCES} PROPERTIES
 #  - -fcommon so tentative defs across mkntfs.c + sd.c don't conflict
 #    (the upstream relies on the pre-C99 behaviour).
 set_source_files_properties(${CANBOOT_NTFS3G_MKFS_SOURCES} PROPERTIES
-    COMPILE_FLAGS "-include ${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_canboot_shim.h -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/ntfsprogs -I${CMAKE_SOURCE_DIR}/cando_port/shims -DCANBOOT_MKNTFS=1 -Dmain=mkntfs_main_canboot -fcommon -DHAVE_CONFIG_H=1 -w"
+    COMPILE_FLAGS "-include ${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_canboot_shim.h -include ${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_mkntfs_main_rename.h -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/ntfsprogs -I${CMAKE_SOURCE_DIR}/cando_port/shims -DCANBOOT_MKNTFS=1 -fno-plt -fvisibility=hidden -fcommon -DHAVE_CONFIG_H=1 -w"
 )
 set_source_files_properties(cando_port/ntfs3g_canboot_io.c cando_port/ntfs3g_canboot_glue.c PROPERTIES
     COMPILE_FLAGS "-include ${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_canboot_shim.h -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g -DHAVE_CONFIG_H=1 -w"
@@ -580,7 +580,9 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
                     -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g
                     -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/ntfsprogs
                     -DCANBOOT_MKNTFS=1
-                    -Dmain=mkntfs_main_canboot
+                    "-include" "${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_mkntfs_main_rename.h"
+                    -fno-plt
+                    -fvisibility=hidden
                     -fcommon
                     -DHAVE_CONFIG_H=1
                     -w
@@ -803,6 +805,7 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
         fs/ntfs.c
         kernel/env.c
         ${CANBOOT_NTFS3G_SOURCES}
+        ${CANBOOT_NTFS3G_MKFS_SOURCES}
         ${CANBOOT_LWIP_SOURCES}
         ${CANBOOT_CANDO_AARCH64_SOURCES}
     )
@@ -825,6 +828,21 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
                 -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot
                 -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include
                 -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g
+                -DHAVE_CONFIG_H=1
+                -w
+            )
+        elseif(_src_abs MATCHES "/ntfsprogs/")
+            set(_extra_flags
+                "-include" "${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_canboot_shim.h"
+                "-include" "${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_mkntfs_main_rename.h"
+                -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot
+                -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include
+                -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g
+                -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/ntfsprogs
+                -DCANBOOT_MKNTFS=1
+                -fno-plt
+                -fvisibility=hidden
+                -fcommon
                 -DHAVE_CONFIG_H=1
                 -w
             )

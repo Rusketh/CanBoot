@@ -31,6 +31,35 @@ static void pl011_write(const char *s) {
 
 void kmain(struct boot_info *bi);
 
+/* AAVMF hands us a relatively small (~128 KiB) boot-services stack.
+ * Cando + mkntfs + libntfs (volume bring-up, $Bitmap walk, $UpCase
+ * generation, MFT record assembly) all need substantial stack. Since
+ * cando is the only thread of execution after kmain we give it as
+ * much as the machine reasonably can - 32 MiB out of the ~506 MiB
+ * QEMU virt reports usable. Bumping further is just a #define away
+ * once we discover a workload that needs it. */
+#define CANBOOT_AARCH64_STACK_BYTES (32u * 1024u * 1024u)
+static __attribute__((aligned(64)))
+unsigned char canboot_aarch64_main_stack[CANBOOT_AARCH64_STACK_BYTES];
+
+static __attribute__((noreturn))
+void switch_to_main_stack(struct boot_info *bi) {
+    unsigned long top = (unsigned long)(canboot_aarch64_main_stack
+                                        + CANBOOT_AARCH64_STACK_BYTES);
+    top &= ~(unsigned long)15;
+    __asm__ volatile (
+        "mov sp, %0\n\t"
+        "mov x0, %1\n\t"
+        "bl  kmain\n\t"
+        "1: wfe\n\t"
+        "b   1b\n\t"
+        :
+        : "r"(top), "r"(bi)
+        : "memory", "x0", "x30"
+    );
+    __builtin_unreachable();
+}
+
 static struct boot_info g_boot_info;
 
 /* DEVICE_TREE_GUID per UEFI spec (b1b621d5-f19c-41a5-830b-d9152c69aae0) */
@@ -217,7 +246,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st) {
         }
     }
 
-    kmain(&g_boot_info);
+    switch_to_main_stack(&g_boot_info);
 
     for (;;) __asm__ volatile ("wfe");
     return EFI_SUCCESS;

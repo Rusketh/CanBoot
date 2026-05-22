@@ -274,11 +274,34 @@ int getopt(int argc, char *const argv[], const char *optstring) {
     return -1;
 }
 
+/* mkntfs's optstring starts with `-`, which by GNU getopt convention
+ * means "report non-option args as code 1". We emulate that for the
+ * canboot wrapper which synthesises argv = { "mkntfs", "<device>" }:
+ * first call returns 1 with optarg = argv[1] and optind = 2; second
+ * call returns -1. Any -Dgetopt code is fine for other consumers
+ * because nothing else uses it at runtime. */
 struct option;
 int getopt_long(int argc, char *const argv[], const char *optstring,
                  const struct option *longopts, int *longindex) {
-    (void)argc; (void)argv; (void)optstring; (void)longopts; (void)longindex;
+    (void)optstring; (void)longopts; (void)longindex;
+    if (optind >= 1 && optind < argc) {
+        optarg = argv[optind];
+        optind++;
+        return 1;
+    }
+    optind = argc;
     return -1;
+}
+
+/* picolibc lets the application override strerror messages via a
+ * weak _user_strerror() hook. When unset, picolibc falls back to its
+ * internal table. The -shared EFI link wants to resolve the symbol
+ * at runtime via PLT (broken in our flat-binary EFI) - providing a
+ * strong stub that returns NULL forces direct binding and yields
+ * the same "use the default" behaviour. */
+char *_user_strerror(int errnum, int internal, int *error) {
+    (void)errnum; (void)internal; (void)error;
+    return (char *)0;
 }
 
 /* ntfsprogs/utils.c provides utils_set_locale and utils_valid_device
