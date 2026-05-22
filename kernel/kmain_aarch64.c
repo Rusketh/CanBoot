@@ -21,6 +21,11 @@
 #include "canboot/boot_info.h"
 #include "hal/console.h"
 
+#if CANBOOT_AARCH64_EFI_BUILD
+#include "hal/pci.h"
+#include "hal/input.h"
+#endif
+
 void fb_clear(const struct canboot_fb *fb, uint32_t pixel);
 void fb_fill_rect(const struct canboot_fb *fb,
                   int32_t x, int32_t y,
@@ -149,6 +154,63 @@ void kmain(struct boot_info *bi) {
     }
 
     hal_console_write("canboot: handshake confirmed (aarch64 milestone-3)\n");
+
+#if CANBOOT_AARCH64_EFI_BUILD
+    /* Milestone 4: HAL input bring-up on the UEFI boot path. PCI was
+     * enumerated by AAVMF (BARs assigned, decoders enabled) before
+     * ExitBootServices; we walk it via ECAM here and attach the
+     * virtio-input driver if a keyboard device is present. */
+    hal_pci_init();
+    hal_console_write("canboot: pci devs=");
+    {
+        uint32_t n = hal_pci_devcount();
+        char b[12]; int i = 0;
+        if (n == 0) { hal_console_putc('0'); }
+        else { while (n) { b[i++] = '0' + (n % 10); n /= 10; } while (i--) hal_console_putc(b[i]); }
+    }
+    hal_console_write("\n");
+
+    hal_input_init();
+    if (canboot_virtio_input_init()) {
+        hal_console_write("canboot: virtio-input present\n");
+    } else {
+        hal_console_write("canboot: virtio-input absent\n");
+    }
+
+    hal_console_write("canboot: input loop start\n");
+    {
+        uint64_t cntfrq;
+        __asm__ volatile ("mrs %0, cntfrq_el0" : "=r"(cntfrq));
+        uint64_t now;
+        __asm__ volatile ("mrs %0, cntvct_el0" : "=r"(now));
+        uint64_t deadline = now + cntfrq * 5u;   /* 5 s */
+        uint32_t echoed = 0;
+        for (;;) {
+            __asm__ volatile ("mrs %0, cntvct_el0" : "=r"(now));
+            if (now >= deadline) break;
+            struct canboot_event ev;
+            while (hal_input_poll(&ev)) {
+                if (ev.type != CANBOOT_EV_KEY_DOWN) continue;
+                hal_console_write("canboot: rx code=");
+                put_hex64(ev.code);
+                if (ev.code >= 0x20 && ev.code < 0x7F) {
+                    hal_console_write(" ascii='");
+                    hal_console_putc((char)ev.code);
+                    hal_console_write("'");
+                }
+                hal_console_write("\n");
+                echoed++;
+                if (ev.code == CANBOOT_KEY_ESC) {
+                    deadline = now;
+                }
+            }
+            __asm__ volatile ("yield");
+        }
+        hal_console_write("canboot: input loop done events=");
+        put_dec(echoed);
+        hal_console_write("\n");
+    }
+#endif
 
     /* Milestone 5: picolibc + pthread shim self-test. Same harness the
      * x86_64 kmain runs, links against the same libc.a. */

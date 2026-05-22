@@ -578,13 +578,20 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
     # path. We recompile them here with -fpic so they're position-
     # independent inside the PE image. Each source becomes a separate
     # custom command producing a .o with EFI-flavoured flags.
+    # On the UEFI build we link in real PCI + virtio + virtio-input
+     # support (AAVMF enumerates PCIe and assigns BARs before
+     # ExitBootServices). Direct -kernel still uses the input stub
+     # since we don't do PCI bring-up there.
     set(EFI_AARCH64_SOURCES
         boot/uefi/efi_main_aarch64.c
         kernel/kmain_aarch64.c
         kernel/fb.c
         kernel/m5_selftest.c
         hal/console/serial_aarch64.c
-        hal/input/input_stub_aarch64.c
+        hal/pci/pci_aarch64.c
+        hal/virtio/virtio_pci.c
+        hal/input/input_queue.c
+        hal/input/virtio_input.c
         rt/picolibc_port/syscalls.c
         rt/pthread_stub/pthread.c
     )
@@ -606,6 +613,7 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
                 -I${CMAKE_SOURCE_DIR}/rt/pthread_stub/include
                 -I${CMAKE_SOURCE_DIR}
                 -I${PICOLIBC_INCLUDE}
+                -DCANBOOT_AARCH64_EFI_BUILD=1
                 -ffreestanding -fpic -fno-stack-protector -fno-stack-check
                 -fno-strict-aliasing -fshort-wchar
                 -Wall -Wextra
