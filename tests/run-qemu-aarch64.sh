@@ -17,6 +17,18 @@ fi
 mkdir -p "$(dirname "$LOG")"
 : > "$LOG"
 
+QEMU_STDERR="${LOG%.log}.stderr.log"
+: > "$QEMU_STDERR"
+
+if ! command -v qemu-system-aarch64 >/dev/null 2>&1; then
+    echo "error: qemu-system-aarch64 not on PATH" >&2
+    echo "PATH=$PATH" >&2
+    command -v qemu-system-arm >&2 || true
+    exit 1
+fi
+
+qemu-system-aarch64 --version >&2 || true
+
 qemu-system-aarch64 \
     -machine virt \
     -cpu cortex-a72 \
@@ -26,7 +38,7 @@ qemu-system-aarch64 \
     -kernel "$ELF" \
     -serial "file:$LOG" \
     -monitor none \
-    >/dev/null 2>&1 &
+    >/dev/null 2>"$QEMU_STDERR" &
 QEMU_PID=$!
 
 cleanup() {
@@ -66,5 +78,16 @@ if [ -s "$LOG" ]; then
     tr -d '\r' < "$LOG" | sed 's/^/  | /' >&2
 else
     echo "  | (empty)" >&2
+fi
+echo "QEMU stderr:" >&2
+if [ -s "$QEMU_STDERR" ]; then
+    sed 's/^/  ! /' < "$QEMU_STDERR" >&2
+else
+    echo "  ! (empty)" >&2
+fi
+if kill -0 "$QEMU_PID" 2>/dev/null; then
+    echo "QEMU still running (pid $QEMU_PID)" >&2
+else
+    echo "QEMU exited before timeout" >&2
 fi
 exit 1

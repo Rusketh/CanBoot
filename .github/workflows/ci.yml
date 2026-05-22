@@ -117,7 +117,10 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             cmake ninja-build \
             gcc-aarch64-linux-gnu \
-            qemu-system-arm
+            qemu-system-arm qemu-system-misc
+          # Sanity-check the aarch64 emulator is on PATH; fail loudly if not.
+          which qemu-system-aarch64
+          qemu-system-aarch64 --version
 
       - name: Configure
         run: cmake -B build-aarch64 -G Ninja
@@ -147,6 +150,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: qemu-aarch64-log
-          path: build-aarch64/qemu-aarch64.log
+          path: |
+            build-aarch64/qemu-aarch64.log
+            build-aarch64/qemu-aarch64.stderr.log
           if-no-files-found: ignore
           retention-days: 7
