@@ -25,7 +25,9 @@ set(CANBOOT_KERNEL_COMMON
     kernel/m6_nettest.c
     kernel/m7_tlstest.c
     kernel/m8_disktest.c
+    kernel/m9_candotest.c
     kernel/canboot_test_ca.c
+    cando_port/cando_stubs.c
     fs/iso9660.c
     fs/fat32.c
     hal/disk/disk.c
@@ -55,6 +57,70 @@ set(CANBOOT_LWIP_SOURCES
     ${lwipcore_SRCS}
     ${lwipcore4_SRCS}
     ${lwipnetif_SRCS}
+)
+
+# CanDo language vendor at vendor/cando. We compile a curated subset of
+# its source files directly into the kernel rather than going through
+# its CMakeLists, which would pull in find_package(OpenSSL) - we don't
+# ship OpenSSL on bare metal. The dropped SSL/socket/HTTP libs are
+# stubbed via cando_port/cando_stubs.c (no-op register hooks); real
+# Mbed TLS + lwIP-backed bindings land in a later milestone.
+set(CANDO_DIR ${CMAKE_SOURCE_DIR}/vendor/cando)
+set(CANBOOT_CANDO_SOURCES
+    ${CANDO_DIR}/source/cando_lib.c
+    ${CANDO_DIR}/source/natives.c
+    ${CANDO_DIR}/source/core/common.c
+    ${CANDO_DIR}/source/core/value.c
+    ${CANDO_DIR}/source/core/lock.c
+    ${CANDO_DIR}/source/core/handle.c
+    ${CANDO_DIR}/source/core/memory.c
+    ${CANDO_DIR}/source/core/thread_platform.c
+    ${CANDO_DIR}/source/object/string.c
+    ${CANDO_DIR}/source/object/value.c
+    ${CANDO_DIR}/source/object/object.c
+    ${CANDO_DIR}/source/object/array.c
+    ${CANDO_DIR}/source/object/function.c
+    ${CANDO_DIR}/source/object/class.c
+    ${CANDO_DIR}/source/object/thread.c
+    ${CANDO_DIR}/source/parser/lexer.c
+    ${CANDO_DIR}/source/parser/parser.c
+    ${CANDO_DIR}/source/vm/opcodes.c
+    ${CANDO_DIR}/source/vm/chunk.c
+    ${CANDO_DIR}/source/vm/bridge.c
+    ${CANDO_DIR}/source/vm/vm.c
+    ${CANDO_DIR}/source/vm/debug.c
+    ${CANDO_DIR}/source/jit/ir.c
+    ${CANDO_DIR}/source/jit/hot.c
+    ${CANDO_DIR}/source/jit/mcode.c
+    ${CANDO_DIR}/source/jit/codegen.c
+    ${CANDO_DIR}/source/jit/jit.c
+    ${CANDO_DIR}/source/lib/gc.c
+    ${CANDO_DIR}/source/lib/jit.c
+    ${CANDO_DIR}/source/lib/app.c
+    ${CANDO_DIR}/source/lib/math.c
+    ${CANDO_DIR}/source/lib/file.c
+    ${CANDO_DIR}/source/lib/eval.c
+    ${CANDO_DIR}/source/lib/string.c
+    ${CANDO_DIR}/source/lib/libutil.c
+    ${CANDO_DIR}/source/lib/include.c
+    ${CANDO_DIR}/source/lib/json.c
+    ${CANDO_DIR}/source/lib/csv.c
+    ${CANDO_DIR}/source/lib/yaml.c
+    ${CANDO_DIR}/source/lib/thread.c
+    ${CANDO_DIR}/source/lib/os.c
+    ${CANDO_DIR}/source/lib/datetime.c
+    ${CANDO_DIR}/source/lib/array.c
+    ${CANDO_DIR}/source/lib/console.c
+    ${CANDO_DIR}/source/lib/console_term.c
+    ${CANDO_DIR}/source/lib/console_input.c
+    ${CANDO_DIR}/source/lib/console_events.c
+    ${CANDO_DIR}/source/lib/console_lineedit.c
+    ${CANDO_DIR}/source/lib/console_dispatch.c
+    ${CANDO_DIR}/source/lib/process.c
+    ${CANDO_DIR}/source/lib/net.c
+    ${CANDO_DIR}/source/lib/object.c
+    ${CANDO_DIR}/source/lib/meta.c
+    ${CANDO_DIR}/source/lib/stream.c
 )
 
 # ---------------------------------------------------------------------------
@@ -102,6 +168,7 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
         boot/multiboot2/header.S
         ${CANBOOT_KERNEL_COMMON}
         ${CANBOOT_LWIP_SOURCES}
+        ${CANBOOT_CANDO_SOURCES}
     )
 else()
     message(FATAL_ERROR "Arch ${CANBOOT_ARCH} bring-up lands in a later milestone")
@@ -116,6 +183,10 @@ set_source_files_properties(
     PROPERTIES LANGUAGE ASM
 )
 
+target_include_directories(${KERNEL_NAME} BEFORE PRIVATE
+    cando_port/shims
+)
+
 target_include_directories(${KERNEL_NAME} PRIVATE
     hal/include
     kernel/include
@@ -127,6 +198,8 @@ target_include_directories(${KERNEL_NAME} PRIVATE
     ${LWIP_DIR}/src/include
     ${PICOLIBC_INCLUDE}
     ${CMAKE_SOURCE_DIR}/vendor/mbedtls/include
+    ${CANDO_DIR}/include
+    ${CANDO_DIR}/source
 )
 
 target_compile_options(${KERNEL_NAME} PRIVATE
@@ -137,11 +210,20 @@ target_compile_options(${KERNEL_NAME} PRIVATE
     $<$<COMPILE_LANGUAGE:C>:-fno-pie>
     $<$<COMPILE_LANGUAGE:C>:-mno-red-zone>
     $<$<COMPILE_LANGUAGE:C>:-mcmodel=kernel>
-    $<$<COMPILE_LANGUAGE:C>:-mno-sse>
-    $<$<COMPILE_LANGUAGE:C>:-mno-mmx>
-    $<$<COMPILE_LANGUAGE:C>:-mno-80387>
     -Wall
     -Wextra
+)
+
+target_compile_options(${KERNEL_NAME} PRIVATE
+    -D_GNU_SOURCE     # cando expects M_PI, strdup, etc. via GNU extensions
+    -DSSIZE_MAX=__LONG_MAX__   # signal lwIP arch.h to use picolibc's ssize_t
+    "SHELL:-iquote ${CANDO_DIR}/source"
+    "SHELL:-iquote ${CANDO_DIR}/source/core"
+    "SHELL:-iquote ${CANDO_DIR}/source/object"
+    "SHELL:-iquote ${CANDO_DIR}/source/parser"
+    "SHELL:-iquote ${CANDO_DIR}/source/vm"
+    "SHELL:-iquote ${CANDO_DIR}/source/jit"
+    "SHELL:-iquote ${CANDO_DIR}/source/lib"
 )
 
 target_link_options(${KERNEL_NAME} PRIVATE
@@ -239,6 +321,7 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
             boot/uefi/efi_main.c
             ${CANBOOT_KERNEL_COMMON}
             ${CANBOOT_LWIP_SOURCES}
+            ${CANBOOT_CANDO_SOURCES}
         )
 
         set(EFI_OBJS "")
@@ -255,6 +338,7 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
             add_custom_command(
                 OUTPUT ${_obj}
                 COMMAND ${CMAKE_C_COMPILER}
+                    -I${CMAKE_SOURCE_DIR}/cando_port/shims
                     -I${GNUEFI_INCLUDE_DIR}
                     -I${GNUEFI_ARCH_INCLUDE_DIR}
                     -I${CMAKE_SOURCE_DIR}/hal/include
@@ -266,11 +350,22 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
                     -I${CMAKE_SOURCE_DIR}
                     -I${LWIP_DIR}/src/include
                     -I${MBEDTLS_DIR}/include
+                    -I${CANDO_DIR}/include
+                    -I${CANDO_DIR}/source
                     -I${PICOLIBC_INCLUDE}
-                    -std=c11
+                    -D_GNU_SOURCE
+                    -DSSIZE_MAX=__LONG_MAX__
+                    "-iquote" "${CANDO_DIR}/source"
+                    "-iquote" "${CANDO_DIR}/source/core"
+                    "-iquote" "${CANDO_DIR}/source/object"
+                    "-iquote" "${CANDO_DIR}/source/parser"
+                    "-iquote" "${CANDO_DIR}/source/vm"
+                    "-iquote" "${CANDO_DIR}/source/jit"
+                    "-iquote" "${CANDO_DIR}/source/lib"
                     -ffreestanding -fpic -fshort-wchar -mno-red-zone
                     -fno-stack-protector -fno-stack-check
-                    -Wall -Wextra
+                    -Wno-implicit-function-declaration
+                    -Wno-int-conversion
                     -c ${_src_abs} -o ${_obj}
                 DEPENDS ${_src_abs} picolibc_ext
                 COMMENT "CC  efi/${_name}.o"

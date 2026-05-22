@@ -7,3 +7,6 @@
 [submodule "vendor/mbedtls"]
 	path = vendor/mbedtls
 	url = https://github.com/Mbed-TLS/mbedtls.git
+[submodule "vendor/cando"]
+	path = vendor/cando
+	url = https://github.com/Rusketh/CanDo.git
