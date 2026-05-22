@@ -115,3 +115,38 @@ print("cando file.list() =");
 print(file.list());
 
 print("cando intro libs end");
+
+// ---- Milestone 16: extension libs ------------------------------------
+
+print("cando ext libs begin");
+
+// url.* - parse out a HTTPS URL.
+VAR u = "https://10.0.2.2:8443/health";
+print("cando url.scheme =", url.scheme(u));
+print("cando url.host =", url.host(u));
+print("cando url.port =", url.port(u));
+print("cando url.path =", url.path(u));
+
+// http.get / https.get - same sidecars, URL form.
+print("cando http.get =", http.get("http://10.0.2.2:8080/"));
+print("cando https.get =", https.get("https://10.0.2.2:8443/"));
+
+// disk.* - raw block read of LBA 0 (FAT32 BPB sector).
+print("cando disk.count =", disk.count());
+print("cando disk.name(0) =", disk.name(0));
+print("cando disk.blockSize(0) =", disk.blockSize(0));
+print("cando disk.blocks(0) =", disk.blocks(0));
+
+// pci.* - sanity check that PCI enumeration is reachable.
+print("cando pci.count =", pci.count());
+print("cando pci.list =");
+print(pci.list());
+
+// fb.* - flush is idempotent; just prove we can call it.
+fb.flush();
+print("cando fb.flush ok");
+
+// fmt.sprintf - mixed conversions.
+print("cando fmt.sprintf =", fmt.sprintf("hex=%x dec=%d str=%s", 4660, 42, "hi"));
+
+print("cando ext libs end");

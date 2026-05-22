@@ -34,6 +34,13 @@ void        canboot_cando_open_hexlib(CandoVM *vm);
 void        canboot_cando_open_base64lib(CandoVM *vm);
 void        canboot_cando_open_loglib(CandoVM *vm);
 void        canboot_cando_open_envlib(CandoVM *vm);
+void        canboot_cando_open_urllib(CandoVM *vm);
+void        canboot_cando_open_httplib(CandoVM *vm);
+void        canboot_cando_open_httpslib(CandoVM *vm);
+void        canboot_cando_open_disklib(CandoVM *vm);
+void        canboot_cando_open_pcilib(CandoVM *vm);
+void        canboot_cando_open_fblib(CandoVM *vm);
+void        canboot_cando_open_fmtlib(CandoVM *vm);
 
 #include "hal/display.h"
 #include "hal/input.h"
@@ -113,6 +120,16 @@ void canboot_m9_candotest(void) {
     canboot_cando_open_loglib(vm);
     canboot_cando_open_envlib(vm);
     printf("milestone 15: env+log libs registered\n");
+
+    /* Milestone 16: URL-aware net + raw block/PCI + display flush + fmt. */
+    canboot_cando_open_urllib(vm);
+    canboot_cando_open_httplib(vm);
+    canboot_cando_open_httpslib(vm);
+    canboot_cando_open_disklib(vm);
+    canboot_cando_open_pcilib(vm);
+    canboot_cando_open_fblib(vm);
+    canboot_cando_open_fmtlib(vm);
+    printf("milestone 16: extension libs registered (url/http/https/disk/pci/fb/fmt)\n");
 
     /* Milestone 10: load /init.cdo from disk and run it through cando_dostring. */
     static char init_src[8192];

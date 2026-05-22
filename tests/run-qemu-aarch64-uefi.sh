@@ -221,6 +221,18 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
             echo "smoke test FAILED: log.setLevel(info) did not suppress debug message" >&2
             exit 1
         fi
+
+        check 'milestone 16: extension libs registered'
+        check 'cando url.scheme = https'
+        check 'cando url.host = 10.0.2.2'
+        check 'cando url.port = 8443'
+        check 'cando url.path = /health'
+        check 'cando http.get = canboot-hello'
+        check 'cando https.get = canboot-secure'
+        check 'cando disk.name(0) = vblk0'
+        check 'cando disk.blockSize(0) = 512'
+        check 'cando fmt.sprintf = hex=1234 dec=42 str=hi'
+        check 'cando ext libs end'
         check 'cando input poll begin'
         check 'cando input poll end'
 

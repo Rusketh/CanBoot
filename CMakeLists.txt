@@ -42,6 +42,12 @@ set(CANBOOT_KERNEL_COMMON
     cando_port/cando_encoding_lib.c
     cando_port/cando_log_lib.c
     cando_port/cando_env_lib.c
+    cando_port/cando_url_lib.c
+    cando_port/cando_http_lib.c
+    cando_port/cando_disk_lib.c
+    cando_port/cando_pci_lib.c
+    cando_port/cando_fb_lib.c
+    cando_port/cando_fmt_lib.c
     fs/iso9660.c
     fs/fat32.c
     hal/disk/disk.c
@@ -666,6 +672,12 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
         cando_port/cando_encoding_lib.c
         cando_port/cando_log_lib.c
         cando_port/cando_env_lib.c
+        cando_port/cando_url_lib.c
+        cando_port/cando_http_lib.c
+        cando_port/cando_disk_lib.c
+        cando_port/cando_pci_lib.c
+        cando_port/cando_fb_lib.c
+        cando_port/cando_fmt_lib.c
         cando_port/jit_codegen_stub_aarch64.c
         kernel/env.c
         ${CANBOOT_LWIP_SOURCES}

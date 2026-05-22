@@ -36,6 +36,8 @@ void cando_lib_crypto_register(struct CandoVM *vm)         { (void)vm; }
 void cando_lib_socket_register(struct CandoVM *vm)         { (void)vm; }
 void cando_lib_secure_socket_register(struct CandoVM *vm)  { (void)vm; }
 void cando_lib_httputil_register(struct CandoVM *vm)       { (void)vm; }
+/* http / https built-ins replaced by canboot_cando_open_httplib /
+ * canboot_cando_open_httpslib in cando_port/cando_http_lib.c. */
 void cando_lib_http_register(struct CandoVM *vm)           { (void)vm; }
 void cando_lib_https_register(struct CandoVM *vm)          { (void)vm; }
 
