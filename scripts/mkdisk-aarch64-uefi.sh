@@ -23,9 +23,16 @@ mmd -i "$OUT" ::/EFI
 mmd -i "$OUT" ::/EFI/BOOT
 mcopy -i "$OUT" "$EFI_BIN" ::/EFI/BOOT/BOOTAA64.EFI
 
-INIT_CDO="$(cd "$(dirname "$0")/.." && pwd)/initramfs/init.cdo"
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+INIT_CDO="$ROOT_DIR/initramfs/init.cdo"
 if [ -f "$INIT_CDO" ]; then
     mcopy -i "$OUT" "$INIT_CDO" ::/init.cdo
+fi
+
+# Test PNG used by the smoke test's image.decode/draw round-trip.
+PROBE_PNG="$ROOT_DIR/initramfs/probe.png"
+if [ -f "$PROBE_PNG" ]; then
+    mcopy -i "$OUT" "$PROBE_PNG" ::/probe.png
 fi
 
 echo "wrote $OUT"

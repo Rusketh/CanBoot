@@ -14,6 +14,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 #include "core/value.h"
 #include "vm/vm.h"
@@ -85,8 +86,67 @@ static int f_sprintf(CandoVM *vm, int argc, CandoValue *args) {
     return 1;
 }
 
+/* Pack a 16-bit unsigned int as 2 raw little-endian bytes. Used by
+ * scripts that build binary file headers (WAV, BMP, etc.) without
+ * having to fall back to a base-16/base-64 round-trip. */
+static int f_u16le(CandoVM *vm, int argc, CandoValue *args) {
+    uint16_t v = (uint16_t)(uint64_t)libutil_arg_num_at(args, argc, 0, 0);
+    char buf[2];
+    buf[0] = (char)(v & 0xff);
+    buf[1] = (char)((v >> 8) & 0xff);
+    CandoString *s = cando_string_new(buf, 2);
+    cando_vm_push(vm, cando_string_value(s));
+    return 1;
+}
+
+static int f_u32le(CandoVM *vm, int argc, CandoValue *args) {
+    uint32_t v = (uint32_t)(uint64_t)libutil_arg_num_at(args, argc, 0, 0);
+    char buf[4];
+    buf[0] = (char)(v & 0xff);
+    buf[1] = (char)((v >> 8) & 0xff);
+    buf[2] = (char)((v >> 16) & 0xff);
+    buf[3] = (char)((v >> 24) & 0xff);
+    CandoString *s = cando_string_new(buf, 4);
+    cando_vm_push(vm, cando_string_value(s));
+    return 1;
+}
+
+/* Generate a `n_samples` long 16-bit signed PCM sine wave at `freq`
+ * Hz against sample rate `sr`. Returned as raw little-endian bytes
+ * so scripts can splice it straight into a RIFF/WAVE body. */
+static int f_sine_wave_16(CandoVM *vm, int argc, CandoValue *args) {
+    int freq = (int)libutil_arg_num_at(args, argc, 0, 440);
+    int sr   = (int)libutil_arg_num_at(args, argc, 1, 44100);
+    int n    = (int)libutil_arg_num_at(args, argc, 2, 11025);
+    if (n <= 0 || sr <= 0) {
+        CandoString *empty = cando_string_new("", 0);
+        cando_vm_push(vm, cando_string_value(empty));
+        return 1;
+    }
+    char *buf = (char *)malloc((size_t)n * 2);
+    if (!buf) {
+        cando_vm_push(vm, cando_null());
+        return 1;
+    }
+    const double TAU = 6.28318530717958647692;
+    for (int i = 0; i < n; i++) {
+        double t = (double)i / (double)sr;
+        double s = sin(TAU * (double)freq * t);
+        int16_t v = (int16_t)(s * 30000.0);
+        buf[i * 2]     = (char)(v & 0xff);
+        buf[i * 2 + 1] = (char)((v >> 8) & 0xff);
+    }
+    CandoString *s = cando_string_new(buf, (uint32_t)(n * 2));
+    free(buf);
+    cando_vm_push(vm, cando_string_value(s));
+    return 1;
+}
+
 static const LibutilMethodEntry fmt_methods[] = {
-    { "sprintf", f_sprintf },
+    { "sprintf",    f_sprintf       },
+    { "u16le",      f_u16le         },
+    { "u32le",      f_u32le         },
+    { "sineWave16", f_sine_wave_16  },
 };
 
 void canboot_cando_open_fmtlib(CandoVM *vm) {

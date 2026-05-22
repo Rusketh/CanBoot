@@ -20,4 +20,9 @@ truncate -s "${SIZE_MB}M" "$OUT"
 mkfs.vfat -F 32 -n CANBOOT "$OUT" >/dev/null
 mcopy -i "$OUT" "$INIT_CDO" ::/init.cdo
 
+PROBE_PNG="$ROOT/initramfs/probe.png"
+if [ -f "$PROBE_PNG" ]; then
+    mcopy -i "$OUT" "$PROBE_PNG" ::/probe.png
+fi
+
 echo "wrote $OUT"

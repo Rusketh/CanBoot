@@ -233,3 +233,52 @@ IF (disk.count() >= 3) {
 }
 
 print("cando part libs end");
+
+// Image library: decode a tiny 4x4 PNG from /probe.png, sample known
+// pixels, and blit it into the framebuffer corner. The decoder
+// supports PNG, JPG, BMP (single stb_image header).
+print("cando image libs begin");
+VAR png = fs.read(0, 0, "/probe.png");
+VAR ih  = image.decode(png);
+print("cando image.decode rc =", ih);
+print("cando image.width =", image.width(ih));
+print("cando image.height =", image.height(ih));
+// Sample the four 2x2 quadrants. The image is 4x4 with:
+//   top-left  pure red    (R=255, G=0,   B=0)
+//   top-right pure green  (R=0,   G=255, B=0)
+//   bot-left  pure blue   (R=0,   G=0,   B=255)
+//   bot-right pure white  (R=255, G=255, B=255)
+// pixel() returns a uint32 packed as 0xAABBGGRR.
+print("cando image.pixel(0,0) =", image.pixel(ih, 0, 0));
+print("cando image.pixel(3,0) =", image.pixel(ih, 3, 0));
+print("cando image.pixel(0,3) =", image.pixel(ih, 0, 3));
+print("cando image.pixel(3,3) =", image.pixel(ih, 3, 3));
+// Draw scaled into a 80x80 patch at (500, 10). The smoke test
+// samples one of those pixels to verify the blit landed.
+print("cando image.draw scaled =", image.draw(ih, 500, 10, 80, 80));
+print("cando image.free =", image.free(ih));
+print("cando image libs end");
+
+// Audio library. The build always carries the WAV parser + minimp3
+// decoder; whether anything actually plays depends on the HAL audio
+// backend (Intel HDA / virtio-sound) being bound at boot time.
+print("cando audio libs begin");
+print("cando audio.present =", audio.present());
+print("cando audio.deviceName =", audio.deviceName());
+// Synthesise a 0.25 s 440 Hz sine wave as PCM and wrap it in a
+// minimal RIFF/WAVE header. The decoder + queueing path is exercised
+// regardless of whether the HAL backend is real; a no-op stub keeps
+// the call returning true so scripts work portably.
+VAR sr = 44100;
+VAR ns = 11025;        // 0.25 s of mono 16-bit PCM
+VAR data_sz = ns * 2;  // 16 bits * 1 channel
+VAR riff_sz = 36 + data_sz;
+VAR hdr = "RIFF";
+hdr = hdr + fmt.u32le(riff_sz);
+hdr = hdr + "WAVEfmt " + fmt.u32le(16) + fmt.u16le(1) + fmt.u16le(1)
+          + fmt.u32le(sr) + fmt.u32le(sr * 2) + fmt.u16le(2) + fmt.u16le(16)
+          + "data" + fmt.u32le(data_sz);
+VAR tone = fmt.sineWave16(440, sr, ns);
+print("cando audio.play wav =", audio.play(hdr + tone));
+audio.stop();
+print("cando audio libs end");

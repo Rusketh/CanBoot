@@ -54,6 +54,11 @@ set(CANBOOT_KERNEL_COMMON
     cando_port/ntfs3g_canboot_glue.c
     cando_port/lwext4_canboot_io.c
     cando_port/lwext4_canboot_glue.c
+    cando_port/cando_image_lib.c
+    cando_port/stb_image_canboot.c
+    cando_port/cando_audio_lib.c
+    cando_port/minimp3_canboot.c
+    hal/audio/audio_stub.c
     fs/partition.c
     fs/ntfs.c
     fs/iso9660.c
@@ -353,6 +358,20 @@ set_source_files_properties(${CANBOOT_LWEXT4_SOURCES} cando_port/lwext4_canboot_
     COMPILE_FLAGS "-I${CMAKE_SOURCE_DIR}/vendor/lwext4/include -I${CMAKE_SOURCE_DIR}/vendor/lwext4_canboot -I${CMAKE_SOURCE_DIR}/cando_port -DCONFIG_USE_DEFAULT_CFG=1 -DCONFIG_DEBUG_PRINTF=0 -w"
 )
 
+# stb_image's single-header body lands in stb_image_canboot.c; the
+# header lives in vendor/stb. -w suppresses the noisy warnings the
+# vendored decoder triggers under -Wall.
+set_source_files_properties(cando_port/stb_image_canboot.c PROPERTIES
+    COMPILE_FLAGS "-I${CMAKE_SOURCE_DIR}/vendor/stb -w"
+)
+
+# minimp3's single-header body lands in minimp3_canboot.c. Same
+# pattern as stb_image. The decoder is heavy on -Wall warnings
+# (-Wstrict-aliasing in particular) that we don't police upstream.
+set_source_files_properties(cando_port/minimp3_canboot.c PROPERTIES
+    COMPILE_FLAGS "-I${CMAKE_SOURCE_DIR}/vendor/minimp3 -w"
+)
+
 if(CANBOOT_ARCH STREQUAL "x86_64")
     add_dependencies(${KERNEL_NAME} picolibc_ext)
 
@@ -645,6 +664,16 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
                     -DCONFIG_DEBUG_PRINTF=0
                     -w
                 )
+            elseif(_src_abs MATCHES "/stb_image_canboot")
+                set(_extra_flags
+                    -I${CMAKE_SOURCE_DIR}/vendor/stb
+                    -w
+                )
+            elseif(_src_abs MATCHES "/minimp3_canboot")
+                set(_extra_flags
+                    -I${CMAKE_SOURCE_DIR}/vendor/minimp3
+                    -w
+                )
             endif()
             add_custom_command(
                 OUTPUT ${_obj}
@@ -860,6 +889,11 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
         cando_port/ntfs3g_canboot_glue.c
         cando_port/lwext4_canboot_io.c
         cando_port/lwext4_canboot_glue.c
+        cando_port/cando_image_lib.c
+        cando_port/stb_image_canboot.c
+        cando_port/cando_audio_lib.c
+        cando_port/minimp3_canboot.c
+        hal/audio/audio_stub.c
         cando_port/jit_codegen_stub_aarch64.c
         fs/partition.c
         fs/ntfs.c
@@ -914,6 +948,16 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
                 -I${CMAKE_SOURCE_DIR}/cando_port
                 -DCONFIG_USE_DEFAULT_CFG=1
                 -DCONFIG_DEBUG_PRINTF=0
+                -w
+            )
+        elseif(_src_abs MATCHES "/stb_image_canboot")
+            set(_extra_flags
+                -I${CMAKE_SOURCE_DIR}/vendor/stb
+                -w
+            )
+        elseif(_src_abs MATCHES "/minimp3_canboot")
+            set(_extra_flags
+                -I${CMAKE_SOURCE_DIR}/vendor/minimp3
                 -w
             )
         endif()

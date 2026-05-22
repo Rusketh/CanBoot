@@ -19,3 +19,9 @@
 [submodule "vendor/lwext4"]
 	path = vendor/lwext4
 	url = https://github.com/gkostka/lwext4.git
+[submodule "vendor/stb"]
+	path = vendor/stb
+	url = https://github.com/nothings/stb.git
+[submodule "vendor/minimp3"]
+	path = vendor/minimp3
+	url = https://github.com/lieff/minimp3.git
