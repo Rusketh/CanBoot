@@ -194,7 +194,15 @@ IF (disk.count() >= 2) {
     print("cando fs.read new.txt =", fs.read(1, 0, "/new.txt"));
     print("cando fs.delete new.txt =", fs.delete(1, 0, "/new.txt"));
     print("cando fs.read new.txt after delete =", fs.read(1, 0, "/new.txt"));
-    print("cando mkfs ntfs gated =", fs.mkfs(1, 0, "ntfs", "REFORMAT"));
+    // fs.mkfs ntfs drives the vendored mkntfs end-to-end. On success
+    // the volume is freshly reformatted (prior probe.txt is gone) and
+    // we re-detect it as NTFS, then write a fresh marker so the
+    // host-side ntfs-3g re-mount check can verify the canboot-
+    // formatted volume is well-formed.
+    print("cando fs.mkfs ntfs =", fs.mkfs(1, 0, "ntfs", "CANBOOTNTFS"));
+    print("cando fs.detect after mkfs =", fs.detect(1, 0));
+    print("cando fs.write after mkfs =", fs.write(1, 0, "/postfmt.txt", "canboot-postformat-2026"));
+    print("cando fs.read after mkfs =", fs.read(1, 0, "/postfmt.txt"));
 } ELSE {
     print("cando disk1 absent");
 }

@@ -274,23 +274,73 @@ int getopt(int argc, char *const argv[], const char *optstring) {
     return -1;
 }
 
-/* mkntfs's optstring starts with `-`, which by GNU getopt convention
- * means "report non-option args as code 1". We emulate that for the
- * canboot wrapper which synthesises argv = { "mkntfs", "<device>" }:
- * first call returns 1 with optarg = argv[1] and optind = 2; second
- * call returns -1. Any -Dgetopt code is fine for other consumers
- * because nothing else uses it at runtime. */
+/* Minimal getopt_long covering the subset mkntfs needs:
+ *  - leading '-' in optstring: report non-option args as code 1
+ *  - short options, with or without ':'-marked required argument
+ *  - long options of the form --name=value or --name value
+ * mkntfs's optstring is "-c:CfFhH:IlL:np:qQs:S:TUvVz:" - all single
+ * letters, only colon-marked ones consume optarg. Anything we don't
+ * understand we treat as the canonical "unknown option" return ('?'),
+ * which mkntfs handles by jumping to its usage path. */
 struct option;
+struct gopt_long {
+    const char *name;
+    int has_arg;
+    int *flag;
+    int val;
+};
+static const char *g_curr_bundle = NULL;
+static int          g_curr_pos   = 1;
+
 int getopt_long(int argc, char *const argv[], const char *optstring,
                  const struct option *longopts, int *longindex) {
-    (void)optstring; (void)longopts; (void)longindex;
-    if (optind >= 1 && optind < argc) {
-        optarg = argv[optind];
-        optind++;
-        return 1;
+    (void)longopts; (void)longindex;
+    /* Continuation of a bundled short option like -abc */
+    if (g_curr_bundle && g_curr_bundle[g_curr_pos]) {
+        char c = g_curr_bundle[g_curr_pos];
+        const char *o = optstring;
+        if (o && o[0] == '-') o++;
+        const char *hit = NULL;
+        for (; o && *o; o++) if (*o == c && *o != ':') { hit = o; break; }
+        if (!hit) { optopt = c; g_curr_pos++; return '?'; }
+        if (hit[1] == ':') {
+            if (g_curr_bundle[g_curr_pos + 1]) {
+                optarg = (char *)&g_curr_bundle[g_curr_pos + 1];
+                g_curr_bundle = NULL; g_curr_pos = 1; optind++;
+            } else {
+                g_curr_bundle = NULL; g_curr_pos = 1; optind++;
+                if (optind >= argc) { optopt = c; return '?'; }
+                optarg = argv[optind++];
+            }
+        } else {
+            g_curr_pos++;
+            if (!g_curr_bundle[g_curr_pos]) {
+                g_curr_bundle = NULL; g_curr_pos = 1; optind++;
+            }
+        }
+        return c;
     }
-    optind = argc;
-    return -1;
+    if (optind >= argc) return -1;
+    const char *arg = argv[optind];
+    if (!arg || arg[0] != '-' || arg[1] == 0) {
+        if (optstring && optstring[0] == '-') {
+            optarg = (char *)arg;
+            optind++;
+            return 1;
+        }
+        return -1;
+    }
+    if (arg[1] == '-' && arg[2] == 0) { optind++; return -1; }
+    if (arg[1] == '-') {
+        /* long opt: --name or --name=val ; we don't have a table so
+         * just consume + return '?'. */
+        optopt = 0; optind++;
+        return '?';
+    }
+    /* Short option(s): position 1 is the first letter. */
+    g_curr_bundle = arg;
+    g_curr_pos    = 1;
+    return getopt_long(argc, argv, optstring, longopts, longindex);
 }
 
 /* picolibc lets the application override strerror messages via a
@@ -308,10 +358,18 @@ char *_user_strerror(int errnum, int internal, int *error) {
  * via the real upstream implementation since we vendor ntfsprogs/
  * for mkntfs. */
 
-/* mkntfs.c calls srandom() once for the volume serial. picolibc has
- * srand/rand; we route srandom to srand and random to rand so the
- * link resolves without us having to vendor BSD's random.c. */
-extern void srand(unsigned int seed);
-extern int  rand(void);
-void srandom(unsigned int seed) { srand(seed); }
-long random(void) { return (long)rand(); }
+/* mkntfs.c calls srandom() once and random() repeatedly. picolibc's
+ * srand and srandom tail-call each other (it expects whichever the
+ * application provides to be the real implementation), so we MUST
+ * define both with a self-contained state and NOT delegate to each
+ * other - otherwise we infinite-recurse and blow the stack the very
+ * first time mkntfs seeds the RNG. A tiny LCG is plenty for the only
+ * use case here: generating the volume serial number. */
+static unsigned long _canboot_rand_state = 1;
+void srandom(unsigned int seed) { _canboot_rand_state = seed ? seed : 1; }
+long random(void) {
+    _canboot_rand_state = _canboot_rand_state * 1103515245UL + 12345UL;
+    return (long)((_canboot_rand_state >> 16) & 0x7fffffffUL);
+}
+void srand(unsigned int seed) { srandom(seed); }
+int  rand(void)                { return (int)random(); }

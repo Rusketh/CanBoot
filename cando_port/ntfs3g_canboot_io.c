@@ -57,9 +57,6 @@ static int alloc_slot(struct canboot_disk *d, uint64_t off, uint64_t sz) {
 
 static int cb_open(struct ntfs_device *dev, int flags) {
     (void)flags;
-    /* mkntfs path: device created via ntfs_device_alloc(..., NULL),
-     * so dev->d_private starts NULL. We bind the canboot priv slot
-     * stashed by canboot_ntfs_format() right before the mkntfs call. */
     if (dev->d_private == NULL && canboot_ntfs_pending_priv) {
         dev->d_private = canboot_ntfs_pending_priv;
         canboot_ntfs_pending_priv = NULL;

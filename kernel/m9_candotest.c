@@ -139,7 +139,7 @@ void canboot_m9_candotest(void) {
     printf("milestone 17: partition+fs libs registered\n");
 
     /* Milestone 10: load /init.cdo from disk and run it through cando_dostring. */
-    static char init_src[8192];
+    static char init_src[32768];
     uint32_t init_len = 0;
     if (load_init_cdo(init_src, sizeof(init_src), &init_len) != 0) {
         printf("milestone 10: FAIL could not load /init.cdo\n");

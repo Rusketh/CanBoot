@@ -271,24 +271,26 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
             check 'cando fs.read new.txt = freshly-created-by-canboot'
             check 'cando fs.delete new.txt = true'
             check 'cando fs.read new.txt after delete = null'
+            # mkntfs (vendored libntfs-3g/ntfsprogs) ran end-to-end
+            # on the test image. After the format the volume looks
+            # freshly mkntfs'd from canboot - we re-detect as NTFS
+            # and write a marker file into the new filesystem.
+            check 'cando fs.mkfs ntfs = true'
+            check 'cando fs.detect after mkfs = ntfs'
+            check 'cando fs.write after mkfs = true'
+            check 'cando fs.read after mkfs = canboot-postformat-2026'
 
-            # Host-side validation: the canboot-modified NTFS volume
-            # must remount with the system ntfs-3g, and the bytes we
-            # wrote must come back exactly. Catches catastrophic on-
-            # disk-format corruption that smoke serial checks miss.
+            # Host-side validation: the canboot-formatted NTFS volume
+            # must remount with the system ntfs-3g, and the marker
+            # file canboot wrote AFTER the format must come back
+            # byte-exact. Catches catastrophic on-disk-format
+            # corruption that smoke serial checks miss.
             HOST_MNT="$(mktemp -d)"
             if ntfs-3g "$NTFS_IMG" "$HOST_MNT" -o loop,ro 2>/dev/null; then
-                if grep -q 'canboot-ntfs-write-2026' "$HOST_MNT/probe.txt" 2>/dev/null; then
-                    echo "host ntfs-3g re-read: probe.txt content survives ✓"
+                if grep -q 'canboot-postformat-2026' "$HOST_MNT/postfmt.txt" 2>/dev/null; then
+                    echo "host ntfs-3g re-read: canboot-formatted volume mounts + postfmt.txt content survives"
                 else
-                    echo "smoke test FAILED: host ntfs-3g re-read mismatch on probe.txt" >&2
-                    fusermount -u "$HOST_MNT" 2>/dev/null || umount "$HOST_MNT"
-                    rmdir "$HOST_MNT" 2>/dev/null || true
-                    exit 1
-                fi
-                # canboot's fs.delete should have removed new.txt
-                if [ -e "$HOST_MNT/new.txt" ]; then
-                    echo "smoke test FAILED: new.txt still on disk after canboot delete" >&2
+                    echo "smoke test FAILED: host ntfs-3g re-read mismatch on postfmt.txt" >&2
                     fusermount -u "$HOST_MNT" 2>/dev/null || umount "$HOST_MNT"
                     rmdir "$HOST_MNT" 2>/dev/null || true
                     exit 1
