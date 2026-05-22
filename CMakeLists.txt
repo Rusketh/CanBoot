@@ -284,9 +284,18 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
     set(DISABLE_PACKAGE_CONFIG_AND_INSTALL ON CACHE BOOL "" FORCE)
     set(GEN_FILES ON CACHE BOOL "" FORCE)
 
+    # -D_Thread_local= flattens cando's four _Thread_local statics
+    # into plain globals. -fPIC defaults gcc to General Dynamic TLS,
+    # which requires a runtime __tls_get_addr resolver we don't ship
+    # and produces JUMP_SLOT/DTPMOD relocations the EFI loader can't
+    # process. local-exec (the obvious alternative) needs TPOFF32
+    # relocations that -shared rejects. We're single-threaded anyway -
+    # the cooperative scheduler will switch _Thread_local back on once
+    # preemption arrives, if it's even still needed.
     add_compile_options(
         -ffreestanding -fno-stack-protector -fno-stack-check
         -mno-red-zone -fPIC -fcf-protection=none
+        -D_Thread_local= -D__thread=
     )
     add_subdirectory(${MBEDTLS_DIR} ${CMAKE_BINARY_DIR}/mbedtls EXCLUDE_FROM_ALL)
 endif()
@@ -369,6 +378,7 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
                     -ffreestanding -fpic -fshort-wchar -mno-red-zone
                     -fno-stack-protector -fno-stack-check
                     -fcf-protection=none
+                    -D_Thread_local= -D__thread=
                     -Wno-implicit-function-declaration
                     -Wno-int-conversion
                     -c ${_src_abs} -o ${_obj}
@@ -384,6 +394,12 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
         # libc; picolibc supplies the same symbols. With picolibc listed
         # first in --start-group, its optimised x86 versions win and
         # the libefi copies are tolerated as harmless duplicates.
+        # libgcc.a supplies the 128-bit divide builtins (__udivti3 etc.)
+        # that picolibc's bignum / Mbed TLS's int math need.
+        execute_process(
+            COMMAND ${CMAKE_C_COMPILER} -print-libgcc-file-name
+            OUTPUT_VARIABLE CANBOOT_LIBGCC OUTPUT_STRIP_TRAILING_WHITESPACE)
+
         add_custom_command(
             OUTPUT ${EFI_SO}
             COMMAND ld -nostdlib -znocombreloc
@@ -394,7 +410,7 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
                 -o ${EFI_SO}
                 --start-group
                 $<TARGET_FILE:mbedtls> $<TARGET_FILE:mbedx509> $<TARGET_FILE:mbedcrypto>
-                ${PICOLIBC_LIB} ${EFI_LIB} ${GNUEFI_LIB}
+                ${PICOLIBC_LIB} ${EFI_LIB} ${GNUEFI_LIB} ${CANBOOT_LIBGCC}
                 --end-group
             DEPENDS ${EFI_OBJS} ${GNUEFI_LDS} ${GNUEFI_CRT0} picolibc_ext
                     mbedtls mbedx509 mbedcrypto

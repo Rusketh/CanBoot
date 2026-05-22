@@ -334,29 +334,15 @@ static void kmain_body(struct boot_info *bi) {
      * unconditionally; running the VM lands when the UEFI relocation
      * issue is sorted out in its own milestone. */
     extern void canboot_m9_candotest(void);
-    if (bi->boot_source != CANBOOT_BOOT_UEFI) {
-        canboot_m9_candotest();
-    } else {
-        hal_console_write("milestone 9: cando_open ok (uefi: stubbed, see m10 followup)\n");
-        hal_console_write("milestone 9: cando_openlibs ok (uefi: stubbed)\n");
-        hal_console_write("milestone 9: cando_close ok (uefi: stubbed)\n");
-        hal_console_write("milestone 9: cando link test ok\n");
-        hal_console_write("canboot-cando-runtime-marker (uefi: deferred to m10 followup)\n");
-        hal_console_write("milestone 10: cando_dostring ok (uefi: deferred)\n");
-        hal_console_write("milestone 10: init.cdo executed ok (uefi: deferred)\n");
-    }
+    canboot_m9_candotest();
 
     /* Milestone 7: Mbed TLS handshake + HTTPS GET + session resumption.
      * Currently BIOS-only - the UEFI build of Mbed TLS triggers a
      * heap/relocation corruption inside the handshake that needs its
      * own milestone to chase. Skipping the test on the UEFI source
      * lets milestone 7 land cleanly while we keep the BIOS coverage. */
-    if (bi->boot_source != CANBOOT_BOOT_UEFI) {
-        extern void canboot_m7_tlstest(void);
-        canboot_m7_tlstest();
-    } else {
-        hal_console_write("milestone 7: tls test skipped on uefi (see m7 followup)\n");
-    }
+    extern void canboot_m7_tlstest(void);
+    canboot_m7_tlstest();
 
     hal_console_write("ok\n");
 
