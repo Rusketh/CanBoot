@@ -85,6 +85,17 @@ Landed so far:
   shims in `cando_port/shims/` (openssl, netdb, netinet, sys/mman,
   sys/socket, sys/ioctl, sys/utsname, sys/sysinfo, dirent, dlfcn,
   termios) and POSIX function stubs in `cando_port/cando_stubs.c`.
+- **Milestone 13 (first cut).** aarch64 kernel boots to `ok` on a
+  PL011 UART under `qemu-system-aarch64 -machine virt`. Cross-build
+  via `gcc-aarch64-linux-gnu` driven by
+  `cmake/toolchain-aarch64.cmake`. `arch/aarch64/bootstrap.S` handles
+  the EL2 → EL1 drop, zeroes `.bss`, sets the stack, and dispatches
+  `aarch64_kmain_entry`. `hal/console/serial_aarch64.c` polls the
+  PL011 FR.TXFF flag at the well-known QEMU virt MMIO base
+  (`0x09000000`). The aarch64 kernel is intentionally minimal in this
+  PR (no picolibc / lwIP / mbedtls / cando yet) so we have a green
+  CI signal for the cross-toolchain pipeline; subsequent aarch64
+  PRs port milestones 2-12 onto the same boot path.
 - **Milestone 12.** CanDo-facing input module. `cando_port/cando_input_lib.c`
   exposes `input.{poll, waitKey, flush, events}` on top of the
   milestone-4 HAL input queue; `waitKey` cooperatively pumps the HAL

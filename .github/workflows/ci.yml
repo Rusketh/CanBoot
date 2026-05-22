@@ -11,18 +11,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: ${{ matrix.arch }} ${{ matrix.firmware }}
+  build-x86_64:
+    name: x86_64 ${{ matrix.firmware }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - arch: x86_64
-            firmware: bios
-          - arch: x86_64
-            firmware: uefi
+        firmware: [bios, uefi]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -40,11 +36,11 @@ jobs:
             qemu-system-x86
 
       - name: Configure
-        run: cmake -B build -G Ninja -DCANBOOT_ARCH=${{ matrix.arch }}
+        run: cmake -B build -G Ninja -DCANBOOT_ARCH=x86_64
 
       - name: Build kernel ELF
         if: matrix.firmware == 'bios'
-        run: cmake --build build --target canboot-${{ matrix.arch }} --verbose
+        run: cmake --build build --target canboot-x86_64 --verbose
 
       - name: Build UEFI binary
         if: matrix.firmware == 'uefi'
@@ -53,45 +49,45 @@ jobs:
       - name: Inspect kernel ELF
         if: matrix.firmware == 'bios'
         run: |
-          file build/canboot-${{ matrix.arch }}.elf
-          readelf -h build/canboot-${{ matrix.arch }}.elf
-          readelf -lS build/canboot-${{ matrix.arch }}.elf
+          file build/canboot-x86_64.elf
+          readelf -h build/canboot-x86_64.elf
+          readelf -lS build/canboot-x86_64.elf
 
       - name: Inspect UEFI PE
         if: matrix.firmware == 'uefi'
         run: |
-          file build/canboot-${{ matrix.arch }}-uefi.efi
-          objdump -h build/canboot-${{ matrix.arch }}-uefi.efi
+          file build/canboot-x86_64-uefi.efi
+          objdump -h build/canboot-x86_64-uefi.efi
 
       - name: Build BIOS ISO
         if: matrix.firmware == 'bios'
         run: bash scripts/mkiso-bios.sh
-              build/canboot-${{ matrix.arch }}.elf
-              build/canboot-${{ matrix.arch }}-bios.iso
+              build/canboot-x86_64.elf
+              build/canboot-x86_64-bios.iso
 
       - name: Build UEFI ISO
         if: matrix.firmware == 'uefi'
         run: bash scripts/mkiso-uefi.sh
-              build/canboot-${{ matrix.arch }}-uefi.efi
-              build/canboot-${{ matrix.arch }}-uefi.iso
+              build/canboot-x86_64-uefi.efi
+              build/canboot-x86_64-uefi.iso
 
       - name: QEMU smoke test (BIOS)
         if: matrix.firmware == 'bios'
-        run: bash tests/run-qemu-bios.sh build/canboot-${{ matrix.arch }}-bios.iso
+        run: bash tests/run-qemu-bios.sh build/canboot-x86_64-bios.iso
 
       - name: QEMU smoke test (UEFI)
         if: matrix.firmware == 'uefi'
-        run: bash tests/run-qemu-uefi.sh build/canboot-${{ matrix.arch }}-uefi.iso
+        run: bash tests/run-qemu-uefi.sh build/canboot-x86_64-uefi.iso
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: canboot-${{ matrix.arch }}-${{ matrix.firmware }}
+          name: canboot-x86_64-${{ matrix.firmware }}
           path: |
-            build/canboot-${{ matrix.arch }}.elf
-            build/canboot-${{ matrix.arch }}-uefi.efi
-            build/canboot-${{ matrix.arch }}-bios.iso
-            build/canboot-${{ matrix.arch }}-uefi.iso
+            build/canboot-x86_64.elf
+            build/canboot-x86_64-uefi.efi
+            build/canboot-x86_64-bios.iso
+            build/canboot-x86_64-uefi.iso
           if-no-files-found: ignore
           retention-days: 14
 
@@ -99,9 +95,58 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: qemu-${{ matrix.firmware }}-log-${{ matrix.arch }}
+          name: qemu-${{ matrix.firmware }}-log-x86_64
           path: |
             build/qemu-bios.log
             build/qemu-uefi.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  build-aarch64:
+    name: aarch64 virt
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build \
+            gcc-aarch64-linux-gnu \
+            qemu-system-arm
+
+      - name: Configure
+        run: cmake -B build-aarch64 -G Ninja
+                -DCANBOOT_ARCH=aarch64
+                -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-aarch64.cmake
+
+      - name: Build kernel ELF
+        run: cmake --build build-aarch64 --target canboot-aarch64 --verbose
+
+      - name: Inspect kernel ELF
+        run: |
+          file build-aarch64/canboot-aarch64.elf
+          aarch64-linux-gnu-readelf -h build-aarch64/canboot-aarch64.elf
+
+      - name: QEMU smoke test (virt)
+        run: bash tests/run-qemu-aarch64.sh build-aarch64/canboot-aarch64.elf
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: canboot-aarch64
+          path: build-aarch64/canboot-aarch64.elf
+          retention-days: 14
+
+      - name: Upload serial log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-aarch64-log
+          path: build-aarch64/qemu-aarch64.log
           if-no-files-found: ignore
           retention-days: 7
