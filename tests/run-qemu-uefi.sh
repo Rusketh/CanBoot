@@ -248,6 +248,13 @@ PY
             echo "smoke test FAILED: log.setLevel(info) did not suppress debug message" >&2
             exit 1
         fi
+        check 'milestone 16: extension libs registered'
+        check 'cando url.scheme = https'
+        check 'cando url.host = 10.0.2.2'
+        check 'cando http.get = canboot-hello'
+        check 'cando https.get = canboot-secure'
+        check 'cando fmt.sprintf = hex=1234 dec=42 str=hi'
+        check 'cando ext libs end'
 
         if [ -f "$WORK/screen.ppm" ]; then
             EXPECTED=$(cat "$ROOT/tests/refs/m11-uefi.ppm.sha256" 2>/dev/null | head -1)
