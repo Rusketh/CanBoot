@@ -232,6 +232,12 @@ PY
         check 'cando net.httpGet = canboot-hello'
         check 'cando tls.httpsGet = canboot-secure'
         check 'cando sys libs end'
+        check 'milestone 14: crypto libs registered'
+        check 'cando hex.encode(canboot) = 63616e626f6f74'
+        check 'cando base64.encode(canboot) = Y2FuYm9vdA=='
+        check 'cando crypto.sha256Hex(empty) = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+        check 'cando crypto.hmacSha256Hex(k, m) = f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8'
+        check 'cando crypto libs end'
 
         if [ -f "$WORK/screen.ppm" ]; then
             EXPECTED=$(cat "$ROOT/tests/refs/m11-uefi.ppm.sha256" 2>/dev/null | head -1)
