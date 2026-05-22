@@ -133,19 +133,20 @@ jobs:
                 -DCANBOOT_ARCH=aarch64
                 -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-aarch64.cmake
 
-      - name: Build kernel ELF
+      - name: Build kernel ELF + raw .bin
         if: matrix.firmware == 'direct'
-        run: cmake --build build-aarch64 --target canboot-aarch64 --verbose
+        run: cmake --build build-aarch64 --target canboot-aarch64-bin --verbose
 
       - name: Build UEFI binary
         if: matrix.firmware == 'uefi'
         run: cmake --build build-aarch64 --target canboot-uefi --verbose
 
-      - name: Inspect kernel ELF
+      - name: Inspect kernel ELF + raw image
         if: matrix.firmware == 'direct'
         run: |
           file build-aarch64/canboot-aarch64.elf
           aarch64-linux-gnu-readelf -h build-aarch64/canboot-aarch64.elf
+          file build-aarch64/canboot-aarch64.bin
 
       - name: Inspect UEFI PE
         if: matrix.firmware == 'uefi'
@@ -161,7 +162,7 @@ jobs:
 
       - name: QEMU smoke test (virt direct -kernel)
         if: matrix.firmware == 'direct'
-        run: bash tests/run-qemu-aarch64.sh build-aarch64/canboot-aarch64.elf
+        run: bash tests/run-qemu-aarch64.sh build-aarch64/canboot-aarch64.bin
 
       - name: QEMU smoke test (virt AAVMF UEFI)
         if: matrix.firmware == 'uefi'
@@ -173,6 +174,7 @@ jobs:
           name: canboot-aarch64-${{ matrix.firmware }}
           path: |
             build-aarch64/canboot-aarch64.elf
+            build-aarch64/canboot-aarch64.bin
             build-aarch64/canboot-aarch64-uefi.efi
             build-aarch64/canboot-aarch64-uefi.img
           if-no-files-found: ignore

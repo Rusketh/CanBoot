@@ -184,7 +184,8 @@ elseif(CANBOOT_ARCH STREQUAL "aarch64")
     set(KERNEL_SOURCES
         arch/aarch64/bootstrap.S
         arch/aarch64/aarch64_entry.c
-        kernel/kmain_aarch64_stub.c
+        arch/aarch64/fdt.c
+        kernel/kmain_aarch64.c
         kernel/fb.c
         hal/console/serial_aarch64.c
     )
@@ -304,6 +305,25 @@ set_target_properties(${KERNEL_NAME} PROPERTIES
     SUFFIX ".elf"
     LINK_DEPENDS ${KERNEL_LINKER_SCRIPT}
 )
+
+# On aarch64 we also emit a raw .bin via objcopy. The bootstrap.S starts
+# with a 64-byte Linux ARM64 boot header (b _boot_entry + magic + ...),
+# which makes QEMU's -kernel path detect us as a "Linux" kernel and run
+# its boot stub - that stub is what sets x0 = FDT phys at entry. Plain
+# ELF -kernel skips the stub and leaves x0 = 0, so the raw image is the
+# canonical artifact for the direct-kernel boot path.
+if(CANBOOT_ARCH STREQUAL "aarch64")
+    set(KERNEL_BIN "${CMAKE_BINARY_DIR}/${KERNEL_NAME}.bin")
+    add_custom_command(
+        OUTPUT ${KERNEL_BIN}
+        COMMAND ${CMAKE_OBJCOPY} -O binary
+            $<TARGET_FILE:${KERNEL_NAME}> ${KERNEL_BIN}
+        DEPENDS ${KERNEL_NAME}
+        COMMENT "BIN ${KERNEL_NAME}.bin"
+        VERBATIM
+    )
+    add_custom_target(canboot-aarch64-bin ALL DEPENDS ${KERNEL_BIN})
+endif()
 
 add_custom_target(canboot-info ALL
     COMMAND ${CMAKE_COMMAND} -E echo "Kernel ELF: $<TARGET_FILE:${KERNEL_NAME}>"
@@ -547,7 +567,8 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
     # custom command producing a .o with EFI-flavoured flags.
     set(EFI_AARCH64_SOURCES
         boot/uefi/efi_main_aarch64.c
-        kernel/kmain_aarch64_stub.c
+        kernel/kmain_aarch64.c
+        kernel/fb.c
         hal/console/serial_aarch64.c
     )
 

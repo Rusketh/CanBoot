@@ -49,11 +49,38 @@ static int guid_eq(const EFI_GUID *a, const EFI_GUID *b) {
     return 1;
 }
 
+/* In headless mode (e.g. -display none) AAVMF skips ConnectController
+ * on the virtio-gpu device handle, so EFI_GRAPHICS_OUTPUT_PROTOCOL is
+ * never produced and LocateProtocol returns NOT_FOUND. The standard
+ * workaround is to walk all handles and call ConnectController(...,
+ * TRUE) on each so driver-binding protocols run; that materialises the
+ * GOP if a virtio-gpu (or any other graphics device) is attached. */
+static void force_connect_all_drivers(EFI_SYSTEM_TABLE *st) {
+    UINTN n_handles = 0;
+    EFI_HANDLE *handles = NULL;
+    EFI_STATUS s = uefi_call_wrapper(st->BootServices->LocateHandleBuffer, 5,
+                                     AllHandles, NULL, NULL,
+                                     &n_handles, &handles);
+    if (EFI_ERROR(s) || handles == NULL) return;
+    for (UINTN i = 0; i < n_handles; i++) {
+        uefi_call_wrapper(st->BootServices->ConnectController, 4,
+                          handles[i], NULL, NULL, TRUE);
+    }
+    uefi_call_wrapper(st->BootServices->FreePool, 1, handles);
+}
+
 static void populate_fb(EFI_SYSTEM_TABLE *st, struct boot_info *bi) {
     EFI_GUID gop_guid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
     EFI_GRAPHICS_OUTPUT_PROTOCOL *gop = NULL;
     EFI_STATUS s = uefi_call_wrapper(st->BootServices->LocateProtocol, 3,
                                      &gop_guid, NULL, (void **)&gop);
+    if (EFI_ERROR(s) || gop == NULL) {
+        /* Try again after kicking the driver-binding loop. */
+        force_connect_all_drivers(st);
+        gop = NULL;
+        s = uefi_call_wrapper(st->BootServices->LocateProtocol, 3,
+                              &gop_guid, NULL, (void **)&gop);
+    }
     if (EFI_ERROR(s) || gop == NULL || gop->Mode == NULL || gop->Mode->Info == NULL) {
         bi->fb.format = CANBOOT_FB_NONE;
         return;
