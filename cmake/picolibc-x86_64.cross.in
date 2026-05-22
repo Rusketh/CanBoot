@@ -15,5 +15,5 @@ skip_sanity_check = true
 needs_exe_wrapper = true
 
 [built-in options]
-c_args = ['-ffreestanding', '-fno-stack-protector', '-fno-stack-check', '-mno-red-zone', '-fpic']
+c_args = ['-ffreestanding', '-fno-stack-protector', '-fno-stack-check', '-mno-red-zone', '-fpic', '-fcf-protection=none']
 c_link_args = ['-nostdlib']

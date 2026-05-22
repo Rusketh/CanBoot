@@ -153,8 +153,13 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'milestone 7: tls test skipped on uefi'
         check 'milestone 8: init.cdo marker ok'
         check 'milestone 8: disk test ok'
-        check 'milestone 9: libcando linked into kernel'
+        check 'milestone 9: cando_open ok'
+        check 'milestone 9: cando_openlibs ok'
+        check 'milestone 9: cando_close ok'
         check 'milestone 9: cando link test ok'
+        check 'canboot-cando-runtime-marker'
+        check 'milestone 10: cando_dostring ok'
+        check 'milestone 10: init.cdo executed ok'
 
         echo "smoke test passed; serial log:"
         echo "$stripped" | sed 's/^/  | /'

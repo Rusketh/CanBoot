@@ -3,7 +3,7 @@
 //
 // Loaded by kmain at boot from /init.cdo on the first writable disk,
 // falling back to the boot ISO9660 image if no disk carries one.
-// Once the CanDo VM is vendored (milestone 9) this file is what the
-// vendored interpreter will execute as the userspace entry point.
+// Executed by libcando via cando_dostring once milestone 10 stands
+// the VM up on bare metal.
 
-print("canboot: hello from init.cdo")
+print("canboot-cando-runtime-marker init.cdo executed inside vm");

@@ -86,11 +86,22 @@ Landed so far:
   shims in `cando_port/shims/` (openssl, netdb, netinet, sys/mman,
   sys/socket, sys/ioctl, sys/utsname, sys/sysinfo, dirent, dlfcn,
   termios) and POSIX function stubs in `cando_port/cando_stubs.c`.
-  `kernel/m9_candotest.c` confirms the public entry points
-  (`cando_open`/`cando_openlibs`/`cando_close`) are linked into the
-  kernel; full runtime bring-up (calling `cando_open` then
-  `cando_dofile("/init.cdo")`) lands in milestone 10 once the
-  startup-time syscall surface is fully shaken out.
+- **Milestone 10 (plan's primary milestone).** The CanDo VM runs on
+  bare metal. `kmain` now installs a minimal IDT
+  (`arch/x86_64/idt.{c,h}`, `arch/x86_64/idt_stubs.S`) that prints
+  trap frames on any CPU exception, sets up FS_BASE against a static
+  16 KiB TLS area for cando's `_Thread_local` variables, drops
+  `-fcf-protection` so gcc stops emitting `endbr64` (QEMU's `qemu64`
+  CPU lacks CET and treats it as #UD), and calls
+  `cando_open` → `cando_openlibs` → `cando_dostring(/init.cdo
+  contents)` → `cando_close`. `/init.cdo` is loaded via milestone 8's
+  FAT32+ISO9660 path and executes inside the VM; its `print()` lands
+  on serial via picolibc → `hal_console`. BIOS smoke test asserts the
+  `canboot-cando-runtime-marker` line came from cando. UEFI tracks
+  the same EFI shared-object PIC-relocation followup as milestone 7's
+  Mbed TLS: cando_open's first function-pointer call jumps into the
+  `.data` section; the runtime is stubbed there until we add a
+  dedicated UEFI-mbedtls/cando link milestone.
 - **Milestone 8.** HAL disk surface (`hal/include/hal/disk.h`,
   `hal/disk/disk.c`) plus three drivers wired underneath: virtio-blk
   (`hal/disk/virtio_blk.c`, reuses milestone 4's virtio-pci
