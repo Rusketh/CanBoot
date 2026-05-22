@@ -43,6 +43,8 @@ void        canboot_cando_open_fblib(CandoVM *vm);
 void        canboot_cando_open_fmtlib(CandoVM *vm);
 void        canboot_cando_open_partitionlib(CandoVM *vm);
 void        canboot_cando_open_fslib(CandoVM *vm);
+void        canboot_cando_open_imagelib(CandoVM *vm);
+void        canboot_cando_open_audiolib(CandoVM *vm);
 
 #include "hal/display.h"
 #include "hal/input.h"
@@ -137,6 +139,12 @@ void canboot_m9_candotest(void) {
     canboot_cando_open_partitionlib(vm);
     canboot_cando_open_fslib(vm);
     printf("milestone 17: partition+fs libs registered\n");
+
+    /* Milestone 18: image decoders (PNG/JPG/BMP via stb_image) +
+     * audio HAL surface (WAV inline, MP3 via minimp3). */
+    canboot_cando_open_imagelib(vm);
+    canboot_cando_open_audiolib(vm);
+    printf("milestone 18: image+audio libs registered\n");
 
     /* Milestone 10: load /init.cdo from disk and run it through cando_dostring. */
     static char init_src[32768];

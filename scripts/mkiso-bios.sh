@@ -22,9 +22,14 @@ cp "$KERNEL" "$WORKDIR/boot/canboot.elf"
 
 # Embed /init.cdo at the ISO root so the milestone 8 disk test can find
 # it via ISO9660 when no attached FAT32 disk is present.
-INIT_CDO="$(cd "$(dirname "$0")/.." && pwd)/initramfs/init.cdo"
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+INIT_CDO="$ROOT_DIR/initramfs/init.cdo"
 if [ -f "$INIT_CDO" ]; then
     cp "$INIT_CDO" "$WORKDIR/init.cdo"
+fi
+PROBE_PNG="$ROOT_DIR/initramfs/probe.png"
+if [ -f "$PROBE_PNG" ]; then
+    cp "$PROBE_PNG" "$WORKDIR/probe.png"
 fi
 
 cat > "$WORKDIR/boot/grub/grub.cfg" <<'EOF'

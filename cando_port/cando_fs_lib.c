@@ -245,8 +245,12 @@ static int f_read(CandoVM *vm, int argc, CandoValue *args) {
          * test image is whole-disk FAT32). Multi-partition FAT32
          * mounts would need a partition-relative read shim. */
         if (p.start_lba != 0) goto fail;
+        /* FAT32 root-dir lookup expects bare 8.3 names; strip the
+         * leading '/' that scripts pass in to match the libntfs-3g
+         * / lwext4 conventions. */
+        const char *fat_name = (name[0] == '/') ? name + 1 : name;
         uint32_t got = 0;
-        if (canboot_fat32_read_root_file(&fs, name, buf, sizeof(buf) - 1, &got) > 0) {
+        if (canboot_fat32_read_root_file(&fs, fat_name, buf, sizeof(buf) - 1, &got) > 0) {
             buf[got < sizeof(buf) - 1 ? got : sizeof(buf) - 1] = '\0';
             CandoString *s = cando_string_new(buf, got);
             cando_vm_push(vm, cando_string_value(s));
@@ -322,8 +326,9 @@ static int f_write(CandoVM *vm, int argc, CandoValue *args) {
     const char *t = detect_fs(d, p.start_lba);
     if (strcmp(t, "fat32") == 0 && p.start_lba == 0) {
         struct canboot_fat32 fs;
+        const char *fat_name = (name[0] == '/') ? name + 1 : name;
         if (canboot_fat32_open(d, &fs) &&
-            canboot_fat32_write_root_file(&fs, name, data, (uint32_t)strlen(data)) == 0) {
+            canboot_fat32_write_root_file(&fs, fat_name, data, (uint32_t)strlen(data)) == 0) {
             cando_vm_push(vm, cando_bool(true));
             return 1;
         }
@@ -388,8 +393,9 @@ static int f_delete(CandoVM *vm, int argc, CandoValue *args) {
     const char *t = detect_fs(d, p.start_lba);
     if (strcmp(t, "fat32") == 0 && p.start_lba == 0) {
         struct canboot_fat32 fs;
+        const char *fat_name = (name[0] == '/') ? name + 1 : name;
         if (canboot_fat32_open(d, &fs) &&
-            canboot_fat32_delete_root_file(&fs, name) == 0) {
+            canboot_fat32_delete_root_file(&fs, fat_name) == 0) {
             cando_vm_push(vm, cando_bool(true));
             return 1;
         }

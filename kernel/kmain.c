@@ -331,6 +331,19 @@ static void kmain_body(struct boot_info *bi) {
     extern void canboot_m8_disktest(void);
     canboot_m8_disktest();
 
+    /* Milestone 18: Intel HDA audio probe. Best-effort; the cando
+     * audio library still works against the stub backend if no real
+     * sound device is present. */
+    extern bool hal_audio_init(void);
+    extern const char *hal_audio_device_name(void);
+    if (hal_audio_init()) {
+        hal_console_write("canboot: audio device=");
+        hal_console_write(hal_audio_device_name());
+        hal_console_write("\n");
+    } else {
+        hal_console_write("canboot: audio device=none\n");
+    }
+
     /* Milestone 9+10: vendored CanDo - link, open VM, run /init.cdo.
      * Currently BIOS-only - the UEFI EFI shared-object link mis-relocates
      * function-pointer call sites deep in libcando the same way it does

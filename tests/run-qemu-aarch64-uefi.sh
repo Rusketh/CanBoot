@@ -372,6 +372,32 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
             echo "(ext4 disk attached but canboot reported disk.count() != 3 - skipping ext4 assertions)" >&2
             grep -E 'cando disk count =|cando disk[0-9]+' <<<"$stripped" | sed 's/^/  ext4-diag | /' >&2
         fi
+        # Image library: stb_image decoded the 4x4 PNG on the boot
+        # disk and pixel sampling returns the known quadrant colours.
+        # Pixel encoding is 0xAABBGGRR uint32 (little-endian bytes
+        # R, G, B, A) - top-left is pure red so the high byte's R
+        # nibble is 0xFF and the low bytes encode opaque alpha.
+        check 'cando image.decode rc = 0'
+        check 'cando image.width = 4'
+        check 'cando image.height = 4'
+        check 'cando image.pixel(0,0) = 4278190335'   # 0xFF0000FF (R)
+        check 'cando image.pixel(3,0) = 4278255360'   # 0xFF00FF00 (G)
+        check 'cando image.pixel(0,3) = 4294901760'   # 0xFFFF0000 (B)
+        check 'cando image.pixel(3,3) = 4294967295'   # 0xFFFFFFFF (W)
+        check 'cando image.draw scaled = true'
+        check 'cando image.free = true'
+
+        # Audio HAL surface: the build always carries the WAV parser
+        # + minimp3 decoder, but `audio.present()` reports false until
+        # the HAL audio backend (Intel HDA / virtio-sound) ships and
+        # successfully binds a device. The play call must accept the
+        # samples regardless so scripts work portably against the
+        # stub backend.
+        check 'cando audio libs begin'
+        check 'cando audio.deviceName ='
+        check 'cando audio.play wav = true'
+        check 'cando audio libs end'
+
         check 'cando input poll begin'
         check 'cando input poll end'
 

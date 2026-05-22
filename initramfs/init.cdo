@@ -15,6 +15,23 @@ display.fillRect(300, 100, 100, 100, 255);            // 0x0000FF - blue
 display.line(0, 0, 400, 200, 16777215);               // 0xFFFFFF - white
 display.text(160, 220, "CanBoot init.cdo", 16777215, 0);
 
+// ---- Milestone 18: image.* (paint before the screendump marker
+// so the captured framebuffer is deterministic across hosts; the
+// timing race between init.cdo execution and the host-side QEMU
+// screendump command otherwise made the m11 sha256 baseline depend
+// on per-host scheduling). -------------------------------------------
+VAR png_early = fs.read(0, 0, "/probe.png");
+VAR ih_early  = image.decode(png_early);
+print("cando image.decode rc =", ih_early);
+print("cando image.width =", image.width(ih_early));
+print("cando image.height =", image.height(ih_early));
+print("cando image.pixel(0,0) =", image.pixel(ih_early, 0, 0));
+print("cando image.pixel(3,0) =", image.pixel(ih_early, 3, 0));
+print("cando image.pixel(0,3) =", image.pixel(ih_early, 0, 3));
+print("cando image.pixel(3,3) =", image.pixel(ih_early, 3, 3));
+print("cando image.draw scaled =", image.draw(ih_early, 500, 10, 80, 80));
+print("cando image.free =", image.free(ih_early));
+
 print("init.cdo painted display");
 
 // ---- Milestone 12: input.* -------------------------------------------
@@ -233,3 +250,32 @@ IF (disk.count() >= 3) {
 }
 
 print("cando part libs end");
+
+// The image library is exercised in the early-paint block above
+// (before the screendump marker) so the assertion lines surface in
+// the same place the m11 PPM hash check expects. Skipping the
+// late re-decode keeps the test budget tight without losing coverage.
+
+// Audio library. The build always carries the WAV parser + minimp3
+// decoder; whether anything actually plays depends on the HAL audio
+// backend (Intel HDA / virtio-sound) being bound at boot time.
+print("cando audio libs begin");
+print("cando audio.present =", audio.present());
+print("cando audio.deviceName =", audio.deviceName());
+// Synthesise a 0.25 s 440 Hz sine wave as PCM and wrap it in a
+// minimal RIFF/WAVE header. The decoder + queueing path is exercised
+// regardless of whether the HAL backend is real; a no-op stub keeps
+// the call returning true so scripts work portably.
+VAR sr = 44100;
+VAR ns = 11025;        // 0.25 s of mono 16-bit PCM
+VAR data_sz = ns * 2;  // 16 bits * 1 channel
+VAR riff_sz = 36 + data_sz;
+VAR hdr = "RIFF";
+hdr = hdr + fmt.u32le(riff_sz);
+hdr = hdr + "WAVEfmt " + fmt.u32le(16) + fmt.u16le(1) + fmt.u16le(1)
+          + fmt.u32le(sr) + fmt.u32le(sr * 2) + fmt.u16le(2) + fmt.u16le(16)
+          + "data" + fmt.u32le(data_sz);
+VAR tone = fmt.sineWave16(440, sr, ns);
+print("cando audio.play wav =", audio.play(hdr + tone));
+audio.stop();
+print("cando audio libs end");
