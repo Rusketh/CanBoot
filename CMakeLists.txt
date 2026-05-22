@@ -51,6 +51,7 @@ set(CANBOOT_KERNEL_COMMON
     cando_port/cando_partition_lib.c
     cando_port/cando_fs_lib.c
     cando_port/ntfs3g_canboot_io.c
+    cando_port/ntfs3g_canboot_glue.c
     fs/partition.c
     fs/ntfs.c
     fs/iso9660.c
@@ -275,7 +276,7 @@ add_executable(${KERNEL_NAME} ${KERNEL_SOURCES})
 set_source_files_properties(${CANBOOT_NTFS3G_SOURCES} PROPERTIES
     COMPILE_FLAGS "-include ${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_canboot_shim.h -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g -I${CMAKE_SOURCE_DIR}/cando_port/shims -DHAVE_CONFIG_H=1 -w"
 )
-set_source_files_properties(cando_port/ntfs3g_canboot_io.c PROPERTIES
+set_source_files_properties(cando_port/ntfs3g_canboot_io.c cando_port/ntfs3g_canboot_glue.c PROPERTIES
     COMPILE_FLAGS "-include ${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_canboot_shim.h -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g -DHAVE_CONFIG_H=1 -w"
 )
 
@@ -536,7 +537,7 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
             math(EXPR _efi_obj_seq "${_efi_obj_seq} + 1")
             set(_obj "${CMAKE_BINARY_DIR}/efi_${_efi_obj_seq}_${_name}.o")
             set(_extra_flags "")
-            if(_src_abs MATCHES "/libntfs-3g/" OR _src_abs MATCHES "/ntfs3g_canboot_io")
+            if(_src_abs MATCHES "/libntfs-3g/" OR _src_abs MATCHES "/ntfs3g_canboot_")
                 set(_extra_flags
                     "-include" "${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_canboot_shim.h"
                     -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot
@@ -757,6 +758,7 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
         cando_port/cando_partition_lib.c
         cando_port/cando_fs_lib.c
         cando_port/ntfs3g_canboot_io.c
+        cando_port/ntfs3g_canboot_glue.c
         cando_port/jit_codegen_stub_aarch64.c
         fs/partition.c
         fs/ntfs.c
@@ -778,7 +780,7 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
         math(EXPR _efi_obj_seq "${_efi_obj_seq} + 1")
         set(_obj "${CMAKE_BINARY_DIR}/efi_aarch64_${_efi_obj_seq}_${_name}.o")
         set(_extra_flags "")
-        if(_src_abs MATCHES "/libntfs-3g/" OR _src_abs MATCHES "/ntfs3g_canboot_io")
+        if(_src_abs MATCHES "/libntfs-3g/" OR _src_abs MATCHES "/ntfs3g_canboot_")
             set(_extra_flags
                 "-include" "${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_canboot_shim.h"
                 -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot

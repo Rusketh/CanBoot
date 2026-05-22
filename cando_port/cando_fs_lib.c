@@ -33,6 +33,16 @@
 #include "fs/ntfs.h"
 #include "fs/iso9660.h"
 
+/* libntfs-3g glue (cando_port/ntfs3g_canboot_glue.c). Linked but not
+ * yet exercised against a real NTFS volume - the next PR adds a CI
+ * mkfs.ntfs test image. Declared inline so we don't have to add yet
+ * another header just for these four entry points. */
+int canboot_ntfs3g_open (struct canboot_disk *d, uint64_t off, uint64_t sz);
+int canboot_ntfs3g_close(int handle);
+int canboot_ntfs3g_read (int handle, const char *path, void *buf, int len);
+int canboot_ntfs3g_write(int handle, const char *path, const void *buf, int len);
+int canboot_ntfs3g_label(int handle, char *out, int cap);
+
 #include "core/value.h"
 #include "vm/vm.h"
 #include "vm/bridge.h"
@@ -203,6 +213,21 @@ static int f_read(CandoVM *vm, int argc, CandoValue *args) {
             return 1;
         }
     } else if (strcmp(t, "ntfs") == 0) {
+        /* Prefer libntfs-3g (vendored, full r/w capable in principle)
+         * over our minimal read-only driver. Falls back if mount fails. */
+        uint64_t bs = d->block_size;
+        int h = canboot_ntfs3g_open(d, p.start_lba * bs, p.size_lba * bs);
+        if (h >= 0) {
+            int n = canboot_ntfs3g_read(h, name, buf, sizeof(buf) - 1);
+            canboot_ntfs3g_close(h);
+            if (n > 0) {
+                buf[n] = '\0';
+                CandoString *s = cando_string_new(buf, (uint32_t)n);
+                cando_vm_push(vm, cando_string_value(s));
+                return 1;
+            }
+        }
+        /* Fallback: our in-tree read-only NTFS driver. */
         struct canboot_ntfs fs;
         if (!canboot_ntfs_open(d, p.start_lba, &fs)) goto fail;
         uint32_t got = 0;
@@ -251,8 +276,22 @@ static int f_write(CandoVM *vm, int argc, CandoValue *args) {
             cando_vm_push(vm, cando_bool(true));
             return 1;
         }
+    } else if (strcmp(t, "ntfs") == 0) {
+        /* Route through libntfs-3g. WRITE PATH IS UNVERIFIED - the
+         * library is vendored + linked but never been exercised
+         * against a real Windows-touched volume in this codebase.
+         * Use at your own risk; production install/repair tooling
+         * needs the chkdsk-validation PR before relying on this. */
+        uint64_t bs = d->block_size;
+        int h = canboot_ntfs3g_open(d, p.start_lba * bs, p.size_lba * bs);
+        if (h >= 0) {
+            int n = canboot_ntfs3g_write(h, name, data, (int)strlen(data));
+            canboot_ntfs3g_close(h);
+            cando_vm_push(vm, cando_bool(n > 0));
+            return 1;
+        }
     }
-    /* ntfs / ext4 writes deferred. */
+    /* ext4 writes deferred. */
     cando_vm_push(vm, cando_bool(false));
     return 1;
 }
