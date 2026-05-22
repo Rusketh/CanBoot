@@ -7,10 +7,11 @@ set -euo pipefail
 
 IMG="${1:-build-aarch64/canboot-aarch64-uefi.img}"
 LOG="${LOG:-build-aarch64/qemu-aarch64-uefi.log}"
-TIMEOUT="${TIMEOUT:-90}"
+TIMEOUT="${TIMEOUT:-120}"
 
 AAVMF_CODE="${AAVMF_CODE:-/usr/share/AAVMF/AAVMF_CODE.fd}"
 AAVMF_VARS_SRC="${AAVMF_VARS_SRC:-/usr/share/AAVMF/AAVMF_VARS.fd}"
+MON_SOCK="${MON_SOCK:-$(dirname "$LOG")/mon.sock}"
 
 if [ ! -f "$IMG" ]; then
     echo "error: ESP image not found at $IMG" >&2
@@ -55,12 +56,46 @@ qemu-system-aarch64 \
     -drive if=pflash,format=raw,file="$AAVMF_VARS" \
     -drive if=none,id=hd0,format=raw,file="$IMG" \
     -device virtio-blk-pci,drive=hd0,bootindex=0 \
+    -device virtio-keyboard-pci \
     -serial "file:$LOG" \
-    -monitor none \
+    -monitor "unix:$MON_SOCK,server,nowait" \
     >/dev/null 2>"$QEMU_STDERR" &
 QEMU_PID=$!
 
+# Background injector: once we see "input loop start", send a few keys
+# via HMP so the kernel's virtio-input pump receives them.
+(
+    for _ in $(seq 1 30); do
+        [ -S "$MON_SOCK" ] && break
+        sleep 0.2
+    done
+    for _ in $(seq 1 200); do
+        if grep -q 'canboot: input loop start' "$LOG" 2>/dev/null; then
+            break
+        fi
+        sleep 0.1
+    done
+    python3 - "$MON_SOCK" <<'PY' 2>/dev/null || true
+import socket, sys, time
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+try:
+    sock.connect(sys.argv[1])
+except Exception:
+    sys.exit(0)
+time.sleep(0.2)
+for k in ("a", "b", "ret"):
+    sock.sendall(("sendkey " + k + "\n").encode())
+    time.sleep(0.3)
+sock.close()
+PY
+) &
+INJECTOR_PID=$!
+
 cleanup() {
+    if kill -0 "$INJECTOR_PID" 2>/dev/null; then
+        kill "$INJECTOR_PID" 2>/dev/null || true
+        wait "$INJECTOR_PID" 2>/dev/null || true
+    fi
     if kill -0 "$QEMU_PID" 2>/dev/null; then
         kill "$QEMU_PID" 2>/dev/null || true
         wait "$QEMU_PID" 2>/dev/null || true
@@ -88,6 +123,15 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'canboot: mmap entries='
         check 'canboot: platform-tables='
         check 'canboot: handshake confirmed (aarch64 milestone-3)'
+        check 'canboot: pci devs='
+        check 'canboot: virtio-input present'
+        check 'canboot: input loop start'
+        check 'canboot: input loop done events='
+        if ! grep -qE "canboot: rx code=0x[0-9a-f]+ ascii='a'" <<<"$stripped"; then
+            echo "smoke test FAILED: virtio-input did not echo injected 'a'" >&2
+            echo "$stripped" | sed 's/^/  | /' >&2
+            exit 1
+        fi
         check 'milestone 5: starting self-test'
         check 'milestone 5: self-test ok'
 
