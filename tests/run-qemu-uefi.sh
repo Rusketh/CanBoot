@@ -290,7 +290,10 @@ PY
         # Milestone 18 audio assertions (same shape as the BIOS test).
         check 'cando audio.deviceName = intel-hda'
         check 'cando audio.present = true'
-        check 'cando audio.play wav = true'
+        check 'cando audio.newSource = 0'
+        check 'cando audio.play(src) = true'
+        check 'cando audio.isPlaying(src) = true'
+        check 'cando audio.isPlaying after stop = false'
         if [ -f "$AUDIO_WAV" ] && [ "$(stat -c '%s' "$AUDIO_WAV")" -gt 4096 ]; then
             if python3 -c "
 import sys

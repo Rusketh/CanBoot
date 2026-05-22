@@ -401,7 +401,10 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'cando audio libs begin'
         check 'cando audio.deviceName = virtio-snd'
         check 'cando audio.present = true'
-        check 'cando audio.play wav = true'
+        check 'cando audio.newSource = 0'
+        check 'cando audio.play(src) = true'
+        check 'cando audio.isPlaying(src) = true'
+        check 'cando audio.isPlaying after stop = false'
         check 'cando audio libs end'
 
         # Audio capture validation: virtio-snd shovels canboot's

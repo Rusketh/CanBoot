@@ -16,6 +16,10 @@
 #include "lwip/sys.h"
 #include "hal/net.h"
 
+/* Cando audio mixer pump - auto-tick from this module so scripts that
+ * call time.ms / time.sleep don't need to remember audio.update(). */
+extern void canboot_audio_pump_default(void);
+
 #include "core/value.h"
 #include "vm/vm.h"
 #include "vm/bridge.h"
@@ -39,6 +43,7 @@ static inline uint64_t arch_now(void) {
 
 static int t_ms(CandoVM *vm, int argc, CandoValue *args) {
     (void)argc; (void)args;
+    canboot_audio_pump_default();
     cando_vm_push(vm, cando_number((f64)sys_now()));
     return 1;
 }
@@ -70,6 +75,7 @@ static int t_sleep(CandoVM *vm, int argc, CandoValue *args) {
     uint64_t dl = arch_now() + ((uint64_t)ms * hz) / 1000ull;
     while (arch_now() < dl) {
         hal_net_pump();
+        canboot_audio_pump_default();
 #if defined(__x86_64__)
         __asm__ volatile ("pause");
 #elif defined(__aarch64__)
