@@ -69,6 +69,7 @@ qemu-system-aarch64 \
     -drive if=none,id=hd0,format=raw,file="$IMG" \
     -device virtio-blk-pci,drive=hd0,bootindex=0 \
     -device virtio-keyboard-pci \
+    -device virtio-gpu-pci \
     -netdev user,id=n0 \
     -device virtio-net-pci,netdev=n0,romfile= \
     -serial "file:$LOG" \
@@ -186,7 +187,9 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'milestone 9: cando link test ok'
         check 'milestone 10: cando_dostring ok'
         check 'milestone 10: init.cdo executed ok'
+        check 'canboot: virtio-gpu fb '
         check 'milestone 11: display lib registered'
+        check 'milestone 11: display test ok'
         check 'milestone 12: input lib registered'
         check 'cando input poll begin'
         check 'cando input poll end'
