@@ -377,7 +377,6 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         # Pixel encoding is 0xAABBGGRR uint32 (little-endian bytes
         # R, G, B, A) - top-left is pure red so the high byte's R
         # nibble is 0xFF and the low bytes encode opaque alpha.
-        check 'cando image libs begin'
         check 'cando image.decode rc = 0'
         check 'cando image.width = 4'
         check 'cando image.height = 4'
@@ -387,7 +386,6 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'cando image.pixel(3,3) = 4294967295'   # 0xFFFFFFFF (W)
         check 'cando image.draw scaled = true'
         check 'cando image.free = true'
-        check 'cando image libs end'
 
         # Audio HAL surface: the build always carries the WAV parser
         # + minimp3 decoder, but `audio.present()` reports false until

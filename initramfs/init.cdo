@@ -15,6 +15,23 @@ display.fillRect(300, 100, 100, 100, 255);            // 0x0000FF - blue
 display.line(0, 0, 400, 200, 16777215);               // 0xFFFFFF - white
 display.text(160, 220, "CanBoot init.cdo", 16777215, 0);
 
+// ---- Milestone 18: image.* (paint before the screendump marker
+// so the captured framebuffer is deterministic across hosts; the
+// timing race between init.cdo execution and the host-side QEMU
+// screendump command otherwise made the m11 sha256 baseline depend
+// on per-host scheduling). -------------------------------------------
+VAR png_early = fs.read(0, 0, "/probe.png");
+VAR ih_early  = image.decode(png_early);
+print("cando image.decode rc =", ih_early);
+print("cando image.width =", image.width(ih_early));
+print("cando image.height =", image.height(ih_early));
+print("cando image.pixel(0,0) =", image.pixel(ih_early, 0, 0));
+print("cando image.pixel(3,0) =", image.pixel(ih_early, 3, 0));
+print("cando image.pixel(0,3) =", image.pixel(ih_early, 0, 3));
+print("cando image.pixel(3,3) =", image.pixel(ih_early, 3, 3));
+print("cando image.draw scaled =", image.draw(ih_early, 500, 10, 80, 80));
+print("cando image.free =", image.free(ih_early));
+
 print("init.cdo painted display");
 
 // ---- Milestone 12: input.* -------------------------------------------
@@ -234,30 +251,10 @@ IF (disk.count() >= 3) {
 
 print("cando part libs end");
 
-// Image library: decode a tiny 4x4 PNG from /probe.png, sample known
-// pixels, and blit it into the framebuffer corner. The decoder
-// supports PNG, JPG, BMP (single stb_image header).
-print("cando image libs begin");
-VAR png = fs.read(0, 0, "/probe.png");
-VAR ih  = image.decode(png);
-print("cando image.decode rc =", ih);
-print("cando image.width =", image.width(ih));
-print("cando image.height =", image.height(ih));
-// Sample the four 2x2 quadrants. The image is 4x4 with:
-//   top-left  pure red    (R=255, G=0,   B=0)
-//   top-right pure green  (R=0,   G=255, B=0)
-//   bot-left  pure blue   (R=0,   G=0,   B=255)
-//   bot-right pure white  (R=255, G=255, B=255)
-// pixel() returns a uint32 packed as 0xAABBGGRR.
-print("cando image.pixel(0,0) =", image.pixel(ih, 0, 0));
-print("cando image.pixel(3,0) =", image.pixel(ih, 3, 0));
-print("cando image.pixel(0,3) =", image.pixel(ih, 0, 3));
-print("cando image.pixel(3,3) =", image.pixel(ih, 3, 3));
-// Draw scaled into a 80x80 patch at (500, 10). The smoke test
-// samples one of those pixels to verify the blit landed.
-print("cando image.draw scaled =", image.draw(ih, 500, 10, 80, 80));
-print("cando image.free =", image.free(ih));
-print("cando image libs end");
+// The image library is exercised in the early-paint block above
+// (before the screendump marker) so the assertion lines surface in
+// the same place the m11 PPM hash check expects. Skipping the
+// late re-decode keeps the test budget tight without losing coverage.
 
 // Audio library. The build always carries the WAV parser + minimp3
 // decoder; whether anything actually plays depends on the HAL audio
