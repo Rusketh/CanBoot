@@ -61,12 +61,28 @@ Landed so far:
   smoke test on the host's loopback. `kmain` enables SSE/SSE2 state
   bits in CR0/CR4 so picolibc + lwIP can use SSE-emitting paths
   without tripping #UD.
+- **Milestone 7.** Mbed TLS 3.6.6 (LTS) vendored at `vendor/mbedtls`
+  and brought in via `add_subdirectory(EXCLUDE_FROM_ALL)`; the
+  user-config in `net/mbedtls_port/include/canboot_mbedtls_user_config.h`
+  trims POSIX dependencies. A hardware entropy hook
+  (`net/mbedtls_port/entropy.c`) tries RDSEED/RDRAND (CPUID-gated to
+  avoid #UD on `qemu64`) then falls back to a TSC-jitter mixer; a
+  cooperative TCP BIO (`net/mbedtls_port/lwip_bio.c`) wraps lwIP's
+  raw API into the synchronous `mbedtls_ssl_send`/`recv` shape Mbed
+  TLS expects. `kernel/m7_tlstest.c` performs the full TLS 1.2
+  handshake against a sidecar Python HTTPS server
+  (`tests/sidecars/https_secure.py`) using a pinned self-signed CA
+  at `tests/sidecars/tls/canboot-test.pem` (embedded in the kernel via
+  `kernel/canboot_test_ca.c`, regenerable with
+  `scripts/embed-test-ca.sh`), validates the chain, issues an HTTPS
+  GET, then reconnects to verify session-ticket resumption (~25x
+  faster handshake). Currently BIOS-only; UEFI Mbed TLS link tracks a
+  separate followup issue.
 
 Upcoming milestones bring up the rest of the HAL surface (disk, fs,
-time, entropy), integrate Mbed TLS for HTTPS, vendor the CanDo
-submodule with its patch series, and ship the full set of release
-artifacts (hybrid ISO, single-firmware ISOs, PXE bundle, raw `.img`,
-standalone `.efi`).
+time, entropy), vendor the CanDo submodule with its patch series, and
+ship the full set of release artifacts (hybrid ISO, single-firmware
+ISOs, PXE bundle, raw `.img`, standalone `.efi`).
 
 ## Building locally
 
