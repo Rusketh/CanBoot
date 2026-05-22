@@ -37,11 +37,13 @@
  * yet exercised against a real NTFS volume - the next PR adds a CI
  * mkfs.ntfs test image. Declared inline so we don't have to add yet
  * another header just for these four entry points. */
-int canboot_ntfs3g_open (struct canboot_disk *d, uint64_t off, uint64_t sz);
-int canboot_ntfs3g_close(int handle);
-int canboot_ntfs3g_read (int handle, const char *path, void *buf, int len);
-int canboot_ntfs3g_write(int handle, const char *path, const void *buf, int len);
-int canboot_ntfs3g_label(int handle, char *out, int cap);
+int canboot_ntfs3g_open  (struct canboot_disk *d, uint64_t off, uint64_t sz);
+int canboot_ntfs3g_close (int handle);
+int canboot_ntfs3g_read  (int handle, const char *path, void *buf, int len);
+int canboot_ntfs3g_write (int handle, const char *path, const void *buf, int len);
+int canboot_ntfs3g_create(int handle, const char *path, const void *buf, int len);
+int canboot_ntfs3g_delete(int handle, const char *path);
+int canboot_ntfs3g_label (int handle, char *out, int cap);
 
 #include "core/value.h"
 #include "vm/vm.h"
@@ -291,15 +293,16 @@ static int f_write(CandoVM *vm, int argc, CandoValue *args) {
             return 1;
         }
     } else if (strcmp(t, "ntfs") == 0) {
-        /* Route through libntfs-3g. WRITE PATH IS UNVERIFIED - the
-         * library is vendored + linked but never been exercised
-         * against a real Windows-touched volume in this codebase.
-         * Use at your own risk; production install/repair tooling
-         * needs the chkdsk-validation PR before relying on this. */
+        /* Route through libntfs-3g. Upsert semantics: try write to
+         * existing file first; if pathname lookup fails, fall through
+         * to ntfs_create which makes a fresh inode + writes the
+         * payload as the initial $DATA content. */
         uint64_t bs = d->block_size;
         int h = canboot_ntfs3g_open(d, p.start_lba * bs, p.size_lba * bs);
         if (h >= 0) {
-            int n = canboot_ntfs3g_write(h, name, data, (int)strlen(data));
+            int len = (int)strlen(data);
+            int n = canboot_ntfs3g_write(h, name, data, len);
+            if (n <= 0) n = canboot_ntfs3g_create(h, name, data, len);
             canboot_ntfs3g_close(h);
             cando_vm_push(vm, cando_bool(n > 0));
             return 1;
@@ -328,6 +331,37 @@ static bool fat_list_cb(const char *name, uint32_t size, void *user) {
 static bool ntfs_list_cb(const char *name, uint64_t size, void *user) {
     (void)size;
     return fat_list_cb(name, 0, user);
+}
+
+static int f_delete(CandoVM *vm, int argc, CandoValue *args) {
+    int di = (int)libutil_arg_num_at(args, argc, 0, 0);
+    int pi = (int)libutil_arg_num_at(args, argc, 1, 0);
+    const char *name = libutil_arg_cstr_at(args, argc, 2);
+    struct canboot_disk *d; struct canboot_partition p;
+    if (!get_part(di, pi, &d, &p) || !name) {
+        cando_vm_push(vm, cando_bool(false));
+        return 1;
+    }
+    const char *t = detect_fs(d, p.start_lba);
+    if (strcmp(t, "fat32") == 0 && p.start_lba == 0) {
+        struct canboot_fat32 fs;
+        if (canboot_fat32_open(d, &fs) &&
+            canboot_fat32_delete_root_file(&fs, name) == 0) {
+            cando_vm_push(vm, cando_bool(true));
+            return 1;
+        }
+    } else if (strcmp(t, "ntfs") == 0) {
+        uint64_t bs = d->block_size;
+        int h = canboot_ntfs3g_open(d, p.start_lba * bs, p.size_lba * bs);
+        if (h >= 0) {
+            int rc = canboot_ntfs3g_delete(h, name);
+            canboot_ntfs3g_close(h);
+            cando_vm_push(vm, cando_bool(rc == 0));
+            return 1;
+        }
+    }
+    cando_vm_push(vm, cando_bool(false));
+    return 1;
 }
 
 static int f_list(CandoVM *vm, int argc, CandoValue *args) {
@@ -360,6 +394,7 @@ static const LibutilMethodEntry fs_methods[] = {
     { "mkfs",       f_mkfs        },
     { "read",       f_read        },
     { "write",      f_write       },
+    { "delete",     f_delete      },
     { "list",       f_list        },
 };
 

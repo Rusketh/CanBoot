@@ -177,12 +177,12 @@ IF (disk.count() >= 2) {
     print("cando disk1 blockSize =", disk.blockSize(1));
     print("cando disk1 blocks =", disk.blocks(1));
     // fs.* now treats a whole disk with no partition table as a
-    // single synthetic partition 0 - so disk 1's NTFS volume is
+    // single synthetic partition 0 - so disk 1 NTFS volume is
     // accessible at (1, 0).
     print("cando fs.detect(1,0) =", fs.detect(1, 0));
     print("cando fs.label(1,0) =", fs.label(1, 0));
     // Read the probe file. libntfs-3g mounts disk 1, walks the MFT,
-    // reads /probe.txt's $DATA attribute. Marker:
+    // reads /probe.txt $DATA attribute. Marker:
     //   "canboot-ntfs-marker-2026"
     print("cando fs.read(1,0,probe.txt) =", fs.read(1, 0, "/probe.txt"));
     // Write through libntfs-3g. This is the FIRST real-disk NTFS
@@ -190,6 +190,10 @@ IF (disk.count() >= 2) {
     // mkfs.ntfs (on the host) refuses to re-mount the volume after.
     print("cando fs.write(1,0,probe.txt) =", fs.write(1, 0, "/probe.txt", "canboot-ntfs-write-2026"));
     print("cando fs.read(1,0,probe.txt) after write =", fs.read(1, 0, "/probe.txt"));
+    print("cando fs.write create new.txt =", fs.write(1, 0, "/new.txt", "freshly-created-by-canboot"));
+    print("cando fs.read new.txt =", fs.read(1, 0, "/new.txt"));
+    print("cando fs.delete new.txt =", fs.delete(1, 0, "/new.txt"));
+    print("cando fs.read new.txt after delete =", fs.read(1, 0, "/new.txt"));
 } ELSE {
     print("cando disk1 absent");
 }

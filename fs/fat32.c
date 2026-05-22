@@ -514,3 +514,49 @@ int canboot_fat32_format(struct canboot_disk *d,
     }
     return 0;
 }
+
+int canboot_fat32_delete_root_file(struct canboot_fat32 *fs,
+                                    const char *name) {
+    if (!fs || !name) return -1;
+    /* find_root_entry locates the entry but returns the entry data
+     * by value; we need to mark the on-disk entry as deleted and
+     * walk its cluster chain to free it. Re-walk the root dir
+     * directly so we have a pointer to mutate. */
+    char target[11];
+    to_83(name, target);
+
+    uint32_t cluster = fs->root_cluster;
+    static __attribute__((aligned(8))) uint8_t buf[8192];
+    if (fs->bytes_per_cluster > sizeof(buf)) return -1;
+
+    while (cluster < 0x0FFFFFF8u) {
+        if (read_cluster(fs, cluster, buf) != 0) return -1;
+        uint32_t entries = fs->bytes_per_cluster / DIR_ENTRY_SIZE;
+        for (uint32_t i = 0; i < entries; i++) {
+            struct fat_dir *e = (struct fat_dir *)(buf + i * DIR_ENTRY_SIZE);
+            if ((uint8_t)e->name[0] == 0x00) return -1;          /* end of dir */
+            if ((uint8_t)e->name[0] == 0xE5) continue;
+            if (e->attr == ATTR_LFN) continue;
+            if (e->attr & (ATTR_VOLUME_ID | ATTR_DIRECTORY)) continue;
+            if (memcmp(e->name, target, 11) != 0) continue;
+
+            /* Walk + free the cluster chain. */
+            uint32_t first = ((uint32_t)e->cluster_hi << 16) | e->cluster_lo;
+            uint32_t cur   = first;
+            while (cur >= 2 && cur < 0x0FFFFFF8u) {
+                uint32_t next;
+                if (read_fat_entry(fs, cur, &next) != 0) return -1;
+                if (write_fat_entry(fs, cur, 0) != 0) return -1;
+                cur = next;
+            }
+
+            /* Mark the dir entry as deleted (0xE5). */
+            e->name[0] = (char)0xE5;
+            return write_cluster(fs, cluster, buf) == 0 ? 0 : -1;
+        }
+        uint32_t next;
+        if (read_fat_entry(fs, cluster, &next) != 0) return -1;
+        cluster = next;
+    }
+    return -1;
+}
