@@ -194,6 +194,7 @@ IF (disk.count() >= 2) {
     print("cando fs.read new.txt =", fs.read(1, 0, "/new.txt"));
     print("cando fs.delete new.txt =", fs.delete(1, 0, "/new.txt"));
     print("cando fs.read new.txt after delete =", fs.read(1, 0, "/new.txt"));
+    print("cando mkfs ntfs gated =", fs.mkfs(1, 0, "ntfs", "REFORMAT"));
 } ELSE {
     print("cando disk1 absent");
 }
