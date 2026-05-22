@@ -36,6 +36,9 @@ set(CANBOOT_KERNEL_COMMON
     cando_port/cando_file_lib.c
     cando_port/cando_net_lib.c
     cando_port/cando_tls_lib.c
+    cando_port/cando_random_lib.c
+    cando_port/cando_crypto_lib.c
+    cando_port/cando_encoding_lib.c
     fs/iso9660.c
     fs/fat32.c
     hal/disk/disk.c
@@ -654,6 +657,9 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
         cando_port/cando_file_lib.c
         cando_port/cando_net_lib.c
         cando_port/cando_tls_lib.c
+        cando_port/cando_random_lib.c
+        cando_port/cando_crypto_lib.c
+        cando_port/cando_encoding_lib.c
         cando_port/jit_codegen_stub_aarch64.c
         ${CANBOOT_LWIP_SOURCES}
         ${CANBOOT_CANDO_AARCH64_SOURCES}

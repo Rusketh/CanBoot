@@ -59,3 +59,30 @@ print("cando net.httpGet =", net.httpGet("10.0.2.2", 8080, "/"));
 print("cando tls.httpsGet =", tls.httpsGet("10.0.2.2", 8443, "/"));
 
 print("cando sys libs end");
+
+// ---- Milestone 14: crypto libs (random / crypto / hex / base64) -----
+
+print("cando crypto libs begin");
+
+// hex round-trip: encode/decode should match input
+print("cando hex.encode(canboot) =", hex.encode("canboot"));
+print("cando hex.decode(63616e626f6f74) =", hex.decode("63616e626f6f74"));
+
+// base64 round-trip
+print("cando base64.encode(canboot) =", base64.encode("canboot"));
+print("cando base64.decode(Y2FuYm9vdA==) =", base64.decode("Y2FuYm9vdA=="));
+
+// Known sha256 vector: sha256("") = e3b0c4...855
+print("cando crypto.sha256Hex(empty) =", crypto.sha256Hex(""));
+// sha256("canboot") = c1b3ca...
+print("cando crypto.sha256Hex(canboot) =", crypto.sha256Hex("canboot"));
+
+// HMAC-SHA256 with a deterministic key/data.
+print("cando crypto.hmacSha256Hex(k, m) =", crypto.hmacSha256Hex("key", "The quick brown fox jumps over the lazy dog"));
+
+// random.* - just prove it returns something of the right shape.
+print("cando random.hex(8) =", random.hex(8));
+print("cando random.int(1,100) =", random.int(1, 100));
+print("cando random.uuid() =", random.uuid());
+
+print("cando crypto libs end");
