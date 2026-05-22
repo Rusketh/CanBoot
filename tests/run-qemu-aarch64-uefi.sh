@@ -7,7 +7,7 @@ set -euo pipefail
 
 IMG="${1:-build-aarch64/canboot-aarch64-uefi.img}"
 LOG="${LOG:-build-aarch64/qemu-aarch64-uefi.log}"
-TIMEOUT="${TIMEOUT:-300}"
+TIMEOUT="${TIMEOUT:-360}"
 
 AAVMF_CODE="${AAVMF_CODE:-/usr/share/AAVMF/AAVMF_CODE.fd}"
 AAVMF_VARS_SRC="${AAVMF_VARS_SRC:-/usr/share/AAVMF/AAVMF_VARS.fd}"
@@ -76,8 +76,11 @@ qemu-system-aarch64 \
     >/dev/null 2>"$QEMU_STDERR" &
 QEMU_PID=$!
 
-# Background injector: once we see "input loop start", send a few keys
-# via HMP so the kernel's virtio-input pump receives them.
+# Background injector: two waves.
+#  - m4: send "a b ret" once "canboot: input loop start" appears so the
+#    raw HAL input pump receives them.
+#  - m12: send "x y z" once "cando input poll begin" appears so cando's
+#    input.waitKey() inside /init.cdo receives them via the same pump.
 (
     for _ in $(seq 1 30); do
         [ -S "$MON_SOCK" ] && break
@@ -100,6 +103,25 @@ time.sleep(0.2)
 for k in ("a", "b", "ret"):
     sock.sendall(("sendkey " + k + "\n").encode())
     time.sleep(0.3)
+sock.close()
+PY
+    for _ in $(seq 1 600); do
+        if grep -q 'cando input poll begin' "$LOG" 2>/dev/null; then
+            break
+        fi
+        sleep 0.1
+    done
+    python3 - "$MON_SOCK" <<'PY' 2>/dev/null || true
+import socket, sys, time
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+try:
+    sock.connect(sys.argv[1])
+except Exception:
+    sys.exit(0)
+time.sleep(0.3)
+for k in ("x", "y", "z"):
+    sock.sendall(("sendkey " + k + "\n").encode())
+    time.sleep(0.4)
 sock.close()
 PY
 ) &
@@ -156,6 +178,28 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'milestone 7: https get ok'
         check 'milestone 7: session resumption ok'
         check 'milestone 7: tls test ok'
+        check 'milestone 8: init.cdo marker ok'
+        check 'milestone 8: disk test ok'
+        check 'milestone 9: cando_open ok'
+        check 'milestone 9: cando_openlibs ok'
+        check 'milestone 9: cando_close ok'
+        check 'milestone 9: cando link test ok'
+        check 'milestone 10: cando_dostring ok'
+        check 'milestone 10: init.cdo executed ok'
+        check 'milestone 11: display lib registered'
+        check 'milestone 12: input lib registered'
+        check 'cando input poll begin'
+        check 'cando input poll end'
+
+        # m12 second-wave injection: cando's input.waitKey() inside
+        # /init.cdo should have received x/y/z. The script prints
+        # "cando got key1: <ascii>" for each successful read; a null
+        # means waitKey timed out before the injector fired.
+        if ! grep -q "cando got key1: 120" <<<"$stripped"; then
+            echo "smoke test FAILED: cando input.waitKey did not receive 'x' (120)" >&2
+            echo "$stripped" | sed 's/^/  | /' >&2
+            exit 1
+        fi
 
         # Framebuffer path: Debian/Ubuntu AAVMF ships a stripped firmware
         # build with no GOP-producing drivers, so the loader's

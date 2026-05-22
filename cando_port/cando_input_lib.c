@@ -26,9 +26,15 @@
 
 extern uint64_t canboot_tsc_hz(void);
 static inline uint64_t rdtsc_local(void) {
+#if defined(__x86_64__)
     uint32_t lo, hi;
     __asm__ volatile ("rdtsc" : "=a"(lo), "=d"(hi));
     return ((uint64_t)hi << 32) | lo;
+#elif defined(__aarch64__)
+    uint64_t v;
+    __asm__ volatile ("mrs %0, cntvct_el0" : "=r"(v));
+    return v;
+#endif
 }
 
 static int in_poll(CandoVM *vm, int argc, CandoValue *args) {
@@ -61,7 +67,11 @@ static int in_wait_key(CandoVM *vm, int argc, CandoValue *args) {
             cando_vm_push(vm, cando_number((f64)c));
             return 1;
         }
+#if defined(__x86_64__)
         __asm__ volatile ("pause");
+#elif defined(__aarch64__)
+        __asm__ volatile ("yield");
+#endif
     }
     cando_vm_push(vm, cando_null());
     return 1;

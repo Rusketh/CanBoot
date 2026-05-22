@@ -126,7 +126,11 @@ static int do_request(struct vblk_inst *vb, uint32_t type, uint64_t sector,
             return 0;
         }
         if ((spins & 0xFFF) == 0) hal_net_pump();
+#if defined(__x86_64__)
         __asm__ volatile ("pause");
+#elif defined(__aarch64__)
+        __asm__ volatile ("yield");
+#endif
     }
     printf("virtio-blk: request timeout type=%u sector=%llu\n",
            (unsigned)type, (unsigned long long)sector);
