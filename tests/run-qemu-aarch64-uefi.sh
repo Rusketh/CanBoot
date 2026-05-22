@@ -7,11 +7,15 @@ set -euo pipefail
 
 IMG="${1:-build-aarch64/canboot-aarch64-uefi.img}"
 LOG="${LOG:-build-aarch64/qemu-aarch64-uefi.log}"
-TIMEOUT="${TIMEOUT:-120}"
+TIMEOUT="${TIMEOUT:-240}"
 
 AAVMF_CODE="${AAVMF_CODE:-/usr/share/AAVMF/AAVMF_CODE.fd}"
 AAVMF_VARS_SRC="${AAVMF_VARS_SRC:-/usr/share/AAVMF/AAVMF_VARS.fd}"
 MON_SOCK="${MON_SOCK:-$(dirname "$LOG")/mon.sock}"
+UDP_PORT="${UDP_PORT:-7777}"
+HTTP_PORT="${HTTP_PORT:-8080}"
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 if [ ! -f "$IMG" ]; then
     echo "error: ESP image not found at $IMG" >&2
@@ -29,6 +33,12 @@ fi
 
 mkdir -p "$(dirname "$LOG")"
 : > "$LOG"
+
+python3 "$ROOT/tests/sidecars/udp_echo.py"   127.0.0.1 "$UDP_PORT"  >"$(dirname "$LOG")/udp.log"  2>&1 &
+UDP_PID=$!
+python3 "$ROOT/tests/sidecars/http_hello.py" 127.0.0.1 "$HTTP_PORT" >"$(dirname "$LOG")/http.log" 2>&1 &
+HTTP_PID=$!
+sleep 0.3
 
 QEMU_STDERR="${LOG%.log}.stderr.log"
 : > "$QEMU_STDERR"
@@ -49,7 +59,6 @@ qemu-system-aarch64 \
     -cpu cortex-a72 \
     -m 512M \
     -nodefaults \
-    -net none \
     -display none \
     -no-reboot \
     -drive if=pflash,format=raw,readonly=on,file="$AAVMF_CODE" \
@@ -57,6 +66,8 @@ qemu-system-aarch64 \
     -drive if=none,id=hd0,format=raw,file="$IMG" \
     -device virtio-blk-pci,drive=hd0,bootindex=0 \
     -device virtio-keyboard-pci \
+    -netdev user,id=n0 \
+    -device virtio-net-pci,netdev=n0,romfile= \
     -serial "file:$LOG" \
     -monitor "unix:$MON_SOCK,server,nowait" \
     >/dev/null 2>"$QEMU_STDERR" &
@@ -92,10 +103,12 @@ PY
 INJECTOR_PID=$!
 
 cleanup() {
-    if kill -0 "$INJECTOR_PID" 2>/dev/null; then
-        kill "$INJECTOR_PID" 2>/dev/null || true
-        wait "$INJECTOR_PID" 2>/dev/null || true
-    fi
+    for pid in "$INJECTOR_PID" "$UDP_PID" "$HTTP_PID"; do
+        if [ -n "${pid:-}" ] && kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+        fi
+    done
     if kill -0 "$QEMU_PID" 2>/dev/null; then
         kill "$QEMU_PID" 2>/dev/null || true
         wait "$QEMU_PID" 2>/dev/null || true
@@ -134,6 +147,8 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         fi
         check 'milestone 5: starting self-test'
         check 'milestone 5: self-test ok'
+        check 'milestone 6: udp echo ok'
+        check 'milestone 6: http get ok'
 
         # Framebuffer path: Debian/Ubuntu AAVMF ships a stripped firmware
         # build with no GOP-producing drivers, so the loader's

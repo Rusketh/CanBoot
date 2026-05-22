@@ -24,6 +24,8 @@
 #if CANBOOT_AARCH64_EFI_BUILD
 #include "hal/pci.h"
 #include "hal/input.h"
+#include "hal/net.h"
+#include "lwip/init.h"
 #endif
 
 void fb_clear(const struct canboot_fb *fb, uint32_t pixel);
@@ -216,6 +218,14 @@ void kmain(struct boot_info *bi) {
      * x86_64 kmain runs, links against the same libc.a. */
     canboot_pthread_init();
     canboot_m5_selftest();
+
+#if CANBOOT_AARCH64_EFI_BUILD
+    /* Milestone 6: lwIP over virtio-net. DHCP from SLIRP, UDP echo +
+     * HTTP GET against sidecars on 10.0.2.2. canboot_m6_nettest
+     * handles virtio-net init and lwip_init internally. */
+    extern void canboot_m6_nettest(void);
+    canboot_m6_nettest();
+#endif
 
     hal_console_write("canboot: aarch64 hello world boot complete\n");
     hal_console_write("ok\n");

@@ -26,29 +26,43 @@ bool canboot_virtio_net_init(void);
 struct netif *canboot_virtio_net_netif(void);
 uint64_t canboot_tsc_hz(void);
 
-static inline uint64_t rdtsc_now(void) {
+static inline uint64_t arch_now(void) {
+#if defined(__x86_64__)
     uint32_t lo, hi;
     __asm__ volatile ("rdtsc" : "=a"(lo), "=d"(hi));
     return ((uint64_t)hi << 32) | lo;
+#elif defined(__aarch64__)
+    uint64_t v;
+    __asm__ volatile ("mrs %0, cntvct_el0" : "=r"(v));
+    return v;
+#endif
+}
+
+static inline void arch_relax(void) {
+#if defined(__x86_64__)
+    __asm__ volatile ("pause");
+#elif defined(__aarch64__)
+    __asm__ volatile ("yield");
+#endif
 }
 
 static void pump_for(uint32_t ms) {
     uint64_t hz = canboot_tsc_hz();
-    uint64_t deadline = rdtsc_now() + (hz * ms) / 1000ull;
-    while (rdtsc_now() < deadline) {
+    uint64_t deadline = arch_now() + (hz * ms) / 1000ull;
+    while (arch_now() < deadline) {
         hal_net_pump();
         sys_check_timeouts();
-        __asm__ volatile ("pause");
+        arch_relax();
     }
 }
 
 static bool wait_for(volatile bool *flag, uint32_t timeout_ms) {
     uint64_t hz = canboot_tsc_hz();
-    uint64_t deadline = rdtsc_now() + (hz * timeout_ms) / 1000ull;
-    while (!*flag && rdtsc_now() < deadline) {
+    uint64_t deadline = arch_now() + (hz * timeout_ms) / 1000ull;
+    while (!*flag && arch_now() < deadline) {
         hal_net_pump();
         sys_check_timeouts();
-        __asm__ volatile ("pause");
+        arch_relax();
     }
     return *flag;
 }
@@ -249,7 +263,7 @@ void canboot_m6_nettest(void) {
 
     /* Wait up to 15s for a DHCP lease. */
     uint64_t hz = canboot_tsc_hz();
-    uint64_t dl = rdtsc_now() + hz * 15ull;
+    uint64_t dl = arch_now() + hz * 15ull;
     bool got_lease = false;
     uint32_t last_log = 0;
     extern uint32_t canboot_virtio_net_stat_tx_calls(void);
@@ -257,7 +271,7 @@ void canboot_m6_nettest(void) {
     extern uint32_t canboot_virtio_net_stat_rx_done(void);
     extern uint32_t canboot_virtio_net_stat_tx_done(void);
 
-    while (rdtsc_now() < dl) {
+    while (arch_now() < dl) {
         hal_net_pump();
         sys_check_timeouts();
         if (dhcp_supplied_address(nif)) { got_lease = true; break; }
@@ -274,7 +288,7 @@ void canboot_m6_nettest(void) {
                    (unsigned)canboot_virtio_net_stat_tx_done(),
                    (unsigned)canboot_virtio_net_stat_rx_done());
         }
-        __asm__ volatile ("pause");
+        arch_relax();
     }
     if (!got_lease) {
         printf("milestone 6: FAIL dhcp timeout\n");
