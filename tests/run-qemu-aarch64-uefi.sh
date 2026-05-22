@@ -7,13 +7,14 @@ set -euo pipefail
 
 IMG="${1:-build-aarch64/canboot-aarch64-uefi.img}"
 LOG="${LOG:-build-aarch64/qemu-aarch64-uefi.log}"
-TIMEOUT="${TIMEOUT:-240}"
+TIMEOUT="${TIMEOUT:-300}"
 
 AAVMF_CODE="${AAVMF_CODE:-/usr/share/AAVMF/AAVMF_CODE.fd}"
 AAVMF_VARS_SRC="${AAVMF_VARS_SRC:-/usr/share/AAVMF/AAVMF_VARS.fd}"
 MON_SOCK="${MON_SOCK:-$(dirname "$LOG")/mon.sock}"
 UDP_PORT="${UDP_PORT:-7777}"
 HTTP_PORT="${HTTP_PORT:-8080}"
+HTTPS_PORT="${HTTPS_PORT:-8443}"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -34,10 +35,12 @@ fi
 mkdir -p "$(dirname "$LOG")"
 : > "$LOG"
 
-python3 "$ROOT/tests/sidecars/udp_echo.py"   127.0.0.1 "$UDP_PORT"  >"$(dirname "$LOG")/udp.log"  2>&1 &
+python3 "$ROOT/tests/sidecars/udp_echo.py"    127.0.0.1 "$UDP_PORT"   >"$(dirname "$LOG")/udp.log"   2>&1 &
 UDP_PID=$!
-python3 "$ROOT/tests/sidecars/http_hello.py" 127.0.0.1 "$HTTP_PORT" >"$(dirname "$LOG")/http.log" 2>&1 &
+python3 "$ROOT/tests/sidecars/http_hello.py"  127.0.0.1 "$HTTP_PORT"  >"$(dirname "$LOG")/http.log"  2>&1 &
 HTTP_PID=$!
+python3 "$ROOT/tests/sidecars/https_secure.py" 127.0.0.1 "$HTTPS_PORT" >"$(dirname "$LOG")/https.log" 2>&1 &
+HTTPS_PID=$!
 sleep 0.3
 
 QEMU_STDERR="${LOG%.log}.stderr.log"
@@ -103,7 +106,7 @@ PY
 INJECTOR_PID=$!
 
 cleanup() {
-    for pid in "$INJECTOR_PID" "$UDP_PID" "$HTTP_PID"; do
+    for pid in "$INJECTOR_PID" "$UDP_PID" "$HTTP_PID" "$HTTPS_PID"; do
         if [ -n "${pid:-}" ] && kill -0 "$pid" 2>/dev/null; then
             kill "$pid" 2>/dev/null || true
             wait "$pid" 2>/dev/null || true
@@ -149,6 +152,10 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'milestone 5: self-test ok'
         check 'milestone 6: udp echo ok'
         check 'milestone 6: http get ok'
+        check 'milestone 7: handshake ok'
+        check 'milestone 7: https get ok'
+        check 'milestone 7: session resumption ok'
+        check 'milestone 7: tls test ok'
 
         # Framebuffer path: Debian/Ubuntu AAVMF ships a stripped firmware
         # build with no GOP-producing drivers, so the loader's

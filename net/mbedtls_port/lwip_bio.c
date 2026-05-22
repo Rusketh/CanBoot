@@ -16,15 +16,25 @@
 extern uint64_t canboot_tsc_hz(void);
 
 static inline uint64_t rdtsc_now(void) {
+#if defined(__x86_64__)
     uint32_t lo, hi;
     __asm__ volatile ("rdtsc" : "=a"(lo), "=d"(hi));
     return ((uint64_t)hi << 32) | lo;
+#elif defined(__aarch64__)
+    uint64_t v;
+    __asm__ volatile ("mrs %0, cntvct_el0" : "=r"(v));
+    return v;
+#endif
 }
 
 static void pump_once(void) {
     hal_net_pump();
     sys_check_timeouts();
+#if defined(__x86_64__)
     __asm__ volatile ("pause");
+#elif defined(__aarch64__)
+    __asm__ volatile ("yield");
+#endif
 }
 
 static err_t connect_cb(void *arg, struct tcp_pcb *pcb, err_t err) {

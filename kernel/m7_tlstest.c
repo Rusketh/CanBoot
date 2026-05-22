@@ -36,9 +36,15 @@ static void log_err(const char *step, int rc) {
 }
 
 static inline uint64_t rdtsc_now_local(void) {
+#if defined(__x86_64__)
     uint32_t lo, hi;
     __asm__ volatile ("rdtsc" : "=a"(lo), "=d"(hi));
     return ((uint64_t)hi << 32) | lo;
+#elif defined(__aarch64__)
+    uint64_t v;
+    __asm__ volatile ("mrs %0, cntvct_el0" : "=r"(v));
+    return v;
+#endif
 }
 
 extern uint64_t canboot_tsc_hz(void);
