@@ -32,3 +32,30 @@ VAR k3 = input.waitKey(8000);
 print("cando got key3:", k3);
 
 print("cando input poll end");
+
+// ---- Milestone 13: system libs (time / file / net / tls) ------------
+
+print("cando sys libs begin");
+
+// time.* - monotonic clock from CNTVCT_EL0 / rdtsc.
+print("cando time.ms =", time.ms());
+print("cando time.ticksHz =", time.ticksHz());
+
+// file.* - the disk we booted from is FAT32. file.read returns the
+// loaded contents; file.write round-trips a small probe.
+print("cando file.exists(init.cdo) =", file.exists("init.cdo"));
+print("cando file.size(init.cdo) =", file.size("init.cdo"));
+print("cando file.write =", file.write("cdo.tmp", "hello-from-cando"));
+print("cando file.read =", file.read("cdo.tmp"));
+
+// net.* - UDP echo to the same sidecar the m6 kernel test hits.
+print("cando net.udpEcho =", net.udpEcho("10.0.2.2", 7777, "cando-udp-probe"));
+
+// net.* - HTTP GET against http_hello.py.
+print("cando net.httpGet =", net.httpGet("10.0.2.2", 8080, "/"));
+
+// tls.* - HTTPS GET against https_secure.py using the pinned canboot
+// test CA (SNI defaults to "canboot-test" which matches the cert).
+print("cando tls.httpsGet =", tls.httpsGet("10.0.2.2", 8443, "/"));
+
+print("cando sys libs end");

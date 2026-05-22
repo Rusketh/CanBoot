@@ -24,6 +24,10 @@ int         cando_dostring(CandoVM *vm, const char *src, const char *name);
 const char *cando_errmsg(CandoVM *vm);
 void        canboot_cando_open_displaylib(CandoVM *vm);
 void        canboot_cando_open_inputlib(CandoVM *vm);
+void        canboot_cando_open_timelib(CandoVM *vm);
+void        canboot_cando_open_filelib(CandoVM *vm);
+void        canboot_cando_open_netlib(CandoVM *vm);
+void        canboot_cando_open_tlslib(CandoVM *vm);
 
 #include "hal/display.h"
 #include "hal/input.h"
@@ -84,6 +88,13 @@ void canboot_m9_candotest(void) {
 
     canboot_cando_open_inputlib(vm);
     printf("milestone 12: input lib registered\n");
+
+    /* Milestone 13: system libs - clock, file, net, tls. */
+    canboot_cando_open_timelib(vm);
+    canboot_cando_open_filelib(vm);
+    canboot_cando_open_netlib(vm);
+    canboot_cando_open_tlslib(vm);
+    printf("milestone 13: system libs registered (time/file/net/tls)\n");
 
     /* Milestone 10: load /init.cdo from disk and run it through cando_dostring. */
     static char init_src[8192];

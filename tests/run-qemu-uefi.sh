@@ -224,6 +224,14 @@ PY
         check 'cando got key2: 121'
         check 'cando got key3: 122'
         check 'cando input poll end'
+        check 'milestone 13: system libs registered'
+        check 'cando time.ms ='
+        check 'cando file.exists(init.cdo) = true'
+        check 'cando file.read = hello-from-cando'
+        check 'cando net.udpEcho = cando-udp-probe'
+        check 'cando net.httpGet = canboot-hello'
+        check 'cando tls.httpsGet = canboot-secure'
+        check 'cando sys libs end'
 
         if [ -f "$WORK/screen.ppm" ]; then
             EXPECTED=$(cat "$ROOT/tests/refs/m11-uefi.ppm.sha256" 2>/dev/null | head -1)

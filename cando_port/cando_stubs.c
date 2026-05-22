@@ -39,6 +39,27 @@ void cando_lib_httputil_register(struct CandoVM *vm)       { (void)vm; }
 void cando_lib_http_register(struct CandoVM *vm)           { (void)vm; }
 void cando_lib_https_register(struct CandoVM *vm)          { (void)vm; }
 
+/* cando ships built-in `file` and `net` libraries that expect POSIX
+ * sockets + filesystem syscalls we don't have. Their default
+ * register hooks fail loudly (or claim const-protected globals that
+ * block our HAL-backed replacements). Stub them so cando_openlibs
+ * leaves the `file`/`net` slots open for canboot_cando_open_filelib /
+ * canboot_cando_open_netlib to populate. */
+void cando_lib_file_register(struct CandoVM *vm)           { (void)vm; }
+void cando_lib_net_register(struct CandoVM *vm)            { (void)vm; }
+
+/* Used by cando's process.c to wrap stdio FILE* into a CandoValue
+ * stream. We don't ship the original file.c stream impl, so refuse
+ * the wrap (return null) - process.* methods fall back to the "too
+ * many active streams" error path. */
+#include "core/value.h"
+CandoValue cando_lib_file_stream_from_fp(struct CandoVM *vm,
+                                          FILE *fp,
+                                          unsigned caps) {
+    (void)vm; (void)fp; (void)caps;
+    return cando_null();
+}
+
 /* ---- Filesystem path ops --------------------------------------------- */
 
 char *realpath(const char *path, char *out) {

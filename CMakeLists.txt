@@ -32,6 +32,10 @@ set(CANBOOT_KERNEL_COMMON
     cando_port/cando_stubs.c
     cando_port/cando_display_lib.c
     cando_port/cando_input_lib.c
+    cando_port/cando_time_lib.c
+    cando_port/cando_file_lib.c
+    cando_port/cando_net_lib.c
+    cando_port/cando_tls_lib.c
     fs/iso9660.c
     fs/fat32.c
     hal/disk/disk.c
@@ -103,7 +107,7 @@ set(CANBOOT_CANDO_SOURCES
     ${CANDO_DIR}/source/lib/jit.c
     ${CANDO_DIR}/source/lib/app.c
     ${CANDO_DIR}/source/lib/math.c
-    ${CANDO_DIR}/source/lib/file.c
+    # ${CANDO_DIR}/source/lib/file.c   -- replaced by cando_port/cando_file_lib.c
     ${CANDO_DIR}/source/lib/eval.c
     ${CANDO_DIR}/source/lib/string.c
     ${CANDO_DIR}/source/lib/libutil.c
@@ -122,7 +126,7 @@ set(CANBOOT_CANDO_SOURCES
     ${CANDO_DIR}/source/lib/console_lineedit.c
     ${CANDO_DIR}/source/lib/console_dispatch.c
     ${CANDO_DIR}/source/lib/process.c
-    ${CANDO_DIR}/source/lib/net.c
+    # ${CANDO_DIR}/source/lib/net.c    -- replaced by cando_port/cando_net_lib.c
     ${CANDO_DIR}/source/lib/object.c
     ${CANDO_DIR}/source/lib/meta.c
     ${CANDO_DIR}/source/lib/stream.c
@@ -646,6 +650,10 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
         cando_port/cando_stubs.c
         cando_port/cando_display_lib.c
         cando_port/cando_input_lib.c
+        cando_port/cando_time_lib.c
+        cando_port/cando_file_lib.c
+        cando_port/cando_net_lib.c
+        cando_port/cando_tls_lib.c
         cando_port/jit_codegen_stub_aarch64.c
         ${CANBOOT_LWIP_SOURCES}
         ${CANBOOT_CANDO_AARCH64_SOURCES}
