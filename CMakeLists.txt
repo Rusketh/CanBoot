@@ -129,38 +129,39 @@ set(CANBOOT_CANDO_SOURCES
 )
 
 # ---------------------------------------------------------------------------
-# picolibc: vendored at vendor/picolibc, built via meson at our build time.
-# Provides full libc (stdio, stdlib, string, setjmp, errno) for the kernel +
-# UEFI. posix-console=true routes stdin/stdout/stderr through our syscall
-# stubs in rt/picolibc_port/.
+# picolibc (x86_64 only for now; aarch64 first-cut uses a freestanding
+# kernel with no libc - subsequent aarch64 milestones add the cross-
+# build).
 # ---------------------------------------------------------------------------
-include(ExternalProject)
+if(CANBOOT_ARCH STREQUAL "x86_64")
+    include(ExternalProject)
 
-set(PICOLIBC_SRC       "${CMAKE_SOURCE_DIR}/vendor/picolibc")
-set(PICOLIBC_PREFIX    "${CMAKE_BINARY_DIR}/picolibc")
-set(PICOLIBC_BUILD     "${PICOLIBC_PREFIX}/build")
-set(PICOLIBC_INSTALL   "${PICOLIBC_PREFIX}/install")
-set(PICOLIBC_CROSS_IN  "${CMAKE_SOURCE_DIR}/cmake/picolibc-${CANBOOT_ARCH}.cross.in")
-set(PICOLIBC_CROSS     "${PICOLIBC_PREFIX}/picolibc-${CANBOOT_ARCH}.cross")
-set(PICOLIBC_INCLUDE   "${PICOLIBC_INSTALL}/include")
-set(PICOLIBC_LIB       "${PICOLIBC_INSTALL}/lib/libc.a")
+    set(PICOLIBC_SRC       "${CMAKE_SOURCE_DIR}/vendor/picolibc")
+    set(PICOLIBC_PREFIX    "${CMAKE_BINARY_DIR}/picolibc")
+    set(PICOLIBC_BUILD     "${PICOLIBC_PREFIX}/build")
+    set(PICOLIBC_INSTALL   "${PICOLIBC_PREFIX}/install")
+    set(PICOLIBC_CROSS_IN  "${CMAKE_SOURCE_DIR}/cmake/picolibc-${CANBOOT_ARCH}.cross.in")
+    set(PICOLIBC_CROSS     "${PICOLIBC_PREFIX}/picolibc-${CANBOOT_ARCH}.cross")
+    set(PICOLIBC_INCLUDE   "${PICOLIBC_INSTALL}/include")
+    set(PICOLIBC_LIB       "${PICOLIBC_INSTALL}/lib/libc.a")
 
-configure_file(${PICOLIBC_CROSS_IN} ${PICOLIBC_CROSS} @ONLY)
+    configure_file(${PICOLIBC_CROSS_IN} ${PICOLIBC_CROSS} @ONLY)
 
-ExternalProject_Add(picolibc_ext
-    SOURCE_DIR        ${PICOLIBC_SRC}
-    BINARY_DIR        ${PICOLIBC_BUILD}
-    PREFIX            ${PICOLIBC_PREFIX}
-    CONFIGURE_COMMAND ${CMAKE_SOURCE_DIR}/scripts/build-picolibc.sh
-                          ${PICOLIBC_SRC}
-                          ${PICOLIBC_BUILD}
-                          ${PICOLIBC_INSTALL}
-                          ${PICOLIBC_CROSS}
-    BUILD_COMMAND     ""
-    INSTALL_COMMAND   ""
-    BUILD_BYPRODUCTS  ${PICOLIBC_LIB}
-    USES_TERMINAL_BUILD TRUE
-)
+    ExternalProject_Add(picolibc_ext
+        SOURCE_DIR        ${PICOLIBC_SRC}
+        BINARY_DIR        ${PICOLIBC_BUILD}
+        PREFIX            ${PICOLIBC_PREFIX}
+        CONFIGURE_COMMAND ${CMAKE_SOURCE_DIR}/scripts/build-picolibc.sh
+                              ${PICOLIBC_SRC}
+                              ${PICOLIBC_BUILD}
+                              ${PICOLIBC_INSTALL}
+                              ${PICOLIBC_CROSS}
+        BUILD_COMMAND     ""
+        INSTALL_COMMAND   ""
+        BUILD_BYPRODUCTS  ${PICOLIBC_LIB}
+        USES_TERMINAL_BUILD TRUE
+    )
+endif()
 
 set(KERNEL_NAME "canboot-${CANBOOT_ARCH}")
 set(KERNEL_LINKER_SCRIPT "${CMAKE_SOURCE_DIR}/linker/kernel.${CANBOOT_ARCH}.ld")
@@ -175,84 +176,129 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
         ${CANBOOT_LWIP_SOURCES}
         ${CANBOOT_CANDO_SOURCES}
     )
+elseif(CANBOOT_ARCH STREQUAL "aarch64")
+    # Minimal first-cut aarch64 build: bootstrap + entry trampoline +
+    # PL011 console + a stub kmain that mirrors x86_64's milestone-1
+    # "ok on serial" deliverable. Subsequent aarch64 milestones port
+    # picolibc / lwIP / cando / etc. one PR at a time.
+    set(KERNEL_SOURCES
+        arch/aarch64/bootstrap.S
+        arch/aarch64/aarch64_entry.c
+        kernel/kmain_aarch64_stub.c
+        kernel/fb.c
+        hal/console/serial_aarch64.c
+    )
 else()
     message(FATAL_ERROR "Arch ${CANBOOT_ARCH} bring-up lands in a later milestone")
 endif()
 
 add_executable(${KERNEL_NAME} ${KERNEL_SOURCES})
-add_dependencies(${KERNEL_NAME} picolibc_ext)
 
-set_source_files_properties(
-    arch/x86_64/bootstrap.S
-    arch/x86_64/idt_stubs.S
-    boot/multiboot2/header.S
-    PROPERTIES LANGUAGE ASM
-)
+if(CANBOOT_ARCH STREQUAL "x86_64")
+    add_dependencies(${KERNEL_NAME} picolibc_ext)
 
-target_include_directories(${KERNEL_NAME} BEFORE PRIVATE
-    cando_port/shims
-)
+    set_source_files_properties(
+        arch/x86_64/bootstrap.S
+        arch/x86_64/idt_stubs.S
+        boot/multiboot2/header.S
+        PROPERTIES LANGUAGE ASM
+    )
 
-target_include_directories(${KERNEL_NAME} PRIVATE
-    hal/include
-    kernel/include
-    rt/pthread_stub/include
-    net/lwip_port/include
-    net/mbedtls_port/include
-    net/mbedtls_port
-    ${CMAKE_SOURCE_DIR}
-    ${LWIP_DIR}/src/include
-    ${PICOLIBC_INCLUDE}
-    ${CMAKE_SOURCE_DIR}/vendor/mbedtls/include
-    ${CANDO_DIR}/include
-    ${CANDO_DIR}/source
-)
+    target_include_directories(${KERNEL_NAME} BEFORE PRIVATE
+        cando_port/shims
+    )
 
-target_compile_options(${KERNEL_NAME} PRIVATE
-    $<$<COMPILE_LANGUAGE:C>:-ffreestanding>
-    $<$<COMPILE_LANGUAGE:C>:-fno-stack-protector>
-    $<$<COMPILE_LANGUAGE:C>:-fno-stack-check>
-    $<$<COMPILE_LANGUAGE:C>:-fno-pic>
-    $<$<COMPILE_LANGUAGE:C>:-fno-pie>
-    $<$<COMPILE_LANGUAGE:C>:-mno-red-zone>
-    $<$<COMPILE_LANGUAGE:C>:-mcmodel=kernel>
-    $<$<COMPILE_LANGUAGE:C>:-fcf-protection=none>
-    -Wall
-    -Wextra
-)
+    target_include_directories(${KERNEL_NAME} PRIVATE
+        hal/include
+        kernel/include
+        rt/pthread_stub/include
+        net/lwip_port/include
+        net/mbedtls_port/include
+        net/mbedtls_port
+        ${CMAKE_SOURCE_DIR}
+        ${LWIP_DIR}/src/include
+        ${PICOLIBC_INCLUDE}
+        ${CMAKE_SOURCE_DIR}/vendor/mbedtls/include
+        ${CANDO_DIR}/include
+        ${CANDO_DIR}/source
+    )
 
-target_compile_options(${KERNEL_NAME} PRIVATE
-    -D_GNU_SOURCE     # cando expects M_PI, strdup, etc. via GNU extensions
-    -DSSIZE_MAX=__LONG_MAX__   # signal lwIP arch.h to use picolibc's ssize_t
-    "SHELL:-iquote ${CANDO_DIR}/source"
-    "SHELL:-iquote ${CANDO_DIR}/source/core"
-    "SHELL:-iquote ${CANDO_DIR}/source/object"
-    "SHELL:-iquote ${CANDO_DIR}/source/parser"
-    "SHELL:-iquote ${CANDO_DIR}/source/vm"
-    "SHELL:-iquote ${CANDO_DIR}/source/jit"
-    "SHELL:-iquote ${CANDO_DIR}/source/lib"
-)
+    target_compile_options(${KERNEL_NAME} PRIVATE
+        $<$<COMPILE_LANGUAGE:C>:-ffreestanding>
+        $<$<COMPILE_LANGUAGE:C>:-fno-stack-protector>
+        $<$<COMPILE_LANGUAGE:C>:-fno-stack-check>
+        $<$<COMPILE_LANGUAGE:C>:-fno-pic>
+        $<$<COMPILE_LANGUAGE:C>:-fno-pie>
+        $<$<COMPILE_LANGUAGE:C>:-mno-red-zone>
+        $<$<COMPILE_LANGUAGE:C>:-mcmodel=kernel>
+        $<$<COMPILE_LANGUAGE:C>:-fcf-protection=none>
+        -Wall
+        -Wextra
+    )
 
-target_link_options(${KERNEL_NAME} PRIVATE
-    -nostdlib
-    -no-pie
-    -static
-    -Wl,--build-id=none
-    -Wl,-T,${KERNEL_LINKER_SCRIPT}
-    -Wl,-z,noexecstack
-    -Wl,-z,max-page-size=0x1000
-)
+    target_compile_options(${KERNEL_NAME} PRIVATE
+        -D_GNU_SOURCE
+        -DSSIZE_MAX=__LONG_MAX__
+        "SHELL:-iquote ${CANDO_DIR}/source"
+        "SHELL:-iquote ${CANDO_DIR}/source/core"
+        "SHELL:-iquote ${CANDO_DIR}/source/object"
+        "SHELL:-iquote ${CANDO_DIR}/source/parser"
+        "SHELL:-iquote ${CANDO_DIR}/source/vm"
+        "SHELL:-iquote ${CANDO_DIR}/source/jit"
+        "SHELL:-iquote ${CANDO_DIR}/source/lib"
+    )
 
-# Link picolibc as the kernel's libc. Put it inside a --start-group/end-group
-# pair so circular references between picolibc and our syscall stubs (e.g.
-# malloc -> sbrk; printf -> write) resolve in one pass.
-target_link_libraries(${KERNEL_NAME} PRIVATE
-    -Wl,--start-group
-    mbedtls mbedx509 mbedcrypto
-    ${PICOLIBC_LIB}
-    -Wl,--end-group
-    -lgcc
-)
+    target_link_options(${KERNEL_NAME} PRIVATE
+        -nostdlib
+        -no-pie
+        -static
+        -Wl,--build-id=none
+        -Wl,-T,${KERNEL_LINKER_SCRIPT}
+        -Wl,-z,noexecstack
+        -Wl,-z,max-page-size=0x1000
+    )
+
+    target_link_libraries(${KERNEL_NAME} PRIVATE
+        -Wl,--start-group
+        mbedtls mbedx509 mbedcrypto
+        ${PICOLIBC_LIB}
+        -Wl,--end-group
+        -lgcc
+    )
+
+elseif(CANBOOT_ARCH STREQUAL "aarch64")
+    set_source_files_properties(
+        arch/aarch64/bootstrap.S
+        PROPERTIES LANGUAGE ASM
+    )
+
+    target_include_directories(${KERNEL_NAME} PRIVATE
+        hal/include
+        kernel/include
+        ${CMAKE_SOURCE_DIR}
+    )
+
+    target_compile_options(${KERNEL_NAME} PRIVATE
+        $<$<COMPILE_LANGUAGE:C>:-ffreestanding>
+        $<$<COMPILE_LANGUAGE:C>:-fno-stack-protector>
+        $<$<COMPILE_LANGUAGE:C>:-fno-stack-check>
+        $<$<COMPILE_LANGUAGE:C>:-fno-pic>
+        $<$<COMPILE_LANGUAGE:C>:-fno-pie>
+        $<$<COMPILE_LANGUAGE:C>:-mgeneral-regs-only>
+        -Wall
+        -Wextra
+    )
+
+    target_link_options(${KERNEL_NAME} PRIVATE
+        -nostdlib
+        -no-pie
+        -static
+        -Wl,--build-id=none
+        -Wl,-T,${KERNEL_LINKER_SCRIPT}
+        -Wl,-z,noexecstack
+        -Wl,-z,max-page-size=0x1000
+    )
+endif()
 
 set_target_properties(${KERNEL_NAME} PROPERTIES
     SUFFIX ".elf"
