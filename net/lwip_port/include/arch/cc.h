@@ -29,9 +29,17 @@ typedef uintptr_t mem_ptr_t;
 
 #define LWIP_PLATFORM_DIAG(x) do { printf x; } while (0)
 
+#if defined(__x86_64__)
+#  define CANBOOT_LWIP_HALT() __asm__ volatile ("cli; hlt")
+#elif defined(__aarch64__)
+#  define CANBOOT_LWIP_HALT() __asm__ volatile ("wfe")
+#else
+#  define CANBOOT_LWIP_HALT() ((void)0)
+#endif
+
 #define LWIP_PLATFORM_ASSERT(msg) do { \
     printf("lwip assert: %s @ %s:%d\n", msg, __FILE__, __LINE__); \
-    for (;;) { __asm__ volatile ("cli; hlt"); } \
+    for (;;) { CANBOOT_LWIP_HALT(); } \
 } while (0)
 
 #endif /* CANBOOT_LWIP_ARCH_CC_H */

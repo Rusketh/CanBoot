@@ -587,19 +587,27 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
         kernel/kmain_aarch64.c
         kernel/fb.c
         kernel/m5_selftest.c
+        kernel/m6_nettest.c
         hal/console/serial_aarch64.c
         hal/pci/pci_aarch64.c
         hal/virtio/virtio_pci.c
         hal/input/input_queue.c
         hal/input/virtio_input.c
+        hal/net/virtio_net.c
+        net/lwip_port/sys_arch.c
         rt/picolibc_port/syscalls.c
         rt/pthread_stub/pthread.c
+        ${CANBOOT_LWIP_SOURCES}
     )
 
     set(EFI_AARCH64_OBJS "")
     set(_efi_obj_seq 0)
     foreach(src ${EFI_AARCH64_SOURCES})
-        set(_src_abs ${CMAKE_SOURCE_DIR}/${src})
+        if(IS_ABSOLUTE "${src}")
+            set(_src_abs "${src}")
+        else()
+            set(_src_abs ${CMAKE_SOURCE_DIR}/${src})
+        endif()
         get_filename_component(_name ${src} NAME_WE)
         math(EXPR _efi_obj_seq "${_efi_obj_seq} + 1")
         set(_obj "${CMAKE_BINARY_DIR}/efi_aarch64_${_efi_obj_seq}_${_name}.o")
@@ -611,9 +619,13 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
                 -I${CMAKE_SOURCE_DIR}/hal/include
                 -I${CMAKE_SOURCE_DIR}/kernel/include
                 -I${CMAKE_SOURCE_DIR}/rt/pthread_stub/include
+                -I${CMAKE_SOURCE_DIR}/net/lwip_port/include
                 -I${CMAKE_SOURCE_DIR}
+                -I${LWIP_DIR}/src/include
                 -I${PICOLIBC_INCLUDE}
                 -DCANBOOT_AARCH64_EFI_BUILD=1
+                -D_GNU_SOURCE
+                -DSSIZE_MAX=__LONG_MAX__
                 -ffreestanding -fpic -fno-stack-protector -fno-stack-check
                 -fno-strict-aliasing -fshort-wchar
                 -Wall -Wextra
@@ -639,6 +651,7 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
         COMMAND aarch64-linux-gnu-ld -nostdlib -znocombreloc
             -T ${GNUEFI_AARCH64_LDS}
             -shared -Bsymbolic
+            --allow-multiple-definition
             ${GNUEFI_AARCH64_CRT0} ${EFI_AARCH64_OBJS}
             -o ${EFI_SO}
             -L${GNUEFI_INSTALL}/lib
