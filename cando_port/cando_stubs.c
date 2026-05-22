@@ -257,3 +257,38 @@ gid_t getegid(void) { return 0; }
 void openlog(const char *ident, int option, int facility) { (void)ident; (void)option; (void)facility; }
 void closelog(void) { }
 void syslog(int priority, const char *format, ...) { (void)priority; (void)format; }
+
+/* ---- getopt shim for vendored ntfsprogs --------------------------------
+ * mkntfs's argv parser drives a global mkntfs_options struct. canboot
+ * pre-populates the same struct in canboot_ntfs_format() so the
+ * parse loop has nothing to do; we make getopt_long return -1 on the
+ * first call so the loop exits immediately. */
+
+char *optarg = NULL;
+int   optind = 1;
+int   opterr = 0;
+int   optopt = 0;
+
+int getopt(int argc, char *const argv[], const char *optstring) {
+    (void)argc; (void)argv; (void)optstring;
+    return -1;
+}
+
+struct option;
+int getopt_long(int argc, char *const argv[], const char *optstring,
+                 const struct option *longopts, int *longindex) {
+    (void)argc; (void)argv; (void)optstring; (void)longopts; (void)longindex;
+    return -1;
+}
+
+/* ntfsprogs/utils.c provides utils_set_locale and utils_valid_device
+ * via the real upstream implementation since we vendor ntfsprogs/
+ * for mkntfs. */
+
+/* mkntfs.c calls srandom() once for the volume serial. picolibc has
+ * srand/rand; we route srandom to srand and random to rand so the
+ * link resolves without us having to vendor BSD's random.c. */
+extern void srand(unsigned int seed);
+extern int  rand(void);
+void srandom(unsigned int seed) { srand(seed); }
+long random(void) { return (long)rand(); }

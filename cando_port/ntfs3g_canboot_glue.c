@@ -234,6 +234,55 @@ int canboot_ntfs3g_delete(int handle, const char *path) {
                       name16, (u8)name_len);
 }
 
+/* mkntfs entry point. vendor/ntfs-3g/ntfsprogs/mkntfs.c's main is
+ * renamed to mkntfs_main_canboot via -Dmain= at compile time, so we
+ * can call it from script context. The argv we synthesise contains
+ * exactly one positional: the magic device path our cb_open binds
+ * to the pre-stashed priv slot. */
+extern struct canboot_ntfs_priv *canboot_ntfs_pending_priv;
+
+/* The mkntfs priv slot - separate from the mount slots in g_slots so
+ * formatting doesn't clobber an active mount. */
+struct canboot_ntfs_priv_format {
+    struct canboot_disk *disk;
+    uint64_t  byte_offset;
+    uint64_t  byte_size;
+    uint64_t  cursor;
+    uint8_t   sec_cache[4096];
+    uint64_t  cache_lba;
+    int       cache_valid;
+    int       writable;
+};
+static struct canboot_ntfs_priv_format g_format_priv;
+
+extern int mkntfs_main_canboot(int argc, char *argv[]);
+
+int canboot_ntfs_format(struct canboot_disk *d, uint64_t byte_offset,
+                        uint64_t byte_size, const char *label) {
+    if (!d || !d->writable) return -1;
+    memset(&g_format_priv, 0, sizeof(g_format_priv));
+    g_format_priv.disk        = d;
+    g_format_priv.byte_offset = byte_offset;
+    g_format_priv.byte_size   = byte_size;
+    g_format_priv.cache_lba   = (uint64_t)-1;
+    g_format_priv.writable    = 1;
+
+    /* The cb_open hook in ntfs3g_canboot_io.c reads this on first call. */
+    canboot_ntfs_pending_priv = (struct canboot_ntfs_priv *)&g_format_priv;
+
+    /* mkntfs argv: just the device path. Defaults pick auto cluster
+     * size + quick format. Label injection through getopt_long would
+     * need real parsing; for the first cut volumes get the default
+     * name and the caller renames via a separate write step. */
+    (void)label;
+    static char dev_name[] = "/dev/canboot-vblk";
+    char *argv[] = { (char *)"mkntfs", dev_name, NULL };
+    int rc = mkntfs_main_canboot(2, argv);
+    canboot_ntfs_pending_priv = NULL;
+    /* mkntfs returns 0 on success, 1 on failure. Normalize. */
+    return rc == 0 ? 0 : -1;
+}
+
 int canboot_ntfs3g_label(int handle, char *out, int cap) {
     if (handle < 0 || handle >= HSLOTS || !g_vols[handle]) return -1;
     if (!out || cap <= 0) return -1;

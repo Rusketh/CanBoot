@@ -194,6 +194,17 @@ set(CANBOOT_NTFS3G_SOURCES
     ${NTFS3G_DIR}/libntfs-3g/xattrs.c
 )
 
+# ntfsprogs/mkntfs.c provides format. We pull in the format driver
+# and a couple of helpers (sd, boot, attrdef) that bake security
+# descriptors / boot sector code / attribute defs into the new volume.
+set(CANBOOT_NTFS3G_MKFS_SOURCES
+    ${NTFS3G_DIR}/ntfsprogs/mkntfs.c
+    ${NTFS3G_DIR}/ntfsprogs/sd.c
+    ${NTFS3G_DIR}/ntfsprogs/boot.c
+    ${NTFS3G_DIR}/ntfsprogs/attrdef.c
+    ${NTFS3G_DIR}/ntfsprogs/utils.c
+)
+
 # ---------------------------------------------------------------------------
 # picolibc - cross-built for the current arch via ExternalProject. The
 # x86_64 build has used this since milestone 5; aarch64 m5 hooks into
@@ -242,6 +253,7 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
         ${CANBOOT_LWIP_SOURCES}
         ${CANBOOT_CANDO_SOURCES}
         ${CANBOOT_NTFS3G_SOURCES}
+        ${CANBOOT_NTFS3G_MKFS_SOURCES}
     )
 elseif(CANBOOT_ARCH STREQUAL "aarch64")
     # Minimal first-cut aarch64 build: bootstrap + entry trampoline +
@@ -275,6 +287,20 @@ add_executable(${KERNEL_NAME} ${KERNEL_SOURCES})
 # targets because the source set is shared.
 set_source_files_properties(${CANBOOT_NTFS3G_SOURCES} PROPERTIES
     COMPILE_FLAGS "-include ${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_canboot_shim.h -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g -I${CMAKE_SOURCE_DIR}/cando_port/shims -DHAVE_CONFIG_H=1 -w"
+)
+
+# mkntfs.c and friends need:
+#  - to NOT see NO_NTFS_DEVICE_DEFAULT_IO_OPS (since mkntfs.c #errors
+#    out when that's set - it needs the default ops table to allocate
+#    the device. We provide our HAL ops under that name in
+#    cando_port/ntfs3g_canboot_io.c).
+#  - main renamed to mkntfs_main_canboot so the kernel's real entry
+#    is unaffected.
+#  - getopt.h provided by our shim - cando_port/shims/getopt.h.
+#  - -fcommon so tentative defs across mkntfs.c + sd.c don't conflict
+#    (the upstream relies on the pre-C99 behaviour).
+set_source_files_properties(${CANBOOT_NTFS3G_MKFS_SOURCES} PROPERTIES
+    COMPILE_FLAGS "-include ${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_canboot_shim.h -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/ntfsprogs -I${CMAKE_SOURCE_DIR}/cando_port/shims -DCANBOOT_MKNTFS=1 -Dmain=mkntfs_main_canboot -fcommon -DHAVE_CONFIG_H=1 -w"
 )
 set_source_files_properties(cando_port/ntfs3g_canboot_io.c cando_port/ntfs3g_canboot_glue.c PROPERTIES
     COMPILE_FLAGS "-include ${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_canboot_shim.h -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g -DHAVE_CONFIG_H=1 -w"
@@ -543,6 +569,19 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
                     -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot
                     -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include
                     -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g
+                    -DHAVE_CONFIG_H=1
+                    -w
+                )
+            elseif(_src_abs MATCHES "/ntfsprogs/")
+                set(_extra_flags
+                    "-include" "${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_canboot_shim.h"
+                    -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot
+                    -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include
+                    -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g
+                    -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/ntfsprogs
+                    -DCANBOOT_MKNTFS=1
+                    -Dmain=mkntfs_main_canboot
+                    -fcommon
                     -DHAVE_CONFIG_H=1
                     -w
                 )

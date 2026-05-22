@@ -30,6 +30,7 @@
 #define HAVE_SYS_TYPES_H 1
 #define HAVE_SYS_STAT_H 1
 #define HAVE_TIME_H 1
+#define HAVE_GETOPT_H 1
 
 #define HAVE_MEMCPY 1
 #define HAVE_MEMMOVE 1
@@ -57,7 +58,11 @@
 
 /* The default unix_io.c maps POSIX read/write/seek over a host fd;
  * we replace it with a callback-driven block driver in
- * cando_port/ntfs3g_canboot_io.c. */
+ * cando_port/ntfs3g_canboot_io.c. mkntfs.c references
+ * ntfs_device_default_io_ops explicitly, so we keep the symbol there;
+ * the CANBOOT_MKNTFS compile flag opts mkntfs sources out of this. */
+#if !defined(CANBOOT_MKNTFS)
 #define NO_NTFS_DEVICE_DEFAULT_IO_OPS 1
+#endif
 
 #endif

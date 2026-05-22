@@ -35,6 +35,11 @@ struct canboot_ntfs_priv {
 
 static struct canboot_ntfs_priv g_slots[CANBOOT_NTFS_DEV_SLOTS];
 
+/* Set by canboot_ntfs_format() before invoking mkntfs's main; cb_open
+ * binds it onto dev->d_private on the first open call. Module-level
+ * declared here, defined below. */
+struct canboot_ntfs_priv *canboot_ntfs_pending_priv;
+
 static int alloc_slot(struct canboot_disk *d, uint64_t off, uint64_t sz) {
     for (int i = 0; i < CANBOOT_NTFS_DEV_SLOTS; i++) {
         if (g_slots[i].disk == NULL) {
@@ -51,7 +56,14 @@ static int alloc_slot(struct canboot_disk *d, uint64_t off, uint64_t sz) {
 }
 
 static int cb_open(struct ntfs_device *dev, int flags) {
-    (void)dev; (void)flags;
+    (void)flags;
+    /* mkntfs path: device created via ntfs_device_alloc(..., NULL),
+     * so dev->d_private starts NULL. We bind the canboot priv slot
+     * stashed by canboot_ntfs_format() right before the mkntfs call. */
+    if (dev->d_private == NULL && canboot_ntfs_pending_priv) {
+        dev->d_private = canboot_ntfs_pending_priv;
+        canboot_ntfs_pending_priv = NULL;
+    }
     return 0;
 }
 
@@ -180,8 +192,13 @@ static int cb_sync(struct ntfs_device *dev) {
 }
 
 static int cb_stat(struct ntfs_device *dev, struct stat *buf) {
-    (void)dev; (void)buf;
-    errno = ENOTSUP; return -1;
+    if (!buf) { errno = EINVAL; return -1; }
+    struct canboot_ntfs_priv *p = (struct canboot_ntfs_priv *)dev->d_private;
+    memset(buf, 0, sizeof(*buf));
+    /* S_IFBLK so mkntfs's "is block device" check accepts us. */
+    buf->st_mode = 0060644;
+    buf->st_size = p ? (off_t)p->byte_size : 0;
+    return 0;
 }
 
 static int cb_ioctl(struct ntfs_device *dev, unsigned long request, void *argp) {
@@ -201,6 +218,28 @@ struct ntfs_device_operations canboot_ntfs_device_ops = {
     .stat   = cb_stat,
     .ioctl  = cb_ioctl,
 };
+
+/* libntfs-3g's unix_io.c defines a `ntfs_device_default_io_ops` symbol
+ * when compiled without NO_NTFS_DEVICE_DEFAULT_IO_OPS. We've disabled
+ * that path (because unix_io needs real POSIX open/lseek/read/write
+ * which we don't have), but mkntfs.c references the same symbol via
+ * `ntfs_device_alloc(name, 0, &ntfs_device_default_io_ops, NULL)`. So
+ * we provide it here as an alias of our HAL ops - mkntfs gets the
+ * canboot bridge transparently. */
+struct ntfs_device_operations ntfs_device_default_io_ops = {
+    .open   = cb_open,
+    .close  = cb_close,
+    .seek   = cb_seek,
+    .read   = cb_read,
+    .write  = cb_write,
+    .pread  = cb_pread,
+    .pwrite = cb_pwrite,
+    .sync   = cb_sync,
+    .stat   = cb_stat,
+    .ioctl  = cb_ioctl,
+};
+
+/* (canboot_ntfs_pending_priv defined above with cb_open's call site) */
 
 /* Create an ntfs_device backed by (disk, partition byte range). The
  * caller is expected to ntfs_device_free() when done. */
