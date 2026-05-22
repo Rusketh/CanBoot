@@ -39,6 +39,13 @@ mcopy -i "$ESP_IMG" "$EFI_BIN" ::/EFI/BOOT/BOOTX64.EFI
 mkdir -p "$ISO_ROOT/EFI/BOOT"
 cp "$EFI_BIN" "$ISO_ROOT/EFI/BOOT/BOOTX64.EFI"
 
+# Embed /init.cdo at the ISO root so the milestone 8 disk test can find
+# it via ISO9660 when no attached FAT32 disk is present.
+INIT_CDO="$(cd "$(dirname "$0")/.." && pwd)/initramfs/init.cdo"
+if [ -f "$INIT_CDO" ]; then
+    cp "$INIT_CDO" "$ISO_ROOT/init.cdo"
+fi
+
 xorriso -as mkisofs \
     -V "CANBOOT" \
     -no-emul-boot \
