@@ -231,6 +231,23 @@ void kmain(struct boot_info *bi) {
      * ticket resumption pass. */
     extern void canboot_m7_tlstest(void);
     canboot_m7_tlstest();
+
+    /* Milestone 8: HAL disk + virtio-blk + FAT32/ISO9660. Locates
+     * /init.cdo on the boot disk and verifies the marker string. */
+    extern void canboot_m8_disktest(void);
+    canboot_m8_disktest();
+
+    /* Milestones 9+10+11+12: open the CanDo VM, register display +
+     * input libs, load /init.cdo and execute it. The display painter
+     * was bound earlier via canboot_display_bind() if we had a fb;
+     * here we run the script that drives the bound display through
+     * the cando bridge. */
+    if (bi->fb.format == CANBOOT_FB_RGB) {
+        extern void canboot_display_bind(const struct canboot_fb *fb);
+        canboot_display_bind(&bi->fb);
+    }
+    extern void canboot_m9_candotest(void);
+    canboot_m9_candotest();
 #endif
 
     hal_console_write("canboot: aarch64 hello world boot complete\n");

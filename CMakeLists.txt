@@ -606,6 +606,15 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
      # support (AAVMF enumerates PCIe and assigns BARs before
      # ExitBootServices). Direct -kernel still uses the input stub
      # since we don't do PCI bring-up there.
+    # cando vendor sources, minus the x86_64-only JIT machine-code
+    # emitter (cando_port/jit_codegen_stub_aarch64.c stubs it out).
+    set(CANBOOT_CANDO_AARCH64_SOURCES "")
+    foreach(_csrc ${CANBOOT_CANDO_SOURCES})
+        if(NOT _csrc MATCHES "/jit/codegen\\.c$")
+            list(APPEND CANBOOT_CANDO_AARCH64_SOURCES ${_csrc})
+        endif()
+    endforeach()
+
     set(EFI_AARCH64_SOURCES
         boot/uefi/efi_main_aarch64.c
         kernel/kmain_aarch64.c
@@ -613,6 +622,8 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
         kernel/m5_selftest.c
         kernel/m6_nettest.c
         kernel/m7_tlstest.c
+        kernel/m8_disktest.c
+        kernel/m9_candotest.c
         kernel/canboot_test_ca.c
         hal/console/serial_aarch64.c
         hal/pci/pci_aarch64.c
@@ -620,13 +631,23 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
         hal/input/input_queue.c
         hal/input/virtio_input.c
         hal/net/virtio_net.c
+        hal/disk/disk.c
+        hal/disk/virtio_blk.c
+        hal/display/display.c
+        fs/iso9660.c
+        fs/fat32.c
         net/lwip_port/sys_arch.c
         net/mbedtls_port/entropy.c
         net/mbedtls_port/inet_pton.c
         net/mbedtls_port/lwip_bio.c
         rt/picolibc_port/syscalls.c
         rt/pthread_stub/pthread.c
+        cando_port/cando_stubs.c
+        cando_port/cando_display_lib.c
+        cando_port/cando_input_lib.c
+        cando_port/jit_codegen_stub_aarch64.c
         ${CANBOOT_LWIP_SOURCES}
+        ${CANBOOT_CANDO_AARCH64_SOURCES}
     )
 
     set(EFI_AARCH64_OBJS "")
@@ -643,6 +664,7 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
         add_custom_command(
             OUTPUT ${_obj}
             COMMAND aarch64-linux-gnu-gcc
+                -I${CMAKE_SOURCE_DIR}/cando_port/shims
                 -I${GNUEFI_INCLUDE}
                 -I${GNUEFI_ARCH_INCLUDE}
                 -I${CMAKE_SOURCE_DIR}/hal/include
@@ -654,12 +676,24 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
                 -I${CMAKE_SOURCE_DIR}
                 -I${LWIP_DIR}/src/include
                 -I${MBEDTLS_DIR}/include
+                -I${CANDO_DIR}/include
+                -I${CANDO_DIR}/source
                 -I${PICOLIBC_INCLUDE}
+                "-iquote" "${CANDO_DIR}/source"
+                "-iquote" "${CANDO_DIR}/source/core"
+                "-iquote" "${CANDO_DIR}/source/object"
+                "-iquote" "${CANDO_DIR}/source/parser"
+                "-iquote" "${CANDO_DIR}/source/vm"
+                "-iquote" "${CANDO_DIR}/source/jit"
+                "-iquote" "${CANDO_DIR}/source/lib"
                 -DCANBOOT_AARCH64_EFI_BUILD=1
                 -D_GNU_SOURCE
                 -DSSIZE_MAX=__LONG_MAX__
+                -D_Thread_local= -D__thread=
                 -ffreestanding -fpic -fno-stack-protector -fno-stack-check
                 -fno-strict-aliasing -fshort-wchar
+                -Wno-implicit-function-declaration
+                -Wno-int-conversion
                 -Wall -Wextra
                 -c ${_src_abs} -o ${_obj}
             DEPENDS ${_src_abs} gnu_efi_ext picolibc_ext

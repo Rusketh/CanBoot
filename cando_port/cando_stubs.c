@@ -78,7 +78,13 @@ pid_t getppid(void)                                 { return 0; }
 
 /* ---- Scheduling / threading ------------------------------------------ */
 
-int sched_yield(void) { __asm__ volatile ("pause"); return 0; }
+int sched_yield(void) { __asm__ volatile (
+#if defined(__x86_64__)
+        "pause"
+#elif defined(__aarch64__)
+        "yield"
+#endif
+    ); return 0; }
 
 long syscall(long number, ...) { (void)number; STUB_FAIL_ERRNO(-1L, ENOSYS); }
 
@@ -87,7 +93,13 @@ int pthread_detach(unsigned long t) { (void)t; return 0; }
 struct timespec; /* opaque - we ignore the contents */
 int nanosleep(const struct timespec *req, struct timespec *rem) {
     (void)req; (void)rem;
-    for (volatile int i = 0; i < 1000; i++) __asm__ volatile ("pause");
+    for (volatile int i = 0; i < 1000; i++) __asm__ volatile (
+#if defined(__x86_64__)
+        "pause"
+#elif defined(__aarch64__)
+        "yield"
+#endif
+    );
     return 0;
 }
 
