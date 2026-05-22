@@ -1,14 +1,13 @@
 // CanBoot default init.cdo
 // canboot-init-marker
 //
-// Drives the milestone-11 display surface end-to-end: three coloured
-// rectangles whose colours we read back from kmain to prove cando is
-// painting through to the framebuffer, a connecting diagonal, and a
-// text label.
+// Drives the milestone-11 display surface and the milestone-12 input
+// surface end-to-end from cando.
 
 print("canboot-cando-runtime-marker init.cdo executed inside vm");
 
-// cando lexer accepts decimal only; comment shows the 0xRRGGBB form.
+// ---- Milestone 11: display.* -----------------------------------------
+// cando lexer accepts decimal only; comments show the 0xRRGGBB form.
 display.clear(2105376);                                // 0x202020 - bg
 display.fillRect(0,   0, 100, 100, 16711680);         // 0xFF0000 - red
 display.fillRect(150, 50, 100, 100, 65280);           // 0x00FF00 - green
@@ -17,3 +16,19 @@ display.line(0, 0, 400, 200, 16777215);               // 0xFFFFFF - white
 display.text(160, 220, "CanBoot init.cdo", 16777215, 0);
 
 print("init.cdo painted display");
+
+// ---- Milestone 12: input.* -------------------------------------------
+print("cando input poll begin");
+
+// Drain any stale events from the milestone-4 input-loop phase so
+// fresh injections show up.
+input.flush();
+
+VAR k1 = input.waitKey(8000);
+print("cando got key1:", k1);
+VAR k2 = input.waitKey(8000);
+print("cando got key2:", k2);
+VAR k3 = input.waitKey(8000);
+print("cando got key3:", k3);
+
+print("cando input poll end");
