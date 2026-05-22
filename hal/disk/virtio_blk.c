@@ -150,12 +150,12 @@ static int vblk_write(struct canboot_disk *cd, uint64_t lba,
     return do_request(vb, VIRTIO_BLK_T_OUT, lba, n, (void *)buf);
 }
 
-static bool bring_up_one(uint16_t pci_dev_id) {
+static bool bring_up_one(uint16_t pci_dev_id, uint32_t skip) {
     if (g_inst_count >= MAX_INSTANCES) return false;
     struct vblk_inst *vb = &g_inst[g_inst_count];
     memset(vb, 0, sizeof(*vb));
 
-    if (!canboot_virtio_find(pci_dev_id, &vb->dev)) return false;
+    if (!canboot_virtio_find_nth(pci_dev_id, skip, &vb->dev)) return false;
 
     uint64_t want = (1ull << VIRTIO_F_VERSION_1);
     /* Accept BLK_SIZE if offered so we get the device's preferred block. */
@@ -210,11 +210,19 @@ static bool bring_up_one(uint16_t pci_dev_id) {
 }
 
 bool canboot_virtio_blk_init(void) {
-    /* canboot_virtio_find always returns the first matching device,
-     * so we only bring up one virtio-blk per PCI device ID for now.
-     * Multi-disk support lands when we extend the transport with a
-     * "find starting from PCI addr" cursor. */
-    if (bring_up_one(VIRTIO_BLK_PCI_MODERN)) return true;
-    if (bring_up_one(VIRTIO_BLK_PCI_TRANSITIONAL)) return true;
-    return false;
+    /* Bring up every virtio-blk on the bus, up to MAX_INSTANCES. We
+     * walk the modern device IDs first, then transitional, using
+     * canboot_virtio_find_nth with an increasing skip count. Drivers
+     * register with the HAL in PCI discovery order so disk indices
+     * match QEMU's -drive order. */
+    bool any = false;
+    for (uint32_t i = 0; g_inst_count < MAX_INSTANCES; i++) {
+        if (!bring_up_one(VIRTIO_BLK_PCI_MODERN, i)) break;
+        any = true;
+    }
+    for (uint32_t i = 0; g_inst_count < MAX_INSTANCES; i++) {
+        if (!bring_up_one(VIRTIO_BLK_PCI_TRANSITIONAL, i)) break;
+        any = true;
+    }
+    return any;
 }

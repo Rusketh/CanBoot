@@ -166,12 +166,32 @@ print("cando partition.count(0) =", partition.count(0));
 // no valid partition entry to point at - we get "unknown".
 print("cando fs.detect(0,0) =", fs.detect(0, 0));
 
-// Full lifecycle test (initGpt -> create -> mkfs -> resize -> delete)
-// requires a second blank disk. The current virtio-blk driver only
-// brings up one device per PCI ID; multi-disk support lands when we
-// extend the transport with a "find from PCI cursor" pass. Until
-// then, the partition + fs libs are exercised as callable APIs only.
+// Multi-disk: if QEMU attached a second disk (NTFS test image), the
+// virtio-blk driver enumerates it as disk 1. We exercise libntfs-3g
+// read against it. The image is whole-disk NTFS (no partition table)
+// so we read at disk index 1, partition 0 - fs.detect/fs.read inspect
+// the raw disk directly.
 print("cando disk count =", disk.count());
-print("cando lifecycle test deferred (single virtio-blk)");
+IF (disk.count() >= 2) {
+    print("cando disk1 name =", disk.name(1));
+    print("cando disk1 blockSize =", disk.blockSize(1));
+    print("cando disk1 blocks =", disk.blocks(1));
+    // fs.* now treats a whole disk with no partition table as a
+    // single synthetic partition 0 - so disk 1's NTFS volume is
+    // accessible at (1, 0).
+    print("cando fs.detect(1,0) =", fs.detect(1, 0));
+    print("cando fs.label(1,0) =", fs.label(1, 0));
+    // Read the probe file. libntfs-3g mounts disk 1, walks the MFT,
+    // reads /probe.txt's $DATA attribute. Marker:
+    //   "canboot-ntfs-marker-2026"
+    print("cando fs.read(1,0,probe.txt) =", fs.read(1, 0, "/probe.txt"));
+    // Write through libntfs-3g. This is the FIRST real-disk NTFS
+    // write canboot has ever done; the trip-wire is whether
+    // mkfs.ntfs (on the host) refuses to re-mount the volume after.
+    print("cando fs.write(1,0,probe.txt) =", fs.write(1, 0, "/probe.txt", "canboot-ntfs-write-2026"));
+    print("cando fs.read(1,0,probe.txt) after write =", fs.read(1, 0, "/probe.txt"));
+} ELSE {
+    print("cando disk1 absent");
+}
 
 print("cando part libs end");

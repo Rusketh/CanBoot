@@ -81,11 +81,18 @@ static bool walk_caps(struct canboot_virtio_dev *out,
 }
 
 bool canboot_virtio_find(uint16_t pci_device_id, struct canboot_virtio_dev *out) {
+    return canboot_virtio_find_nth(pci_device_id, 0, out);
+}
+
+bool canboot_virtio_find_nth(uint16_t pci_device_id, uint32_t skip,
+                              struct canboot_virtio_dev *out) {
     const struct canboot_pci_dev *devs = hal_pci_devs();
     uint32_t n = hal_pci_devcount();
+    uint32_t seen = 0;
     for (uint32_t i = 0; i < n; i++) {
         if (devs[i].vendor != CANBOOT_VIRTIO_VENDOR) continue;
         if (devs[i].device != pci_device_id) continue;
+        if (seen++ < skip) continue;
         hal_pci_enable_bus_master(devs[i].addr);
         if (walk_caps(out, pci_device_id, devs[i].addr)) return true;
     }

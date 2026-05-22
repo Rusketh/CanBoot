@@ -50,6 +50,8 @@ set(CANBOOT_KERNEL_COMMON
     cando_port/cando_fmt_lib.c
     cando_port/cando_partition_lib.c
     cando_port/cando_fs_lib.c
+    cando_port/ntfs3g_canboot_io.c
+    cando_port/ntfs3g_canboot_glue.c
     fs/partition.c
     fs/ntfs.c
     fs/iso9660.c
@@ -149,6 +151,50 @@ set(CANBOOT_CANDO_SOURCES
 )
 
 # ---------------------------------------------------------------------------
+# ntfs-3g library sources. Vendored under vendor/ntfs-3g, compiled
+# against vendor/ntfs-3g_canboot/config.h with the pre-include shim
+# at cando_port/ntfs3g_canboot_shim.h. Skips win32_io.c (Windows-only).
+# unix_io.c is included for its declarations; NO_NTFS_DEVICE_DEFAULT_IO_OPS
+# in config.h elides the default ops table - we register our own via
+# cando_port/ntfs3g_canboot_io.c.
+# ---------------------------------------------------------------------------
+set(NTFS3G_DIR ${CMAKE_SOURCE_DIR}/vendor/ntfs-3g)
+set(CANBOOT_NTFS3G_SOURCES
+    ${NTFS3G_DIR}/libntfs-3g/acls.c
+    ${NTFS3G_DIR}/libntfs-3g/attrib.c
+    ${NTFS3G_DIR}/libntfs-3g/attrlist.c
+    ${NTFS3G_DIR}/libntfs-3g/bitmap.c
+    ${NTFS3G_DIR}/libntfs-3g/bootsect.c
+    ${NTFS3G_DIR}/libntfs-3g/cache.c
+    ${NTFS3G_DIR}/libntfs-3g/collate.c
+    ${NTFS3G_DIR}/libntfs-3g/compat.c
+    ${NTFS3G_DIR}/libntfs-3g/compress.c
+    ${NTFS3G_DIR}/libntfs-3g/debug.c
+    ${NTFS3G_DIR}/libntfs-3g/device.c
+    ${NTFS3G_DIR}/libntfs-3g/dir.c
+    ${NTFS3G_DIR}/libntfs-3g/ea.c
+    ${NTFS3G_DIR}/libntfs-3g/efs.c
+    ${NTFS3G_DIR}/libntfs-3g/index.c
+    ${NTFS3G_DIR}/libntfs-3g/inode.c
+    ${NTFS3G_DIR}/libntfs-3g/ioctl.c
+    ${NTFS3G_DIR}/libntfs-3g/lcnalloc.c
+    ${NTFS3G_DIR}/libntfs-3g/logfile.c
+    ${NTFS3G_DIR}/libntfs-3g/logging.c
+    ${NTFS3G_DIR}/libntfs-3g/mft.c
+    ${NTFS3G_DIR}/libntfs-3g/misc.c
+    ${NTFS3G_DIR}/libntfs-3g/mst.c
+    ${NTFS3G_DIR}/libntfs-3g/object_id.c
+    ${NTFS3G_DIR}/libntfs-3g/realpath.c
+    ${NTFS3G_DIR}/libntfs-3g/reparse.c
+    ${NTFS3G_DIR}/libntfs-3g/runlist.c
+    ${NTFS3G_DIR}/libntfs-3g/security.c
+    ${NTFS3G_DIR}/libntfs-3g/unistr.c
+    ${NTFS3G_DIR}/libntfs-3g/unix_io.c
+    ${NTFS3G_DIR}/libntfs-3g/volume.c
+    ${NTFS3G_DIR}/libntfs-3g/xattrs.c
+)
+
+# ---------------------------------------------------------------------------
 # picolibc - cross-built for the current arch via ExternalProject. The
 # x86_64 build has used this since milestone 5; aarch64 m5 hooks into
 # the same machinery via cmake/picolibc-aarch64.cross.in.
@@ -195,6 +241,7 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
         ${CANBOOT_KERNEL_COMMON}
         ${CANBOOT_LWIP_SOURCES}
         ${CANBOOT_CANDO_SOURCES}
+        ${CANBOOT_NTFS3G_SOURCES}
     )
 elseif(CANBOOT_ARCH STREQUAL "aarch64")
     # Minimal first-cut aarch64 build: bootstrap + entry trampoline +
@@ -219,6 +266,19 @@ else()
 endif()
 
 add_executable(${KERNEL_NAME} ${KERNEL_SOURCES})
+
+# libntfs-3g per-source compile flags: pre-include our shim header,
+# point at the canboot config.h, suppress upstream warnings we have
+# no business policing, and bypass HAVE_CONFIG_H gating. ntfs3g_canboot_io.c
+# only needs the include path - the shim picks up the canboot config.h
+# transitively. Applied to both the x86_64 BIOS+UEFI and aarch64 EFI
+# targets because the source set is shared.
+set_source_files_properties(${CANBOOT_NTFS3G_SOURCES} PROPERTIES
+    COMPILE_FLAGS "-include ${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_canboot_shim.h -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g -I${CMAKE_SOURCE_DIR}/cando_port/shims -DHAVE_CONFIG_H=1 -w"
+)
+set_source_files_properties(cando_port/ntfs3g_canboot_io.c cando_port/ntfs3g_canboot_glue.c PROPERTIES
+    COMPILE_FLAGS "-include ${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_canboot_shim.h -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g -DHAVE_CONFIG_H=1 -w"
+)
 
 if(CANBOOT_ARCH STREQUAL "x86_64")
     add_dependencies(${KERNEL_NAME} picolibc_ext)
@@ -462,6 +522,7 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
             ${CANBOOT_KERNEL_COMMON}
             ${CANBOOT_LWIP_SOURCES}
             ${CANBOOT_CANDO_SOURCES}
+            ${CANBOOT_NTFS3G_SOURCES}
         )
 
         set(EFI_OBJS "")
@@ -475,9 +536,21 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
             get_filename_component(_name ${src} NAME_WE)
             math(EXPR _efi_obj_seq "${_efi_obj_seq} + 1")
             set(_obj "${CMAKE_BINARY_DIR}/efi_${_efi_obj_seq}_${_name}.o")
+            set(_extra_flags "")
+            if(_src_abs MATCHES "/libntfs-3g/" OR _src_abs MATCHES "/ntfs3g_canboot_")
+                set(_extra_flags
+                    "-include" "${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_canboot_shim.h"
+                    -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot
+                    -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include
+                    -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g
+                    -DHAVE_CONFIG_H=1
+                    -w
+                )
+            endif()
             add_custom_command(
                 OUTPUT ${_obj}
                 COMMAND ${CMAKE_C_COMPILER}
+                    ${_extra_flags}
                     -I${CMAKE_SOURCE_DIR}/cando_port/shims
                     -I${GNUEFI_INCLUDE_DIR}
                     -I${GNUEFI_ARCH_INCLUDE_DIR}
@@ -684,10 +757,13 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
         cando_port/cando_fmt_lib.c
         cando_port/cando_partition_lib.c
         cando_port/cando_fs_lib.c
+        cando_port/ntfs3g_canboot_io.c
+        cando_port/ntfs3g_canboot_glue.c
         cando_port/jit_codegen_stub_aarch64.c
         fs/partition.c
         fs/ntfs.c
         kernel/env.c
+        ${CANBOOT_NTFS3G_SOURCES}
         ${CANBOOT_LWIP_SOURCES}
         ${CANBOOT_CANDO_AARCH64_SOURCES}
     )
@@ -703,9 +779,21 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
         get_filename_component(_name ${src} NAME_WE)
         math(EXPR _efi_obj_seq "${_efi_obj_seq} + 1")
         set(_obj "${CMAKE_BINARY_DIR}/efi_aarch64_${_efi_obj_seq}_${_name}.o")
+        set(_extra_flags "")
+        if(_src_abs MATCHES "/libntfs-3g/" OR _src_abs MATCHES "/ntfs3g_canboot_")
+            set(_extra_flags
+                "-include" "${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_canboot_shim.h"
+                -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot
+                -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include
+                -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g
+                -DHAVE_CONFIG_H=1
+                -w
+            )
+        endif()
         add_custom_command(
             OUTPUT ${_obj}
             COMMAND aarch64-linux-gnu-gcc
+                ${_extra_flags}
                 -I${CMAKE_SOURCE_DIR}/cando_port/shims
                 -I${GNUEFI_INCLUDE}
                 -I${GNUEFI_ARCH_INCLUDE}
