@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include <sys/stat.h>
 
 #include "ntfs-3g/volume.h"
 #include "ntfs-3g/dir.h"
@@ -124,6 +125,113 @@ int canboot_ntfs3g_read(int handle, const char *path, void *buf, int len) {
 
 int canboot_ntfs3g_write(int handle, const char *path, const void *buf, int len) {
     return rw_helper(handle, path, (void *)buf, len, 1);
+}
+
+/* ASCII -> UTF-16LE name conversion. NTFS stores filenames as
+ * native-endian 16-bit code units; libntfs takes `ntfschar` (uint16_t)
+ * arrays plus an explicit code-unit length. Returns the code-unit
+ * count, or -1 if the input is too long.
+ *
+ * We don't attempt full UTF-8 decode here - the cando string surface
+ * is byte-oriented and most boot-time tooling uses ASCII names. A
+ * proper UTF-8 decoder can land alongside the LFN read path later. */
+static int ascii_to_utf16(const char *in, uint16_t *out, int out_cap) {
+    int n = 0;
+    while (in[n] && n < out_cap) {
+        out[n] = (uint16_t)(unsigned char)in[n];
+        n++;
+    }
+    return in[n] ? -1 : n;
+}
+
+/* Find the parent inode for `path`, returning the parent ntfs_inode
+ * via *out_parent and the basename pointer into the original string.
+ * Caller frees *out_parent via ntfs_inode_close. Returns 0/-1. */
+static int resolve_parent(ntfs_volume *vol, const char *path,
+                          ntfs_inode **out_parent, const char **out_base) {
+    if (!path || path[0] != '/') return -1;
+    /* Find the last '/' to split parent and basename. */
+    const char *last = path;
+    for (const char *p = path; *p; p++) if (*p == '/') last = p;
+    if (last == path) {
+        /* path is "/foo" - parent is the root */
+        *out_parent = ntfs_pathname_to_inode(vol, NULL, "/");
+        *out_base = path + 1;
+    } else {
+        char parent_buf[256];
+        size_t pl = (size_t)(last - path);
+        if (pl >= sizeof(parent_buf)) return -1;
+        memcpy(parent_buf, path, pl);
+        parent_buf[pl] = '\0';
+        *out_parent = ntfs_pathname_to_inode(vol, NULL, parent_buf);
+        *out_base = last + 1;
+    }
+    return *out_parent ? 0 : -1;
+}
+
+int canboot_ntfs3g_create(int handle, const char *path,
+                          const void *data, int len) {
+    if (handle < 0 || handle >= HSLOTS || !g_vols[handle]) return -1;
+    if (!path || !data || len < 0) return -1;
+    ntfs_inode *parent = NULL;
+    const char *base = NULL;
+    if (resolve_parent(g_vols[handle], path, &parent, &base) != 0) return -1;
+
+    uint16_t name16[256];
+    int name_len = ascii_to_utf16(base, name16, 255);
+    if (name_len <= 0) {
+        ntfs_inode_close(parent);
+        return -1;
+    }
+
+    /* S_IFREG = regular file, mode 0644. libntfs sets up an empty
+     * $FILE_NAME, $STANDARD_INFORMATION and unnamed $DATA. */
+    ntfs_inode *ino = ntfs_create(parent, 0, name16, (u8)name_len, S_IFREG);
+    ntfs_inode_close(parent);
+    if (!ino) return -1;
+
+    ntfs_attr *attr = ntfs_attr_open(ino, AT_DATA, NULL, 0);
+    if (!attr) {
+        ntfs_inode_close(ino);
+        return -1;
+    }
+    int wrote = 0;
+    if (len > 0) {
+        ntfs_attr_truncate(attr, len);
+        int64_t w = ntfs_attr_pwrite(attr, 0, len, data);
+        wrote = (w > 0) ? (int)w : 0;
+    }
+    ntfs_attr_close(attr);
+    ntfs_inode_close(ino);
+    return wrote;
+}
+
+int canboot_ntfs3g_delete(int handle, const char *path) {
+    if (handle < 0 || handle >= HSLOTS || !g_vols[handle]) return -1;
+    if (!path) return -1;
+
+    ntfs_inode *target = ntfs_pathname_to_inode(g_vols[handle], NULL, path);
+    if (!target) return -1;
+
+    ntfs_inode *parent = NULL;
+    const char *base = NULL;
+    if (resolve_parent(g_vols[handle], path, &parent, &base) != 0) {
+        ntfs_inode_close(target);
+        return -1;
+    }
+
+    uint16_t name16[256];
+    int name_len = ascii_to_utf16(base, name16, 255);
+    if (name_len <= 0) {
+        ntfs_inode_close(parent);
+        ntfs_inode_close(target);
+        return -1;
+    }
+
+    /* ntfs_delete consumes both inodes - it closes them internally
+     * on both success and failure paths. */
+    return ntfs_delete(g_vols[handle], NULL, target, parent,
+                      name16, (u8)name_len);
 }
 
 int canboot_ntfs3g_label(int handle, char *out, int cap) {

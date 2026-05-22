@@ -49,6 +49,11 @@ typedef bool (*canboot_fat32_iter_fn)(const char *name83, uint32_t size, void *u
 int  canboot_fat32_list_root(struct canboot_fat32 *fs,
                               canboot_fat32_iter_fn cb, void *user);
 
+/* Mark the file `name` in the root directory as deleted and free
+ * its cluster chain. Returns 0 on success, -1 on miss / disk error. */
+int  canboot_fat32_delete_root_file(struct canboot_fat32 *fs,
+                                     const char *name);
+
 /* Write a fresh FAT32 onto the disk region starting at start_lba and
  * spanning size_lba sectors. Picks sectors-per-cluster automatically
  * from the volume size table the FAT32 spec recommends. The fresh FS

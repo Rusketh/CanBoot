@@ -267,6 +267,35 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
             check 'cando fs.read(1,0,probe.txt) = canboot-ntfs-marker-2026'
             check 'cando fs.write(1,0,probe.txt) = true'
             check 'cando fs.read(1,0,probe.txt) after write = canboot-ntfs-write-2026'
+            check 'cando fs.write create new.txt = true'
+            check 'cando fs.read new.txt = freshly-created-by-canboot'
+            check 'cando fs.delete new.txt = true'
+            check 'cando fs.read new.txt after delete = null'
+
+            # Host-side validation: the canboot-modified NTFS volume
+            # must remount with the system ntfs-3g, and the bytes we
+            # wrote must come back exactly. Catches catastrophic on-
+            # disk-format corruption that smoke serial checks miss.
+            HOST_MNT="$(mktemp -d)"
+            if ntfs-3g "$NTFS_IMG" "$HOST_MNT" -o loop,ro 2>/dev/null; then
+                if grep -q 'canboot-ntfs-write-2026' "$HOST_MNT/probe.txt" 2>/dev/null; then
+                    echo "host ntfs-3g re-read: probe.txt content survives ✓"
+                else
+                    echo "smoke test FAILED: host ntfs-3g re-read mismatch on probe.txt" >&2
+                    fusermount -u "$HOST_MNT" 2>/dev/null || umount "$HOST_MNT"
+                    rmdir "$HOST_MNT" 2>/dev/null || true
+                    exit 1
+                fi
+                # canboot's fs.delete should have removed new.txt
+                if [ -e "$HOST_MNT/new.txt" ]; then
+                    echo "smoke test FAILED: new.txt still on disk after canboot delete" >&2
+                    fusermount -u "$HOST_MNT" 2>/dev/null || umount "$HOST_MNT"
+                    rmdir "$HOST_MNT" 2>/dev/null || true
+                    exit 1
+                fi
+                fusermount -u "$HOST_MNT" 2>/dev/null || umount "$HOST_MNT"
+            fi
+            rmdir "$HOST_MNT" 2>/dev/null || true
         fi
         check 'cando input poll begin'
         check 'cando input poll end'
