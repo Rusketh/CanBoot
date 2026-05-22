@@ -32,6 +32,8 @@ void        canboot_cando_open_randomlib(CandoVM *vm);
 void        canboot_cando_open_cryptolib(CandoVM *vm);
 void        canboot_cando_open_hexlib(CandoVM *vm);
 void        canboot_cando_open_base64lib(CandoVM *vm);
+void        canboot_cando_open_loglib(CandoVM *vm);
+void        canboot_cando_open_envlib(CandoVM *vm);
 
 #include "hal/display.h"
 #include "hal/input.h"
@@ -106,6 +108,11 @@ void canboot_m9_candotest(void) {
     canboot_cando_open_hexlib(vm);
     canboot_cando_open_base64lib(vm);
     printf("milestone 14: crypto libs registered (random/crypto/hex/base64)\n");
+
+    /* Milestone 15: introspection + structured logging. */
+    canboot_cando_open_loglib(vm);
+    canboot_cando_open_envlib(vm);
+    printf("milestone 15: env+log libs registered\n");
 
     /* Milestone 10: load /init.cdo from disk and run it through cando_dostring. */
     static char init_src[8192];

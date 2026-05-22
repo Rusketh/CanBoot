@@ -12,6 +12,7 @@
 #include <stdint.h>
 
 #include "canboot/boot_info.h"
+#include "canboot/env.h"
 #include "hal/console.h"
 #include "hal/input.h"
 #include "hal/pci.h"
@@ -158,6 +159,7 @@ extern void canboot_idt_install(void);
 
 static void kmain_body(struct boot_info *bi) {
     hal_console_init();
+    canboot_env_set_boot_info(bi);
     hal_console_write("canboot: kmain reached (pre-init)\n");
     enable_sse_fpu();
     hal_console_write("canboot: sse enabled\n");

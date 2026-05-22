@@ -127,12 +127,40 @@ static int f_write(CandoVM *vm, int argc, CandoValue *args) {
     return 1;
 }
 
+struct list_acc {
+    char *buf;
+    size_t cap;
+    size_t used;
+};
+
+static bool list_cb(const char *name83, uint32_t size, void *user) {
+    (void)size;
+    struct list_acc *a = user;
+    size_t n = 0;
+    while (name83[n]) n++;
+    if (a->used + n + 1 >= a->cap) return false;
+    memcpy(a->buf + a->used, name83, n);
+    a->used += n;
+    a->buf[a->used++] = '\n';
+    return true;
+}
+
 static int f_list(CandoVM *vm, int argc, CandoValue *args) {
     (void)argc; (void)args;
-    /* fs/fat32.c doesn't currently expose a directory iterator; we
-     * stub list() so script code can call it without breaking, and
-     * return an empty string until the iterator lands. */
-    CandoString *s = cando_string_new("", 0);
+    /* Walk every disk; emit one filename per line from the first
+     * FAT32 root that mounts. */
+    static char out[8192];
+    struct list_acc acc = { .buf = out, .cap = sizeof(out), .used = 0 };
+    uint32_t nd = hal_disk_count();
+    for (uint32_t i = 0; i < nd; i++) {
+        struct canboot_disk *d = hal_disk_get(i);
+        if (!d) continue;
+        if (!canboot_fat32_open(d, &g_fat_state)) continue;
+        canboot_fat32_list_root(&g_fat_state, list_cb, &acc);
+        break;
+    }
+    if (acc.used > 0 && out[acc.used - 1] == '\n') acc.used--;
+    CandoString *s = cando_string_new(out, (uint32_t)acc.used);
     cando_vm_push(vm, cando_string_value(s));
     return 1;
 }
