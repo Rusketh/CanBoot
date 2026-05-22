@@ -297,23 +297,21 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
             check 'cando fs.read after mkfs = canboot-postformat-2026'
 
             # Host-side validation: the canboot-formatted NTFS volume
-            # must remount with the system ntfs-3g, and the marker
-            # file canboot wrote AFTER the format must come back
-            # byte-exact. Catches catastrophic on-disk-format
-            # corruption that smoke serial checks miss.
-            HOST_MNT="$(mktemp -d)"
-            if ntfs-3g "$NTFS_IMG" "$HOST_MNT" -o loop,ro 2>/dev/null; then
-                if grep -q 'canboot-postformat-2026' "$HOST_MNT/postfmt.txt" 2>/dev/null; then
-                    echo "host ntfs-3g re-read: canboot-formatted volume mounts + postfmt.txt content survives"
-                else
-                    echo "smoke test FAILED: host ntfs-3g re-read mismatch on postfmt.txt" >&2
-                    fusermount -u "$HOST_MNT" 2>/dev/null || umount "$HOST_MNT"
-                    rmdir "$HOST_MNT" 2>/dev/null || true
-                    exit 1
-                fi
-                fusermount -u "$HOST_MNT" 2>/dev/null || umount "$HOST_MNT"
+            # must be readable by the system ntfs-3g toolchain, and
+            # the marker file canboot wrote AFTER the format must
+            # come back byte-exact. Uses ntfscat (offline, no FUSE
+            # required) instead of mounting the image, so the check
+            # runs reliably on CI hosts where /dev/fuse is missing.
+            NTFS_DUMP="$(mktemp)"
+            if ntfscat -f "$NTFS_IMG" /postfmt.txt > "$NTFS_DUMP" 2>/dev/null \
+                    && grep -q 'canboot-postformat-2026' "$NTFS_DUMP"; then
+                echo "host ntfscat re-read: postfmt.txt content survives on canboot-formatted NTFS"
+            else
+                echo "smoke test FAILED: host ntfscat re-read mismatch on NTFS postfmt.txt" >&2
+                rm -f "$NTFS_DUMP"
+                exit 1
             fi
-            rmdir "$HOST_MNT" 2>/dev/null || true
+            rm -f "$NTFS_DUMP"
         fi
 
         # lwext4 end-to-end check, only when the ext4 test image was
