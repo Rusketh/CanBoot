@@ -19,6 +19,8 @@ endif()
 # compiled twice with different flags (kernel-model vs PIC EFI) and linked
 # into each target separately.
 set(CANBOOT_KERNEL_COMMON
+    arch/x86_64/idt.c
+    arch/x86_64/idt_stubs.S
     kernel/kmain.c
     kernel/fb.c
     kernel/m5_selftest.c
@@ -179,6 +181,7 @@ add_dependencies(${KERNEL_NAME} picolibc_ext)
 
 set_source_files_properties(
     arch/x86_64/bootstrap.S
+    arch/x86_64/idt_stubs.S
     boot/multiboot2/header.S
     PROPERTIES LANGUAGE ASM
 )
@@ -210,6 +213,7 @@ target_compile_options(${KERNEL_NAME} PRIVATE
     $<$<COMPILE_LANGUAGE:C>:-fno-pie>
     $<$<COMPILE_LANGUAGE:C>:-mno-red-zone>
     $<$<COMPILE_LANGUAGE:C>:-mcmodel=kernel>
+    $<$<COMPILE_LANGUAGE:C>:-fcf-protection=none>
     -Wall
     -Wextra
 )
@@ -282,7 +286,7 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
 
     add_compile_options(
         -ffreestanding -fno-stack-protector -fno-stack-check
-        -mno-red-zone -fPIC
+        -mno-red-zone -fPIC -fcf-protection=none
     )
     add_subdirectory(${MBEDTLS_DIR} ${CMAKE_BINARY_DIR}/mbedtls EXCLUDE_FROM_ALL)
 endif()
@@ -364,6 +368,7 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
                     "-iquote" "${CANDO_DIR}/source/lib"
                     -ffreestanding -fpic -fshort-wchar -mno-red-zone
                     -fno-stack-protector -fno-stack-check
+                    -fcf-protection=none
                     -Wno-implicit-function-declaration
                     -Wno-int-conversion
                     -c ${_src_abs} -o ${_obj}
