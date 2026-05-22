@@ -634,6 +634,7 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
         hal/disk/disk.c
         hal/disk/virtio_blk.c
         hal/display/display.c
+        hal/display/virtio_gpu.c
         fs/iso9660.c
         fs/fat32.c
         net/lwip_port/sys_arch.c

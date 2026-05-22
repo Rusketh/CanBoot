@@ -237,17 +237,39 @@ void kmain(struct boot_info *bi) {
     extern void canboot_m8_disktest(void);
     canboot_m8_disktest();
 
+    /* If the firmware didn't hand us a framebuffer (Debian AAVMF
+     * ships without graphics drivers), drive virtio-gpu ourselves so
+     * milestone 11's paint actually lands on a real scanout. */
+    if (bi->fb.format != CANBOOT_FB_RGB) {
+        extern bool canboot_virtio_gpu_init(struct canboot_fb *out_fb);
+        if (canboot_virtio_gpu_init(&bi->fb)) {
+            hal_console_write("canboot: virtio-gpu fb ");
+            put_dec(bi->fb.width);
+            hal_console_write("x");
+            put_dec(bi->fb.height);
+            hal_console_write("x");
+            put_dec(bi->fb.bpp);
+            hal_console_write("\n");
+        } else {
+            hal_console_write("canboot: virtio-gpu absent\n");
+        }
+    }
+
     /* Milestones 9+10+11+12: open the CanDo VM, register display +
-     * input libs, load /init.cdo and execute it. The display painter
-     * was bound earlier via canboot_display_bind() if we had a fb;
-     * here we run the script that drives the bound display through
-     * the cando bridge. */
+     * input libs, load /init.cdo and execute it. */
     if (bi->fb.format == CANBOOT_FB_RGB) {
         extern void canboot_display_bind(const struct canboot_fb *fb);
         canboot_display_bind(&bi->fb);
     }
     extern void canboot_m9_candotest(void);
     canboot_m9_candotest();
+
+    /* Push the final painted frame to host so QEMU's display (or a
+     * screendump) shows what cando rendered. */
+    if (bi->fb.format == CANBOOT_FB_RGB) {
+        extern void canboot_virtio_gpu_flush(void);
+        canboot_virtio_gpu_flush();
+    }
 #endif
 
     hal_console_write("canboot: aarch64 hello world boot complete\n");
