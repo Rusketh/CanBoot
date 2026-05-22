@@ -295,6 +295,10 @@ static void kmain_body(struct boot_info *bi) {
     extern void canboot_m8_disktest(void);
     canboot_m8_disktest();
 
+    /* Milestone 9: vendored CanDo - link, open/close VM round-trip. */
+    extern void canboot_m9_candotest(void);
+    canboot_m9_candotest();
+
     /* Milestone 7: Mbed TLS handshake + HTTPS GET + session resumption.
      * Currently BIOS-only - the UEFI build of Mbed TLS triggers a
      * heap/relocation corruption inside the handshake that needs its

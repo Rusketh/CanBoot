@@ -153,6 +153,8 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'milestone 7: tls test skipped on uefi'
         check 'milestone 8: init.cdo marker ok'
         check 'milestone 8: disk test ok'
+        check 'milestone 9: libcando linked into kernel'
+        check 'milestone 9: cando link test ok'
 
         echo "smoke test passed; serial log:"
         echo "$stripped" | sed 's/^/  | /'

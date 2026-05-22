@@ -78,6 +78,19 @@ Landed so far:
   GET, then reconnects to verify session-ticket resumption (~25x
   faster handshake). Currently BIOS-only; UEFI Mbed TLS link tracks a
   separate followup issue.
+- **Milestone 9.** CanDo vendored at `vendor/cando` (submodule of
+  `Rusketh/CanDo`). A curated subset of `vendor/cando/source/*.c`
+  (~50 files; everything except the OpenSSL/socket/HTTP libs we'll
+  swap for Mbed TLS + lwIP bindings in a later milestone) is compiled
+  directly into both kernel and EFI builds, with bare-metal header
+  shims in `cando_port/shims/` (openssl, netdb, netinet, sys/mman,
+  sys/socket, sys/ioctl, sys/utsname, sys/sysinfo, dirent, dlfcn,
+  termios) and POSIX function stubs in `cando_port/cando_stubs.c`.
+  `kernel/m9_candotest.c` confirms the public entry points
+  (`cando_open`/`cando_openlibs`/`cando_close`) are linked into the
+  kernel; full runtime bring-up (calling `cando_open` then
+  `cando_dofile("/init.cdo")`) lands in milestone 10 once the
+  startup-time syscall surface is fully shaken out.
 - **Milestone 8.** HAL disk surface (`hal/include/hal/disk.h`,
   `hal/disk/disk.c`) plus three drivers wired underneath: virtio-blk
   (`hal/disk/virtio_blk.c`, reuses milestone 4's virtio-pci
