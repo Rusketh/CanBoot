@@ -41,6 +41,8 @@ void        canboot_cando_open_disklib(CandoVM *vm);
 void        canboot_cando_open_pcilib(CandoVM *vm);
 void        canboot_cando_open_fblib(CandoVM *vm);
 void        canboot_cando_open_fmtlib(CandoVM *vm);
+void        canboot_cando_open_partitionlib(CandoVM *vm);
+void        canboot_cando_open_fslib(CandoVM *vm);
 
 #include "hal/display.h"
 #include "hal/input.h"
@@ -130,6 +132,11 @@ void canboot_m9_candotest(void) {
     canboot_cando_open_fblib(vm);
     canboot_cando_open_fmtlib(vm);
     printf("milestone 16: extension libs registered (url/http/https/disk/pci/fb/fmt)\n");
+
+    /* Milestone 17: partition tables (GPT/MBR) + multi-FS surface. */
+    canboot_cando_open_partitionlib(vm);
+    canboot_cando_open_fslib(vm);
+    printf("milestone 17: partition+fs libs registered\n");
 
     /* Milestone 10: load /init.cdo from disk and run it through cando_dostring. */
     static char init_src[8192];

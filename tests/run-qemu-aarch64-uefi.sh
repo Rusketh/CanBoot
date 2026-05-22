@@ -233,6 +233,10 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'cando disk.blockSize(0) = 512'
         check 'cando fmt.sprintf = hex=1234 dec=42 str=hi'
         check 'cando ext libs end'
+        check 'milestone 17: partition+fs libs registered'
+        check 'cando partition.scheme(0) = none'
+        check 'cando fs.detect(0,0) = unknown'
+        check 'cando part libs end'
         check 'cando input poll begin'
         check 'cando input poll end'
 

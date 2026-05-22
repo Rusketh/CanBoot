@@ -255,6 +255,8 @@ PY
         check 'cando https.get = canboot-secure'
         check 'cando fmt.sprintf = hex=1234 dec=42 str=hi'
         check 'cando ext libs end'
+        check 'milestone 17: partition+fs libs registered'
+        check 'cando part libs end'
 
         if [ -f "$WORK/screen.ppm" ]; then
             EXPECTED=$(cat "$ROOT/tests/refs/m11-uefi.ppm.sha256" 2>/dev/null | head -1)

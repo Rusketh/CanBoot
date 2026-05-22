@@ -395,3 +395,122 @@ int canboot_fat32_list_root(struct canboot_fat32 *fs,
     }
     return reported;
 }
+
+/* ---- FAT32 mkfs ------------------------------------------------------- */
+
+/* Microsoft's recommended sectors-per-cluster table for FAT32. Sizes
+ * are in 512-byte sectors. We cap the smallest cluster at 1 sector to
+ * keep small disks usable; real Windows refuses below 32 MiB. */
+static uint32_t pick_spc(uint64_t size_lba) {
+    if (size_lba <  16384)  return 0;    /* < 8 MiB - reject */
+    if (size_lba <  532480) return 1;    /* < 260 MiB */
+    if (size_lba <  16777216ull) return 8;   /* < 8 GiB */
+    if (size_lba <  33554432ull) return 16;  /* < 16 GiB */
+    if (size_lba <  67108864ull) return 32;
+    return 64;
+}
+
+int canboot_fat32_format(struct canboot_disk *d,
+                         uint64_t start_lba, uint64_t size_lba,
+                         const char *label_or_null) {
+    if (!d || !d->writable) return -1;
+    if (d->block_size != 512) return -1;
+    uint32_t spc = pick_spc(size_lba);
+    if (spc == 0) return -1;
+
+    uint32_t reserved = 32;             /* standard */
+    uint32_t num_fats = 2;
+    uint32_t bps      = 512;
+
+    /* Derive FAT size: each cluster needs 4 bytes of FAT. We solve
+     *   size_lba >= reserved + num_fats * fat_sectors + data_sectors
+     *   data_sectors = clusters * spc
+     *   fat_sectors * (bps / 4) = clusters
+     * iteratively bumping fat_sectors until consistent. */
+    uint32_t fat_sectors = 32;
+    for (int iter = 0; iter < 32; iter++) {
+        uint64_t avail = size_lba - reserved - num_fats * fat_sectors;
+        uint64_t clusters = avail / spc;
+        uint32_t need = (uint32_t)((clusters + (bps / 4) - 1) / (bps / 4));
+        if (need <= fat_sectors) break;
+        fat_sectors = need;
+    }
+    uint64_t avail = size_lba - reserved - num_fats * fat_sectors;
+    uint32_t clusters = (uint32_t)(avail / spc);
+    if (clusters < 65525) return -1;     /* below FAT32 spec floor */
+
+    static __attribute__((aligned(8))) uint8_t sect[512];
+
+    /* ---- BPB (boot sector) ---- */
+    memset(sect, 0, sizeof(sect));
+    sect[0] = 0xEB; sect[1] = 0x58; sect[2] = 0x90;    /* jmp short */
+    memcpy(sect + 3, "MSWIN4.1", 8);
+    *(uint16_t *)(sect + 11) = (uint16_t)bps;
+    sect[13] = (uint8_t)spc;
+    *(uint16_t *)(sect + 14) = (uint16_t)reserved;
+    sect[16] = (uint8_t)num_fats;
+    *(uint16_t *)(sect + 17) = 0;                       /* root entries (FAT32 = 0) */
+    *(uint16_t *)(sect + 19) = 0;                       /* total sectors 16 */
+    sect[21] = 0xF8;                                    /* media descriptor */
+    *(uint16_t *)(sect + 22) = 0;                       /* FAT size 16 (0 on FAT32) */
+    *(uint16_t *)(sect + 24) = 63;                      /* sectors per track (legacy) */
+    *(uint16_t *)(sect + 26) = 255;                     /* heads */
+    *(uint32_t *)(sect + 28) = (uint32_t)start_lba;     /* hidden sectors */
+    *(uint32_t *)(sect + 32) = (uint32_t)(size_lba > 0xFFFFFFFFull ? 0 : size_lba);
+    *(uint32_t *)(sect + 36) = fat_sectors;             /* FAT size 32 */
+    *(uint16_t *)(sect + 40) = 0;                       /* ext flags */
+    *(uint16_t *)(sect + 42) = 0;                       /* fs version */
+    *(uint32_t *)(sect + 44) = 2;                       /* root cluster */
+    *(uint16_t *)(sect + 48) = 1;                       /* FSInfo sector */
+    *(uint16_t *)(sect + 50) = 6;                       /* backup BPB sector */
+    sect[64] = 0x80;                                    /* drive number */
+    sect[66] = 0x29;                                    /* extended boot sig */
+    *(uint32_t *)(sect + 67) = 0xCA17B007u;             /* volume serial */
+    char label_pad[11];
+    memset(label_pad, ' ', 11);
+    if (label_or_null) {
+        for (int i = 0; i < 11 && label_or_null[i]; i++) {
+            char c = label_or_null[i];
+            if (c >= 'a' && c <= 'z') c -= 32;
+            label_pad[i] = c;
+        }
+    } else {
+        memcpy(label_pad, "CANBOOT    ", 11);
+    }
+    memcpy(sect + 71, label_pad, 11);
+    memcpy(sect + 82, "FAT32   ", 8);
+    sect[510] = 0x55; sect[511] = 0xAA;
+    if (d->write(d, start_lba + 0, 1, sect) != 0) return -1;
+    if (d->write(d, start_lba + 6, 1, sect) != 0) return -1;  /* backup BPB */
+
+    /* ---- FSInfo sector ---- */
+    memset(sect, 0, sizeof(sect));
+    *(uint32_t *)(sect + 0)   = 0x41615252u;
+    *(uint32_t *)(sect + 484) = 0x61417272u;
+    *(uint32_t *)(sect + 488) = clusters - 1;           /* free clusters; root takes 1 */
+    *(uint32_t *)(sect + 492) = 3;                      /* next free cluster hint */
+    sect[510] = 0x55; sect[511] = 0xAA;
+    if (d->write(d, start_lba + 1, 1, sect) != 0) return -1;
+    if (d->write(d, start_lba + 7, 1, sect) != 0) return -1;  /* backup FSInfo */
+
+    /* ---- FAT tables ---- */
+    memset(sect, 0, sizeof(sect));
+    *(uint32_t *)(sect + 0) = 0x0FFFFFF8u;              /* media descriptor */
+    *(uint32_t *)(sect + 4) = 0x0FFFFFFFu;              /* end-of-chain */
+    *(uint32_t *)(sect + 8) = 0x0FFFFFF8u;              /* root cluster EOC */
+    uint64_t fat0 = start_lba + reserved;
+    if (d->write(d, fat0, 1, sect) != 0) return -1;
+    if (d->write(d, fat0 + fat_sectors, 1, sect) != 0) return -1;
+    /* Zero the rest of both FATs. */
+    memset(sect, 0, sizeof(sect));
+    for (uint64_t off = 1; off < fat_sectors; off++) {
+        if (d->write(d, fat0 + off, 1, sect) != 0) return -1;
+        if (d->write(d, fat0 + fat_sectors + off, 1, sect) != 0) return -1;
+    }
+    /* Zero the root cluster. */
+    uint64_t root_lba = start_lba + reserved + num_fats * fat_sectors;
+    for (uint32_t s = 0; s < spc; s++) {
+        if (d->write(d, root_lba + s, 1, sect) != 0) return -1;
+    }
+    return 0;
+}
