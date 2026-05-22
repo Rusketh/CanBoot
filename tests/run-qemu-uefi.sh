@@ -57,9 +57,16 @@ python3 "$ROOT/tests/sidecars/https_secure.py" 127.0.0.1 "$HTTPS_PORT" >"$WORK/h
 HTTPS_PID=$!
 sleep 0.5
 
+DISK_IMG="${DISK_IMG:-build/canboot-fat32.img}"
+if [ ! -f "$DISK_IMG" ]; then
+    "$ROOT/scripts/mkdisk-fat32.sh" "$DISK_IMG" >/dev/null
+fi
+
 QEMU_ARGS=(
     -machine q35
     -cdrom "$ISO"
+    -drive "if=none,id=blk0,file=$DISK_IMG,format=raw"
+    -device virtio-blk-pci,drive=blk0
     -device virtio-keyboard-pci
     -netdev user,id=n0
     -device virtio-net-pci,netdev=n0
@@ -144,6 +151,8 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'milestone 6: http get ok'
         check 'milestone 6: net test ok'
         check 'milestone 7: tls test skipped on uefi'
+        check 'milestone 8: init.cdo marker ok'
+        check 'milestone 8: disk test ok'
 
         echo "smoke test passed; serial log:"
         echo "$stripped" | sed 's/^/  | /'

@@ -78,11 +78,26 @@ Landed so far:
   GET, then reconnects to verify session-ticket resumption (~25x
   faster handshake). Currently BIOS-only; UEFI Mbed TLS link tracks a
   separate followup issue.
+- **Milestone 8.** HAL disk surface (`hal/include/hal/disk.h`,
+  `hal/disk/disk.c`) plus three drivers wired underneath: virtio-blk
+  (`hal/disk/virtio_blk.c`, reuses milestone 4's virtio-pci
+  transport) and AHCI SATA (`hal/disk/ahci.c`, BAR5 ABAR, 32-slot
+  command list, LBA48 READ/WRITE DMA EXT). Filesystems:
+  read-only ISO9660 (`fs/iso9660.c`) for booting from the canboot ISO
+  and read+write FAT32 (`fs/fat32.c`) for an attached disk image (root
+  directory only, 8.3 names, multi-cluster chains). `kmain` runs
+  `kernel/m8_disktest.c`: discover all block devices, look up
+  `/init.cdo` on a writable FAT32 disk first (round-tripping a small
+  write-probe to verify the write path), fall back to the ISO9660
+  root, and assert a build-time `canboot-init-marker` in the loaded
+  body. Smoke tests build a 64 MiB FAT32 disk image carrying
+  `initramfs/init.cdo` (`scripts/mkdisk-fat32.sh`) and attach it to
+  QEMU via virtio-blk.
 
-Upcoming milestones bring up the rest of the HAL surface (disk, fs,
-time, entropy), vendor the CanDo submodule with its patch series, and
-ship the full set of release artifacts (hybrid ISO, single-firmware
-ISOs, PXE bundle, raw `.img`, standalone `.efi`).
+Upcoming milestones vendor the CanDo submodule with its patch series
+and start linking `libcando.a` into the kernel, then ship the full set
+of release artifacts (hybrid ISO, single-firmware ISOs, PXE bundle,
+raw `.img`, standalone `.efi`).
 
 ## Building locally
 

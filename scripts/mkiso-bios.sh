@@ -20,6 +20,13 @@ trap 'rm -rf "$WORKDIR"' EXIT
 mkdir -p "$WORKDIR/boot/grub"
 cp "$KERNEL" "$WORKDIR/boot/canboot.elf"
 
+# Embed /init.cdo at the ISO root so the milestone 8 disk test can find
+# it via ISO9660 when no attached FAT32 disk is present.
+INIT_CDO="$(cd "$(dirname "$0")/.." && pwd)/initramfs/init.cdo"
+if [ -f "$INIT_CDO" ]; then
+    cp "$INIT_CDO" "$WORKDIR/init.cdo"
+fi
+
 cat > "$WORKDIR/boot/grub/grub.cfg" <<'EOF'
 set timeout=0
 set default=0

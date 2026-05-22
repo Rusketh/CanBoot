@@ -24,7 +24,13 @@ set(CANBOOT_KERNEL_COMMON
     kernel/m5_selftest.c
     kernel/m6_nettest.c
     kernel/m7_tlstest.c
+    kernel/m8_disktest.c
     kernel/canboot_test_ca.c
+    fs/iso9660.c
+    fs/fat32.c
+    hal/disk/disk.c
+    hal/disk/virtio_blk.c
+    hal/disk/ahci.c
     hal/console/serial_x86.c
     hal/input/input_queue.c
     hal/input/ps2.c
@@ -117,6 +123,7 @@ target_include_directories(${KERNEL_NAME} PRIVATE
     net/lwip_port/include
     net/mbedtls_port/include
     net/mbedtls_port
+    ${CMAKE_SOURCE_DIR}
     ${LWIP_DIR}/src/include
     ${PICOLIBC_INCLUDE}
     ${CMAKE_SOURCE_DIR}/vendor/mbedtls/include
@@ -256,6 +263,7 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
                     -I${CMAKE_SOURCE_DIR}/net/lwip_port/include
                     -I${CMAKE_SOURCE_DIR}/net/mbedtls_port/include
                     -I${CMAKE_SOURCE_DIR}/net/mbedtls_port
+                    -I${CMAKE_SOURCE_DIR}
                     -I${LWIP_DIR}/src/include
                     -I${MBEDTLS_DIR}/include
                     -I${PICOLIBC_INCLUDE}
