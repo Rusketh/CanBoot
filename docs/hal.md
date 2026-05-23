@@ -3,7 +3,7 @@
 CanBoot's Hardware Abstraction Layer is a flat C ABI: one header per
 device class in `hal/include/hal/`, one or more driver `.c` files in
 `hal/<class>/` that satisfy that header. Higher layers (the cando
-libraries, milestone self-tests) only see the header.
+libraries, selftests) only see the header.
 
 Adding hardware support to CanBoot means writing a new driver `.c` —
 the cando-side API stays unchanged.
@@ -135,7 +135,7 @@ CF8/CFC; the aarch64 path is ECAM at the firmware-provided MMIO base.
 
 | Surface | Files | Notes |
 |---------|-------|-------|
-| `hal/time` | `kernel/m6_nettest.c` calibration | TSC + i8254 PIT; no separate file yet |
+| `hal/time` | `tests/selftest/net.c` calibration | TSC + i8254 PIT; no separate file yet |
 | IDT / IRQ vectors | `arch/x86_64/idt.{c,h}`, `arch/x86_64/idt_stubs.S` | x86_64 trap frame dump on exception |
 | Power off | (not implemented) | ACPI S5 / PSCI bring-up deferred |
 
@@ -149,10 +149,10 @@ CF8/CFC; the aarch64 path is ECAM at the firmware-provided MMIO base.
    (x86_64 kernel ELF + the per-EFI `EFI_*_SOURCES` foreach loops).
 4. Bring up at `kmain` time. The pattern is `if (hal_X_init()) {
    ... } else { hal_console_write("canboot: X absent\n"); }`.
-5. Add a milestone test under `kernel/mNN_*.c` that exercises the
+5. Add a selftest under `tests/selftest/<name>.c` that exercises the
    driver end-to-end on serial output.
 6. Update the relevant `tests/run-qemu-*.sh` runners to attach the
-   QEMU device and assert milestone success markers.
+   QEMU device and assert selftest success markers.
 
 See [adding-libs.md](adding-libs.md) for the cando-binding side of a
 new device.

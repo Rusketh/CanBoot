@@ -61,13 +61,13 @@ jobs:
 
       - name: Build BIOS ISO
         if: matrix.firmware == 'bios'
-        run: bash scripts/mkiso-bios.sh
+        run: bash scripts/mkiso/bios.sh
               build/canboot-x86_64.elf
               build/canboot-x86_64-bios.iso
 
       - name: Build UEFI ISO
         if: matrix.firmware == 'uefi'
-        run: bash scripts/mkiso-uefi.sh
+        run: bash scripts/mkiso/uefi.sh
               build/canboot-x86_64-uefi.efi
               build/canboot-x86_64-uefi.iso
 
@@ -159,7 +159,7 @@ jobs:
 
       - name: Build UEFI ESP image
         if: matrix.firmware == 'uefi'
-        run: bash scripts/mkdisk-aarch64-uefi.sh
+        run: bash scripts/mkdisk/aarch64-uefi.sh
               build-aarch64/canboot-aarch64-uefi.efi
               build-aarch64/canboot-aarch64-uefi.img
 

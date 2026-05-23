@@ -7,7 +7,7 @@ speakers:
    cando script
         │
         ▼
-   audio.* bindings              (cando_port/cando_audio_lib.c)
+   audio.* bindings              (cando_port/lib/audio.c)
         │
         ▼
    Mixer (additive, Q15 fixed-point, saturating clamp)
@@ -37,7 +37,7 @@ speakers:
 
    - Sniff format: `RIFF...WAVE` -> WAV decoder (inline);
      `ID3` / MPEG frame sync -> `canboot_mp3_decode` from
-     `cando_port/minimp3_canboot.c`.
+     `cando_port/vendor_glue/minimp3/decoder.c`.
    - Decode to s16 interleaved PCM at whatever rate/channels the
      source happened to use.
    - Nearest-neighbour resample to the HAL's fixed format
@@ -139,9 +139,9 @@ order will be linked over the stub. Add the source file to
 
 | Path | What |
 |------|------|
-| `cando_port/cando_audio_lib.c` | cando bindings + mixer |
-| `cando_port/stb_image_canboot.c` | unrelated; left for reference (image) |
-| `cando_port/minimp3_canboot.c` | MP3 decoder wrapper |
+| `cando_port/lib/audio.c` | cando bindings + mixer |
+| `cando_port/vendor_glue/stb/image.c` | unrelated; left for reference (image) |
+| `cando_port/vendor_glue/minimp3/decoder.c` | MP3 decoder wrapper |
 | `hal/include/hal/audio.h`     | HAL surface |
 | `hal/audio/audio_stub.c`      | weak fallback backend |
 | `hal/audio/intel_hda.c`       | x86_64 backend |

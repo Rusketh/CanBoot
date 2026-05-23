@@ -6,7 +6,7 @@
 
 /*
  * HAL net interface. virtio-net only today; the same surface fans out
- * to e1000/rtl8169 + real hardware NICs in a later milestone.
+ * to e1000/rtl8169 + real hardware NICs later.
  *
  * Discovery + bring-up live in canboot_virtio_net_init(). The driver
  * registers an lwIP netif on success; callers use lwIP raw APIs for

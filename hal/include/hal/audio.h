@@ -17,7 +17,7 @@
  *   - 44.1 kHz sample rate
  *
  * Future revisions may add format negotiation; sticking to one
- * shape keeps the first audio milestone trivial to verify.
+ * shape keeps the first audio bring-up trivial to verify.
  */
 
 #define HAL_AUDIO_CHANNELS 2u

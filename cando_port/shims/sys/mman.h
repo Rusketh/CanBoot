@@ -3,7 +3,7 @@
 /* Bare-metal shim. The JIT mcode allocator calls mmap to grab an
  * executable page; we provide a static W+X arena via cando_stubs.c
  * but the JIT itself remains disabled at runtime (vm->jit_enabled = 0)
- * until milestone 18 re-enables JIT with proper W^X. */
+ * until we re-enable JIT with proper W^X. */
 #include <stddef.h>
 #define PROT_NONE      0
 #define PROT_READ      1

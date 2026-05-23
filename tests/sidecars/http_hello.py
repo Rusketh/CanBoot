@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tiny HTTP server returning 'canboot-hello' for the milestone-6 GET."""
+"""Tiny HTTP server returning 'canboot-hello' for the net selftest GET."""
 
 import http.server
 import sys

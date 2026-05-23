@@ -2,7 +2,7 @@
 
 A small freestanding kernel that boots on UEFI or BIOS firmware,
 brings up enough hardware to host the CanDo language VM, and runs
-`/init.cdo` from disk. Hardware bring-up is split into "milestones"
+`/init.cdo` from disk. Hardware bring-up is split into stages
 roughly along device lines (console, input, network, TLS, disk,
 display, audio, cando VM).
 
@@ -32,12 +32,12 @@ display, audio, cando VM).
    |  - hal_display_init -> firmware fb / virtio-gpu          |
    |  - hal_audio_init   -> Intel HDA / virtio-sound          |
    |                                                          |
-   |  Milestone self-tests (mNN_*test.c) prove each driver    |
+   |  Boot selftests (tests/selftest/*.c) prove each driver   |
    +-----------------------------------------------------------+
                               |
                               v
                   cando VM: cando_open + cando_openlibs
-                  + register all the cando_port/cando_*_lib.c
+                  + register all the cando_port/lib/*.c
                   bindings + cando_dostring("/init.cdo")
                               |
                               v
@@ -92,33 +92,31 @@ Loaders fill it in before `ExitBootServices` / before jumping out of
 the GRUB stage; the kernel side reads it once and the values are
 fixed for the lifetime of boot.
 
-## Milestones (chronological)
+## Subsystem inventory
 
-The repo is organised by milestone for the same reason the
-[plan](https://github.com/Rusketh/CanBoot/blob/main/docs/plan.md)
-is: each landed PR exercises one HAL surface end-to-end before
-moving on, so failures pin to a small recent diff.
+What's wired today, by layer:
 
-| # | Subsystem |
-|---|-----------|
-| 1 | Multiboot2 boot + 16550 UART |
-| 2 | UEFI loader + GOP framebuffer |
-| 3 | Unified kmain, framebuffer paint |
-| 4 | HAL input (PS/2 + virtio-input) |
-| 5 | picolibc + pthread stub |
-| 6 | lwIP + virtio-net + DHCP / HTTP |
-| 7 | Mbed TLS + HTTPS |
-| 8 | HAL disk + FAT32 / ISO9660 |
-| 9 | CanDo VM linked into kernel |
-| 10 | cando_dostring("/init.cdo") |
-| 11 | cando display.* + GOP self-test |
-| 12 | cando input.* + waitKey loop |
-| 13 | aarch64 boot + PL011 + cross-build |
-| 14 | aarch64 UEFI parity |
-| 15-17 | aarch64 milestone-5..10 parity (picolibc / lwIP / Mbed TLS / disk / cando / display / input) |
-| 18 | NTFS read+write (libntfs-3g) + mkntfs |
-| 19 | ext4 read+write (lwext4) + mkfs |
-| 20 | image + audio (stb_image / minimp3 / Intel HDA / virtio-sound / LOVE-style mixer) |
+| Layer | Implementations |
+|-------|-----------------|
+| Boot loader | Multiboot2 (BIOS via GRUB), UEFI PE/COFF (gnu-efi), aarch64 direct-kernel, aarch64 UEFI (AAVMF) |
+| Console | 16550 UART (x86_64), PL011 (aarch64) |
+| Input | PS/2 i8042, virtio-input |
+| Display | Linear framebuffer (firmware-provided), virtio-gpu (aarch64) |
+| Disk | virtio-blk, AHCI SATA |
+| Net | virtio-net + lwIP 2.2.1 (NO_SYS) |
+| Audio | Intel HDA (x86_64), virtio-sound (aarch64) |
+| PCI | x86_64 port-IO config space, aarch64 PCIe ECAM |
+| Filesystems | ISO9660 (RO), FAT32 (RW root), ext4 via lwext4 (RW + mkfs), NTFS via libntfs-3g (RW + mkntfs) |
+| Partition tables | MBR, GPT |
+| Runtime | picolibc 1.8.11, cooperative pthread fiber stub, 4 MiB static heap |
+| TLS | Mbed TLS 3.6.x LTS with RDSEED/RDRAND + TSC entropy and session tickets |
+| Image decode | stb_image (PNG/JPG/BMP) |
+| Audio decode | minimp3 (MP3), WAV |
+| Language | CanDo VM (full vendored source) with ~25 bare-metal namespaces |
+
+Each subsystem has an in-kernel selftest under `tests/selftest/` that
+runs during boot; CI parses serial output for the green markers and
+fails the matrix job on any miss.
 
 ## Why the cando layer is the only userspace
 

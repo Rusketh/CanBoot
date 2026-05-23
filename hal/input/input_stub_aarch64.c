@@ -6,7 +6,7 @@
  * input drivers land.
  *
  * hal_input_getc() returns -1 to signal "no character available". The
- * milestone-5 self-test doesn't read stdin, so this stub is enough to
+ * runtime selftest doesn't read stdin, so this stub is enough to
  * link and run.
  */
 

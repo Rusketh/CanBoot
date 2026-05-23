@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Boot the aarch64 raw kernel image via QEMU virt's -kernel path and
-# assert the milestone-3 chain ('kmain reached' -> boot_info dump ->
+# assert the early boot chain ('kmain reached' -> boot_info dump ->
 # fdt-derived mmap -> handshake -> ok) appears on PL011 serial within
 # TIMEOUT seconds. The kernel must be the .bin (raw image carrying the
 # arm64 boot header) so QEMU loads us as a Linux-flavoured kernel and
@@ -71,9 +71,9 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'canboot: boot_info v1 source=direct-kernel'
         check 'canboot: mmap entries='
         check 'canboot: platform-tables='
-        check 'canboot: handshake confirmed (aarch64 milestone-3)'
-        check 'milestone 5: starting self-test'
-        check 'milestone 5: self-test ok'
+        check 'canboot: handshake confirmed (aarch64 boot_info)'
+        check 'selftest: starting self-test'
+        check 'selftest: self-test ok'
         check 'canboot: aarch64 hello world boot complete'
 
         # FDT walker must have found at least one usable mmap entry

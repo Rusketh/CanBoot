@@ -31,7 +31,7 @@ mode — no threads, no OS layer, raw API only. The port lives in
 - `net/lwip_port/include/lwipopts.h` — feature toggles. ARP, IPv4,
   UDP, TCP, DHCP, ICMP, etc. enabled; IPv6 disabled for now.
 - `net/lwip_port/sys_arch.c` — provides `sys_now()` backed by the
-  TSC-calibrated clock from milestone 6.
+  TSC-calibrated clock.
 - `net/lwip_port/inet_pton.c` — inet_pton(AF_INET, ...) shim.
 
 The virtio-net driver feeds lwIP via `netif_add` + `etharp_output`;
@@ -56,12 +56,12 @@ Port:
 
 ## DHCP at boot
 
-`kernel/m6_nettest.c` is what kicks DHCP. The netif starts in
+`tests/selftest/net.c` is what kicks DHCP. The netif starts in
 `netif_set_default(&g_netif); netif_set_up(&g_netif);` then
 `dhcp_start(&g_netif)`. The pump runs `dhcp_fine_tmr` / `dhcp_coarse_tmr`
 at the spec'd cadences via lwIP's `sys_check_timeouts()`.
 
-By the time `kmain` reaches the cando milestone, the netif typically
+By the time `kmain` reaches the cando stage, the netif typically
 has a lease and the cando `net.*` calls Just Work.
 
 ## TLS handshake flow
@@ -87,14 +87,14 @@ HTTP body returned to cando
 
 On a second connection to the same host:port, the session ticket
 from the first handshake is reused — handshake#2 is ~30× faster
-than #1 (`milestone 7: session resumption ok (hs1=80697 us hs2=2152 us)`).
+than #1 (`selftest: session resumption ok (hs1=80697 us hs2=2152 us)`).
 
 ## CA pinning
 
 The handshake validates against the canboot test CA only — a single
 self-signed cert at `tests/sidecars/tls/canboot-test.pem`, embedded
-in the kernel via `kernel/canboot_test_ca.c`. Regenerate via
-`scripts/embed-test-ca.sh`.
+in the kernel via `tests/selftest/ca.c`. Regenerate via
+`tests/selftest/embed-test-ca.sh`.
 
 To trust additional CAs in a custom build, append them to the source
 PEM and re-run the embed script. Multiple PEM-encoded certs in one
@@ -122,6 +122,6 @@ boundary above it.
 | lwIP integration  | `net/lwip_port/*` |
 | Mbed TLS integration | `net/mbedtls_port/*` |
 | virtio-net driver | `hal/net/virtio_net.c` |
-| cando bindings    | `cando_port/cando_net_lib.c`, `cando_port/cando_http_lib.c`, `cando_port/cando_https_lib.c`, `cando_port/cando_tls_lib.c` |
-| DHCP + initial net bring-up | `kernel/m6_nettest.c` |
-| TLS bring-up + sample fetch | `kernel/m7_tlstest.c` |
+| cando bindings    | `cando_port/lib/net.c`, `cando_port/lib/http.c`, `cando_port/lib/https.c`, `cando_port/lib/tls.c` |
+| DHCP + initial net bring-up | `tests/selftest/net.c` |
+| TLS bring-up + sample fetch | `tests/selftest/tls.c` |

@@ -9,7 +9,7 @@
  * tree. On success *out_count holds the number of pairs written.
  *
  * Assumes the root uses #address-cells=2 / #size-cells=2 (always true
- * on QEMU virt aarch64 - hard-coded for milestone-scope simplicity).
+ * on QEMU virt aarch64 - hard-coded for simplicity for now).
  */
 int canboot_fdt_walk_memory(const void *fdt_ptr,
                             uint64_t *out_bases,

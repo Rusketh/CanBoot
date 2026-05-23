@@ -70,7 +70,7 @@ Submodules pulled in:
 ```sh
 cmake -B build -G Ninja -DCANBOOT_ARCH=x86_64
 cmake --build build --target canboot-x86_64
-bash scripts/mkiso-bios.sh build/canboot-x86_64.elf build/canboot-x86_64-bios.iso
+bash scripts/mkiso/bios.sh build/canboot-x86_64.elf build/canboot-x86_64-bios.iso
 ```
 
 Artifacts produced:
@@ -92,7 +92,7 @@ Add to the existing build tree:
 
 ```sh
 cmake --build build --target canboot-uefi
-bash scripts/mkiso-uefi.sh build/canboot-x86_64-uefi.efi build/canboot-x86_64-uefi.iso
+bash scripts/mkiso/uefi.sh build/canboot-x86_64-uefi.efi build/canboot-x86_64-uefi.iso
 ```
 
 Artifacts produced:
@@ -141,7 +141,7 @@ bash tests/run-qemu-aarch64.sh build-aarch64/canboot-aarch64.bin
 
 ```sh
 cmake --build build-aarch64 --target canboot-uefi
-bash scripts/mkdisk-aarch64-uefi.sh \
+bash scripts/mkdisk/aarch64-uefi.sh \
     build-aarch64/canboot-aarch64-uefi.efi \
     build-aarch64/canboot-aarch64-uefi.img
 ```
@@ -172,8 +172,8 @@ bash tests/run-qemu-aarch64-uefi.sh build-aarch64/canboot-aarch64-uefi.img
 
 `initramfs/init.cdo` is the cando script embedded on the boot media.
 To ship your own, edit `initramfs/init.cdo` in place and rebuild the disk
-image — `scripts/mkdisk-fat32.sh`, `scripts/mkdisk-aarch64-uefi.sh`,
-`scripts/mkiso-{bios,uefi}.sh` all pick it up at packaging time.
+image — `scripts/mkdisk/fat32.sh`, `scripts/mkdisk/aarch64-uefi.sh`,
+`scripts/mkiso/{bios,uefi}.sh` all pick it up at packaging time.
 
 ## Build flags
 

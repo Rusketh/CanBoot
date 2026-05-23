@@ -11,8 +11,8 @@
  *     the smoke tests look for
  *   - print "ok" as the terminator
  *
- * Later aarch64 milestones layer in picolibc, the HAL surfaces, and
- * cando the same way milestones 4-12 did on x86_64.
+ * picolibc, the HAL surfaces, and cando layer in on top of this in
+ * the same shape as the x86_64 build.
  */
 
 #include <stdbool.h>
@@ -37,7 +37,7 @@ void fb_fill_rect(const struct canboot_fb *fb,
                   uint32_t pixel);
 
 void canboot_pthread_init(void);
-void canboot_m5_selftest(void);
+void runtime_selftest(void);
 
 static void put_hex64(uint64_t v) {
     static const char digits[] = "0123456789abcdef";
@@ -159,7 +159,7 @@ void kmain(struct boot_info *bi) {
         hal_console_write("\n");
     }
 
-    hal_console_write("canboot: handshake confirmed (aarch64 milestone-3)\n");
+    hal_console_write("canboot: handshake confirmed (aarch64 boot_info)\n");
 
 #if CANBOOT_AARCH64_EFI_BUILD
     /* Milestone 4: HAL input bring-up on the UEFI boot path. PCI was
@@ -221,25 +221,25 @@ void kmain(struct boot_info *bi) {
     /* Milestone 5: picolibc + pthread shim self-test. Same harness the
      * x86_64 kmain runs, links against the same libc.a. */
     canboot_pthread_init();
-    canboot_m5_selftest();
+    runtime_selftest();
 
 #if CANBOOT_AARCH64_EFI_BUILD
     /* Milestone 6: lwIP over virtio-net. DHCP from SLIRP, UDP echo +
-     * HTTP GET against sidecars on 10.0.2.2. canboot_m6_nettest
+     * HTTP GET against sidecars on 10.0.2.2. net_selftest
      * handles virtio-net init and lwip_init internally. */
-    extern void canboot_m6_nettest(void);
-    canboot_m6_nettest();
+    extern void net_selftest(void);
+    net_selftest();
 
     /* Milestone 7: Mbed TLS over the now-running lwIP stack. Full
      * TLS 1.2 handshake against the HTTPS sidecar plus a session-
      * ticket resumption pass. */
-    extern void canboot_m7_tlstest(void);
-    canboot_m7_tlstest();
+    extern void tls_selftest(void);
+    tls_selftest();
 
     /* Milestone 8: HAL disk + virtio-blk + FAT32/ISO9660. Locates
      * /init.cdo on the boot disk and verifies the marker string. */
-    extern void canboot_m8_disktest(void);
-    canboot_m8_disktest();
+    extern void disk_selftest(void);
+    disk_selftest();
 
     /* Milestone 18: virtio-sound audio probe (aarch64 / QEMU virt). */
     extern bool hal_audio_init(void);
@@ -254,7 +254,7 @@ void kmain(struct boot_info *bi) {
 
     /* If the firmware didn't hand us a framebuffer (Debian AAVMF
      * ships without graphics drivers), drive virtio-gpu ourselves so
-     * milestone 11's paint actually lands on a real scanout. */
+     * the display selftest's paint actually lands on a real scanout. */
     if (bi->fb.format != CANBOOT_FB_RGB) {
         extern bool canboot_virtio_gpu_init(struct canboot_fb *out_fb);
         if (canboot_virtio_gpu_init(&bi->fb)) {
@@ -276,8 +276,8 @@ void kmain(struct boot_info *bi) {
         extern void canboot_display_bind(const struct canboot_fb *fb);
         canboot_display_bind(&bi->fb);
     }
-    extern void canboot_m9_candotest(void);
-    canboot_m9_candotest();
+    extern void cando_selftest(void);
+    cando_selftest();
 
     /* Push the final painted frame to host so QEMU's display (or a
      * screendump) shows what cando rendered. */

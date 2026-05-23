@@ -2,7 +2,7 @@
 # Boot the BIOS ISO in QEMU with a PS/2 keyboard, virtio-keyboard, and
 # virtio-net. Inject keystrokes via the HMP monitor once kmain reaches
 # its polling loop, run sidecar UDP echo + HTTP servers reachable via
-# the SLIRP host gateway (10.0.2.2), and assert the milestone 1-6
+# the SLIRP host gateway (10.0.2.2), and assert the boot
 # checkpoints before "ok".
 
 set -euo pipefail
@@ -37,7 +37,7 @@ sleep 0.5
 
 DISK_IMG="${DISK_IMG:-build/canboot-fat32.img}"
 if [ ! -f "$DISK_IMG" ]; then
-    "$ROOT/scripts/mkdisk-fat32.sh" "$DISK_IMG" >/dev/null
+    "$ROOT/scripts/mkdisk/fat32.sh" "$DISK_IMG" >/dev/null
 fi
 
 AUDIO_WAV="${AUDIO_WAV:-build/canboot-bios-audio.wav}"
@@ -88,7 +88,7 @@ for k in ("a", "b", "ret"):
 sock.close()
 PY
 
-    # Second wave for milestone 12: cando's input.waitKey loop.
+    # Second wave for selftest: cando's input.waitKey loop.
     for _ in $(seq 1 200); do
         if grep -q 'cando input poll begin' "$LOG" 2>/dev/null; then
             break
@@ -126,7 +126,7 @@ SCREENDUMP_DONE=""
 deadline=$(( $(date +%s) + TIMEOUT ))
 while [ "$(date +%s)" -lt "$deadline" ]; do
     # Once init.cdo finishes painting, grab a screendump for the
-    # milestone-11 sha256 compare. We do this once, on the first
+    # display selftest sha256 compare. We do this once, on the first
     # iteration after the paint marker appears.
     if [ -z "$SCREENDUMP_DONE" ] && \
        tr -d '\r' < "$LOG" 2>/dev/null | grep -q 'init.cdo painted display'; then
@@ -176,33 +176,33 @@ PY
         check 'canboot: ps/2 input ready'
         check 'canboot: virtio-input ready'
         check 'canboot: rx '
-        check 'milestone 5: self-test ok'
-        check 'milestone 6: dhcp lease'
-        check 'milestone 6: udp echo ok'
-        check 'milestone 6: http get ok'
-        check 'milestone 6: net test ok'
-        check 'milestone 7: handshake ok'
-        check 'milestone 7: https get ok'
-        check 'milestone 7: session resumption ok'
-        check 'milestone 7: tls test ok'
-        check 'milestone 8: init.cdo marker ok'
-        check 'milestone 8: disk test ok'
-        check 'milestone 9: cando_open ok'
-        check 'milestone 9: cando_openlibs ok'
-        check 'milestone 9: cando_close ok'
-        check 'milestone 9: cando link test ok'
+        check 'selftest: self-test ok'
+        check 'selftest: dhcp lease'
+        check 'selftest: udp echo ok'
+        check 'selftest: http get ok'
+        check 'selftest: net test ok'
+        check 'selftest: handshake ok'
+        check 'selftest: https get ok'
+        check 'selftest: session resumption ok'
+        check 'selftest: tls test ok'
+        check 'selftest: init.cdo marker ok'
+        check 'selftest: disk test ok'
+        check 'selftest: cando_open ok'
+        check 'selftest: cando_openlibs ok'
+        check 'selftest: cando_close ok'
+        check 'selftest: cando link test ok'
         check 'canboot-cando-runtime-marker'
-        check 'milestone 10: cando_dostring ok'
-        check 'milestone 10: init.cdo executed ok'
-        check 'milestone 11: display lib registered'
-        check 'milestone 11: display test ok'
-        check 'milestone 12: input lib registered'
+        check 'selftest: cando_dostring ok'
+        check 'selftest: init.cdo executed ok'
+        check 'selftest: display lib registered'
+        check 'selftest: display test ok'
+        check 'selftest: input lib registered'
         check 'cando input poll begin'
         check 'cando got key1: 120'
         check 'cando got key2: 121'
         check 'cando got key3: 122'
         check 'cando input poll end'
-        check 'milestone 13: system libs registered'
+        check 'selftest: system libs registered'
         check 'cando time.ms ='
         check 'cando file.exists(init.cdo) = true'
         check 'cando file.read = hello-from-cando'
@@ -210,13 +210,13 @@ PY
         check 'cando net.httpGet = canboot-hello'
         check 'cando tls.httpsGet = canboot-secure'
         check 'cando sys libs end'
-        check 'milestone 14: crypto libs registered'
+        check 'selftest: crypto libs registered'
         check 'cando hex.encode(canboot) = 63616e626f6f74'
         check 'cando base64.encode(canboot) = Y2FuYm9vdA=='
         check 'cando crypto.sha256Hex(empty) = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
         check 'cando crypto.hmacSha256Hex(k, m) = f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8'
         check 'cando crypto libs end'
-        check 'milestone 15: env+log libs registered'
+        check 'selftest: env+log libs registered'
         check 'cando env.source = bios'
         check 'INFO  info-level message from cando'
         check 'INIT.CDO'
@@ -225,29 +225,29 @@ PY
             echo "smoke test FAILED: log.setLevel(info) did not suppress debug message" >&2
             exit 1
         fi
-        check 'milestone 16: extension libs registered'
+        check 'selftest: extension libs registered'
         check 'cando url.scheme = https'
         check 'cando url.host = 10.0.2.2'
         check 'cando http.get = canboot-hello'
         check 'cando https.get = canboot-secure'
         check 'cando fmt.sprintf = hex=1234 dec=42 str=hi'
         check 'cando ext libs end'
-        check 'milestone 17: partition+fs libs registered'
+        check 'selftest: partition+fs libs registered'
         check 'cando part libs end'
 
         # Milestone 11 screenshot hash compare. Per-host firmware /
         # GRUB stage contributions to the framebuffer drift the
         # exact bytes, so the hash check is non-fatal - the real
         # paint correctness gate is the kernel-side pixel sample
-        # check in m9_candotest.c ("milestone 11: probe red top-
+        # check in tests/selftest/cando.c ("selftest: probe red top-
         # left rect" etc.) that already ran above.
         if [ -f "$WORK/screen.ppm" ]; then
             EXPECTED=$(cat "$ROOT/tests/refs/m11-bios.ppm.sha256" 2>/dev/null | head -1)
             GOT=$(sha256sum "$WORK/screen.ppm" | awk '{print $1}')
             if [ "$EXPECTED" = "$GOT" ]; then
-                echo "milestone 11: screendump sha256 matches reference ($GOT)"
+                echo "selftest: screendump sha256 matches reference ($GOT)"
             else
-                echo "milestone 11: screendump sha256 host-drift (got=$GOT exp=$EXPECTED) - ignoring, paint already verified in kmain"
+                echo "selftest: screendump sha256 host-drift (got=$GOT exp=$EXPECTED) - ignoring, paint already verified in kmain"
                 cp "$WORK/screen.ppm" build/m11-bios-actual.ppm 2>/dev/null || true
             fi
         else
@@ -278,7 +278,7 @@ body = data[44:]
 nz = sum(1 for b in body if b != 0)
 sys.exit(0 if nz > 16 else 1)
 " 2>/dev/null; then
-                echo "milestone 18: audio capture has non-silent body ($(stat -c '%s' "$AUDIO_WAV") bytes)"
+                echo "selftest: audio capture has non-silent body ($(stat -c '%s' "$AUDIO_WAV") bytes)"
             else
                 echo "smoke test FAILED: audio wav body is silent (no non-zero samples)" >&2
                 exit 1

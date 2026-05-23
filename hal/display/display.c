@@ -1,7 +1,7 @@
 /*
  * HAL display backed by the loader-provided framebuffer. The drawing
  * primitives match the cando script-facing surface exposed by the
- * milestone-11 cando lib (cando_port/cando_display_lib.c).
+ * cando display lib (cando_port/lib/display.c).
  *
  * Pixel encoding from callers is 0x00RRGGBB; we encode to the device
  * pitch + channel mask discovered at boot, so the same script lines

@@ -1,5 +1,5 @@
 /*
- * Modern virtio-blk driver. Reuses the milestone-4 virtio-pci
+ * Modern virtio-blk driver. Reuses the HAL virtio-pci
  * transport. One requestq (qidx=0); per-request we build a 3-descriptor
  * chain (header read by device, data buffer, 1-byte status written by
  * device) and poll the used ring for completion.
