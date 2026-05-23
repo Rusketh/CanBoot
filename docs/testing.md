@@ -68,12 +68,12 @@ debugging.
 
 ## Host-side cross-validation
 
-Some milestones also verify the test using independent host tools:
+Some selftests also verify themselves using independent host tools:
 
-| Milestone | Host check |
-|-----------|-----------|
-| m11 (display) | `screendump` PPM SHA256 vs checked-in reference (BIOS only — UEFI / aarch64 GOP byte order varies per firmware) |
-| m18 (audio)   | `-audiodev wav,...` capture has >16 non-zero bytes in the PCM body |
+| Selftest | Host check |
+|----------|-----------|
+| display | `screendump` PPM SHA256 vs checked-in reference (BIOS only — UEFI / aarch64 GOP byte order varies per firmware) |
+| audio   | `-audiodev wav,...` capture has >16 non-zero bytes in the PCM body |
 | NTFS write    | `ntfscat -f` reads back the marker file canboot wrote |
 | NTFS format   | host `mount.ntfs-3g` on the canboot-formatted image |
 | ext4 write    | `debugfs dump` reads back the marker |
