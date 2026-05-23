@@ -33,6 +33,10 @@
 
 struct CandoVM;
 void cando_lib_crypto_register(struct CandoVM *vm)         { (void)vm; }
+/* `os` built-in replaced by canboot_cando_open_oslib in
+ * cando_port/lib/os.c. CanDo's upstream os.c uses POSIX getenv,
+ * system(), gethostname, sysinfo, etc. — none available on canboot. */
+void cando_lib_os_register(struct CandoVM *vm)             { (void)vm; }
 void cando_lib_socket_register(struct CandoVM *vm)         { (void)vm; }
 void cando_lib_secure_socket_register(struct CandoVM *vm)  { (void)vm; }
 void cando_lib_httputil_register(struct CandoVM *vm)       { (void)vm; }
