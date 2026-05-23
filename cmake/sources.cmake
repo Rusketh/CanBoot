@@ -23,6 +23,7 @@ set(CANBOOT_KERNEL_COMMON
     tests/selftest/cando.c
     tests/selftest/ca.c
     cando_port/runtime/stubs.c
+    cando_port/lib/error.c
     cando_port/lib/display.c
     cando_port/lib/input.c
     cando_port/lib/time.c
