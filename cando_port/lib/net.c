@@ -239,7 +239,48 @@ static int n_http_get(CandoVM *vm, int argc, CandoValue *args) {
     return 1;
 }
 
+/* ---- DNS / address resolution ----------------------------------------- */
+/*
+ * net.lookup(host) -> array of IP strings
+ *
+ * Drop-in for vendor/cando/source/lib/net.c's `net.lookup`. Host CanDo
+ * delegates to POSIX getaddrinfo; on canboot we don't have a resolver
+ * yet (lwipopts.h has LWIP_DNS=0 — enabling it pulls in the DNS module
+ * + a sys-timer dependency that hasn't been wired). For now we accept
+ * dotted-quad IPv4 literals only:
+ *
+ *   - input parses as IPv4 -> single-element array of the input
+ *   - anything else        -> empty array (matches CanDo's failure shape;
+ *                             does NOT throw)
+ *
+ * Scripts that call this with hostnames get the same observable result
+ * they would under host CanDo when getaddrinfo fails: an empty array.
+ * Real DNS lookup lands when LWIP_DNS is enabled in a subsequent PR.
+ */
+static int n_lookup(CandoVM *vm, int argc, CandoValue *args) {
+    const char *host = libutil_arg_cstr_at(args, argc, 0);
+
+    CandoValue arr_val = cando_bridge_new_array(vm);
+    CdoObject *arr_obj = cando_bridge_resolve(vm, cando_as_handle(arr_val));
+
+    ip_addr_t addr;
+    if (host && parse_ipv4(host, &addr)) {
+        CdoString *s = cdo_string_new(host, (uint32_t)strlen(host));
+        cdo_array_push(arr_obj, cdo_string_value(s));
+        cdo_string_release(s);
+    }
+
+    cando_vm_push(vm, arr_val);
+    return 1;
+}
+
 static const LibutilMethodEntry net_methods[] = {
+    /* CanDo drop-in surface. */
+    { "lookup",  n_lookup   },
+
+    /* CanBoot-specific extensions retained until full socket / http
+     * surfaces land (workstreams 9.socket/9.http). Removed once the
+     * new APIs are in place and init.cdo / smoke tests are migrated. */
     { "udpEcho", n_udp_echo },
     { "httpGet", n_http_get },
 };
