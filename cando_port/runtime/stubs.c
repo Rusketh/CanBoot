@@ -101,6 +101,7 @@ pid_t fork(void)                                    { STUB_FAIL_ERRNO((pid_t)-1,
 int   execvp(const char *f, char *const argv[])     { (void)f; (void)argv; STUB_FAIL_ERRNO(-1, ENOSYS); }
 pid_t waitpid(pid_t pid, int *status, int options)  { (void)pid; (void)status; (void)options; STUB_FAIL_ERRNO((pid_t)-1, ECHILD); }
 int   dup2(int oldfd, int newfd)                    { (void)oldfd; (void)newfd; STUB_FAIL_ERRNO(-1, EBADF); }
+pid_t getpid(void)                                  { return 1; }
 pid_t getppid(void)                                 { return 0; }
 
 /* ---- Scheduling / threading ------------------------------------------ */
