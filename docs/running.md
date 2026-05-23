@@ -102,7 +102,7 @@ to the host. You can inspect it with any wave editor.
 -drive if=none,id=hd2,format=raw,file=ext4.img -device virtio-blk-pci,drive=hd2
 ```
 
-Use `scripts/mkdisk-ntfs.sh` and `scripts/mkdisk-ext4.sh` to build them.
+Use `scripts/mkdisk/ntfs.sh` and `scripts/mkdisk/ext4.sh` to build them.
 Both contain a `/probe.txt` with a known marker.
 
 ## Real hardware

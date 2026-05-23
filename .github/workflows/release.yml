@@ -88,7 +88,7 @@ jobs:
         if: matrix.arch == 'x86_64' && matrix.firmware == 'bios'
         run: |
           cmake --build build --target canboot-x86_64 --verbose
-          bash scripts/mkiso-bios.sh \
+          bash scripts/mkiso/bios.sh \
             build/canboot-x86_64.elf \
             build/canboot-x86_64-bios.iso
 
@@ -105,7 +105,7 @@ jobs:
         if: matrix.arch == 'x86_64' && matrix.firmware == 'uefi'
         run: |
           cmake --build build --target canboot-uefi --verbose
-          bash scripts/mkiso-uefi.sh \
+          bash scripts/mkiso/uefi.sh \
             build/canboot-x86_64-uefi.efi \
             build/canboot-x86_64-uefi.iso
 
@@ -135,7 +135,7 @@ jobs:
         if: matrix.arch == 'aarch64' && matrix.firmware == 'uefi'
         run: |
           cmake --build build-aarch64 --target canboot-uefi --verbose
-          bash scripts/mkdisk-aarch64-uefi.sh \
+          bash scripts/mkdisk/aarch64-uefi.sh \
             build-aarch64/canboot-aarch64-uefi.efi \
             build-aarch64/canboot-aarch64-uefi.img
 

@@ -45,7 +45,7 @@ if command -v mkfs.ntfs >/dev/null 2>&1; then
     # the known marker content; a stale image from a prior run would
     # already have the post-write payload.
     rm -f "$NTFS_IMG"
-    bash "$ROOT/scripts/mkdisk-ntfs.sh" "$NTFS_IMG" 16 >/dev/null 2>&1 || rm -f "$NTFS_IMG"
+    bash "$ROOT/scripts/mkdisk/ntfs.sh" "$NTFS_IMG" 16 >/dev/null 2>&1 || rm -f "$NTFS_IMG"
 fi
 NTFS_ARGS=()
 if [ -f "$NTFS_IMG" ]; then
@@ -60,7 +60,7 @@ fi
 EXT4_IMG="$(dirname "$LOG")/ext4-test.img"
 if command -v mkfs.ext4 >/dev/null 2>&1 && command -v debugfs >/dev/null 2>&1; then
     rm -f "$EXT4_IMG"
-    bash "$ROOT/scripts/mkdisk-ext4.sh" "$EXT4_IMG" 32 >/dev/null 2>&1 || rm -f "$EXT4_IMG"
+    bash "$ROOT/scripts/mkdisk/ext4.sh" "$EXT4_IMG" 32 >/dev/null 2>&1 || rm -f "$EXT4_IMG"
 fi
 EXT4_ARGS=()
 if [ -f "$EXT4_IMG" ]; then

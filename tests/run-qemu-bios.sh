@@ -37,7 +37,7 @@ sleep 0.5
 
 DISK_IMG="${DISK_IMG:-build/canboot-fat32.img}"
 if [ ! -f "$DISK_IMG" ]; then
-    "$ROOT/scripts/mkdisk-fat32.sh" "$DISK_IMG" >/dev/null
+    "$ROOT/scripts/mkdisk/fat32.sh" "$DISK_IMG" >/dev/null
 fi
 
 AUDIO_WAV="${AUDIO_WAV:-build/canboot-bios-audio.wav}"

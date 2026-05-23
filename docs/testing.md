@@ -97,13 +97,13 @@ Same flow as CI:
 # Build everything first
 cmake -B build -G Ninja -DCANBOOT_ARCH=x86_64
 cmake --build build --target canboot-x86_64 canboot-uefi
-bash scripts/mkiso-bios.sh build/canboot-x86_64.elf       build/canboot-x86_64-bios.iso
-bash scripts/mkiso-uefi.sh build/canboot-x86_64-uefi.efi  build/canboot-x86_64-uefi.iso
+bash scripts/mkiso/bios.sh build/canboot-x86_64.elf       build/canboot-x86_64-bios.iso
+bash scripts/mkiso/uefi.sh build/canboot-x86_64-uefi.efi  build/canboot-x86_64-uefi.iso
 
 cmake -B build-aarch64 -G Ninja -DCANBOOT_ARCH=aarch64 \
                        -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-aarch64.cmake
 cmake --build build-aarch64 --target canboot-aarch64-bin canboot-uefi
-bash scripts/mkdisk-aarch64-uefi.sh build-aarch64/canboot-aarch64-uefi.efi \
+bash scripts/mkdisk/aarch64-uefi.sh build-aarch64/canboot-aarch64-uefi.efi \
                                     build-aarch64/canboot-aarch64-uefi.img
 
 # Then run the smoke tests

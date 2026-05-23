@@ -94,7 +94,7 @@ than #1 (`selftest: session resumption ok (hs1=80697 us hs2=2152 us)`).
 The handshake validates against the canboot test CA only — a single
 self-signed cert at `tests/sidecars/tls/canboot-test.pem`, embedded
 in the kernel via `tests/selftest/ca.c`. Regenerate via
-`scripts/embed-test-ca.sh`.
+`tests/selftest/embed-test-ca.sh`.
 
 To trust additional CAs in a custom build, append them to the source
 PEM and re-run the embed script. Multiple PEM-encoded certs in one

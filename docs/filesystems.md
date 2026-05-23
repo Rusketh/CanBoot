@@ -59,7 +59,7 @@ that bridges to the HAL disk read/write at 32-sector batches
 
 - `cando_port/vendor_glue/ntfs3g/shim.h` is force-included before every
   libntfs source: provides `struct hd_geometry`, `LC_ALL`, etc.
-- `cando_port/ntfs3g_mkntfs_main_rename.h` renames `main` ->
+- `cando_port/vendor_glue/ntfs3g/mkntfs_main_rename.h` renames `main` ->
   `mkntfs_main_canboot` and overrides the `ntfs_device_default_io_ops`
   macro so mkntfs sees our HAL bridge.
 - `cando_port/runtime/stubs.c` provides POSIX stubs that mkntfs touches
@@ -105,12 +105,12 @@ The smoke tests build per-FS test images on demand:
 
 | Script | Produces |
 |--------|----------|
-| `scripts/mkdisk-fat32.sh`        | 64 MiB FAT32, contains `/init.cdo` + `/probe.png` |
-| `scripts/mkdisk-ntfs.sh`         | 16 MiB NTFS with `/probe.txt` (uses `mkfs.ntfs` + `ntfscp`) |
-| `scripts/mkdisk-ext4.sh`         | 32 MiB ext4 with `/probe.txt` (uses `mkfs.ext4` + `debugfs`) |
-| `scripts/mkdisk-aarch64-uefi*.sh`| FAT32 ESP image with the EFI binary + init.cdo |
+| `scripts/mkdisk/fat32.sh`        | 64 MiB FAT32, contains `/init.cdo` + `/probe.png` |
+| `scripts/mkdisk/ntfs.sh`         | 16 MiB NTFS with `/probe.txt` (uses `mkfs.ntfs` + `ntfscp`) |
+| `scripts/mkdisk/ext4.sh`         | 32 MiB ext4 with `/probe.txt` (uses `mkfs.ext4` + `debugfs`) |
+| `scripts/mkdisk/aarch64-uefi*.sh`| FAT32 ESP image with the EFI binary + init.cdo |
 
-`scripts/mkdisk-ntfs.sh` and `scripts/mkdisk-ext4.sh` are explicitly
+`scripts/mkdisk/ntfs.sh` and `scripts/mkdisk/ext4.sh` are explicitly
 FUSE-free — `ntfscp` and `debugfs` both operate on the image file
 directly without mounting, so the test runner doesn't depend on
 `/dev/fuse` (which isn't reliably present in CI sandboxes).
