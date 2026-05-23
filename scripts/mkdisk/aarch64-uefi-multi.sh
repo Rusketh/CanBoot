@@ -57,7 +57,7 @@ mkfs.vfat -F 32 -n CANBOOTEFI "$ESP_IMG" >/dev/null
 mmd -i "$ESP_IMG" ::/EFI
 mmd -i "$ESP_IMG" ::/EFI/BOOT
 mcopy -i "$ESP_IMG" "$EFI_BIN" ::/EFI/BOOT/BOOTAA64.EFI
-INIT_CDO="$(cd "$(dirname "$0")/.." && pwd)/initramfs/init.cdo"
+INIT_CDO="$(cd "$(dirname "$0")/../.." && pwd)/initramfs/init.cdo"
 if [ -f "$INIT_CDO" ]; then
     mcopy -i "$ESP_IMG" "$INIT_CDO" ::/init.cdo
 fi

@@ -23,7 +23,7 @@ mmd -i "$OUT" ::/EFI
 mmd -i "$OUT" ::/EFI/BOOT
 mcopy -i "$OUT" "$EFI_BIN" ::/EFI/BOOT/BOOTAA64.EFI
 
-ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 INIT_CDO="$ROOT_DIR/initramfs/init.cdo"
 if [ -f "$INIT_CDO" ]; then
     mcopy -i "$OUT" "$INIT_CDO" ::/init.cdo

@@ -41,7 +41,7 @@ cp "$EFI_BIN" "$ISO_ROOT/EFI/BOOT/BOOTX64.EFI"
 
 # Embed /init.cdo at the ISO root so the disk selftest can find
 # it via ISO9660 when no attached FAT32 disk is present.
-ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 INIT_CDO="$ROOT_DIR/initramfs/init.cdo"
 if [ -f "$INIT_CDO" ]; then
     cp "$INIT_CDO" "$ISO_ROOT/init.cdo"

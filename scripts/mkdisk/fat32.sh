@@ -5,7 +5,7 @@
 set -euo pipefail
 
 OUT="${1:-build/canboot-fat32.img}"
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 INIT_CDO="$ROOT/initramfs/init.cdo"
 SIZE_MB="${SIZE_MB:-64}"
 

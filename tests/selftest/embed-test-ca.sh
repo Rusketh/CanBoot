@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PEM="$ROOT/tests/sidecars/tls/canboot-test.pem"
 OUT="$ROOT/tests/selftest/ca.c"
 
