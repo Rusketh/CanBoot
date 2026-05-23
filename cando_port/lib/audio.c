@@ -61,7 +61,7 @@
 
 #include "hal/audio.h"
 
-/* minimp3 - decoder lives in cando_port/minimp3_canboot.c. */
+/* minimp3 - decoder lives in cando_port/vendor_glue/minimp3/decoder.c. */
 extern int  canboot_mp3_decode(const uint8_t *buf, int len,
                                 int16_t **out_pcm, int *out_frames,
                                 int *out_channels, int *out_hz);

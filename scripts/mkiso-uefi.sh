@@ -39,7 +39,7 @@ mcopy -i "$ESP_IMG" "$EFI_BIN" ::/EFI/BOOT/BOOTX64.EFI
 mkdir -p "$ISO_ROOT/EFI/BOOT"
 cp "$EFI_BIN" "$ISO_ROOT/EFI/BOOT/BOOTX64.EFI"
 
-# Embed /init.cdo at the ISO root so the milestone 8 disk test can find
+# Embed /init.cdo at the ISO root so the disk selftest can find
 # it via ISO9660 when no attached FAT32 disk is present.
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 INIT_CDO="$ROOT_DIR/initramfs/init.cdo"

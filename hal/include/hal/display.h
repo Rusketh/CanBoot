@@ -38,7 +38,7 @@ void     hal_display_copy_rect (int32_t sx, int32_t sy,
 void     hal_display_text      (int32_t x, int32_t y, const char *str,
                                 uint32_t fg, uint32_t bg);
 
-/* Read back a single pixel - useful for the milestone-11 smoke test
+/* Read back a single pixel - useful for the display selftest
  * before we have a working screendump path. */
 uint32_t hal_display_get_pixel (int32_t x, int32_t y);
 

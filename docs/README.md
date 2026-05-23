@@ -93,7 +93,7 @@ with method-style calls.
 
 | Doc | What's in it |
 |-----|--------------|
-| [testing.md](testing.md)       | Running the smoke tests; what each milestone asserts |
+| [testing.md](testing.md)       | Running the smoke tests; what each selftest asserts |
 | [adding-libs.md](adding-libs.md) | Adding a new cando library |
 | [vendoring.md](vendoring.md)   | Adding a new vendored library (stb_image-style or submodule) |
 

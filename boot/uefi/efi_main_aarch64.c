@@ -147,7 +147,7 @@ static void populate_fb(EFI_SYSTEM_TABLE *st, struct boot_info *bi) {
 /* On aarch64 the firmware exposes a DTB (or, less commonly on QEMU virt,
  * an ACPI RSDP) via the configuration table. We stash whichever pointer
  * we find in boot_info.acpi_rsdp - it's just an opaque "platform tables"
- * handle as far as the kernel is concerned at this milestone. */
+ * handle as far as the kernel is concerned at now. */
 static void populate_platform_tables(EFI_SYSTEM_TABLE *st, struct boot_info *bi) {
     for (UINTN i = 0; i < st->NumberOfTableEntries; i++) {
         EFI_GUID *g = &st->ConfigurationTable[i].VendorGuid;

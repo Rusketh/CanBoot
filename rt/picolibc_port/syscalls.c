@@ -10,7 +10,7 @@
  *   - close/lseek/fstat/isatty/open/stat/link/unlink/gettimeofday/kill/getpid
  *     -> stubs that either succeed trivially or return ENOSYS/EBADF
  *
- * No file system yet (milestone 8), so any file fd just errors out.
+ * No file system yet, so any file fd just errors out.
  */
 
 #include <errno.h>

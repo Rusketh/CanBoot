@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Regenerate kernel/canboot_test_ca.c from tests/sidecars/tls/canboot-test.pem
+# Regenerate tests/selftest/ca.c from tests/sidecars/tls/canboot-test.pem
 # Run this whenever the test cert is rotated.
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PEM="$ROOT/tests/sidecars/tls/canboot-test.pem"
-OUT="$ROOT/kernel/canboot_test_ca.c"
+OUT="$ROOT/tests/selftest/ca.c"
 
 if [ ! -f "$PEM" ]; then
     echo "error: $PEM not found" >&2

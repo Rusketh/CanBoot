@@ -2,7 +2,7 @@
  * Walk the Multiboot2 info structure GRUB leaves in EBX at hand-off,
  * normalising the framebuffer tag, memory map tag, command line, and
  * ACPI RSDP into struct boot_info. Unknown tags are skipped. All
- * pointers stay in the identity-mapped first 1 GiB during milestone 3.
+ * pointers stay in the identity-mapped first 1 GiB during early boot.
  */
 
 #include <stdint.h>

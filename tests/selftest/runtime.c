@@ -4,7 +4,7 @@
  * protected counter) work end-to-end.
  *
  * Run from kmain after the input loop. On success the kernel prints
- * "milestone 5: self-test ok"; on any failure it prints the failure
+ * "selftest: self-test ok"; on any failure it prints the failure
  * with detail so the serial log surfaces what broke.
  */
 
@@ -38,36 +38,36 @@ static void *worker(void *arg) {
 size_t canboot_heap_bytes_used(void);
 size_t canboot_heap_bytes_total(void);
 
-void canboot_m5_selftest(void) {
-    hal_console_write("milestone 5: starting self-test\n");
+void runtime_selftest(void) {
+    hal_console_write("selftest: starting self-test\n");
 
     /* stdio + printf */
-    printf("milestone 5: printf int=%d hex=0x%x str=%s\n", 42, 0xCAFE, "alive");
+    printf("selftest: printf int=%d hex=0x%x str=%s\n", 42, 0xCAFE, "alive");
 
     /* malloc / free / strcpy */
     char *buf = (char *)malloc(64);
     if (!buf) {
-        hal_console_write("milestone 5: FAIL malloc returned NULL\n");
+        hal_console_write("selftest: FAIL malloc returned NULL\n");
         return;
     }
     strcpy(buf, "hello, picolibc");
     if (strcmp(buf, "hello, picolibc") != 0) {
-        hal_console_write("milestone 5: FAIL strcpy/strcmp mismatch\n");
+        hal_console_write("selftest: FAIL strcpy/strcmp mismatch\n");
         free(buf);
         return;
     }
-    printf("milestone 5: malloc(64)=%p strcpy ok '%s'\n", (void *)buf, buf);
+    printf("selftest: malloc(64)=%p strcpy ok '%s'\n", (void *)buf, buf);
     free(buf);
 
     /* large allocation to stress sbrk */
     void *big = malloc(64 * 1024);
     if (!big) {
-        hal_console_write("milestone 5: FAIL malloc(64k) returned NULL\n");
+        hal_console_write("selftest: FAIL malloc(64k) returned NULL\n");
         return;
     }
     memset(big, 0xA5, 64 * 1024);
     free(big);
-    printf("milestone 5: heap bytes_used=%zu bytes_total=%zu\n",
+    printf("selftest: heap bytes_used=%zu bytes_total=%zu\n",
            canboot_heap_bytes_used(), canboot_heap_bytes_total());
 
     /* pthread: spawn workers that race a mutex-protected counter. */
@@ -76,7 +76,7 @@ void canboot_m5_selftest(void) {
     for (int i = 0; i < WORKERS; i++) {
         int rc = pthread_create(&t[i], 0, worker, (void *)(intptr_t)i);
         if (rc != 0) {
-            printf("milestone 5: FAIL pthread_create [%d] rc=%d\n", i, rc);
+            printf("selftest: FAIL pthread_create [%d] rc=%d\n", i, rc);
             return;
         }
     }
@@ -84,23 +84,23 @@ void canboot_m5_selftest(void) {
         void *ret = 0;
         int rc = pthread_join(t[i], &ret);
         if (rc != 0) {
-            printf("milestone 5: FAIL pthread_join [%d] rc=%d\n", i, rc);
+            printf("selftest: FAIL pthread_join [%d] rc=%d\n", i, rc);
             return;
         }
         if ((intptr_t)ret != i) {
-            printf("milestone 5: FAIL worker [%d] retval=%ld\n",
+            printf("selftest: FAIL worker [%d] retval=%ld\n",
                    i, (long)(intptr_t)ret);
             return;
         }
     }
     int expected = WORKERS * INCS_PER_WORKER;
     if (g_counter != expected) {
-        printf("milestone 5: FAIL counter=%d expected=%d\n",
+        printf("selftest: FAIL counter=%d expected=%d\n",
                g_counter, expected);
         return;
     }
-    printf("milestone 5: pthread counter=%d (expected %d)\n",
+    printf("selftest: pthread counter=%d (expected %d)\n",
            g_counter, expected);
 
-    hal_console_write("milestone 5: self-test ok\n");
+    hal_console_write("selftest: self-test ok\n");
 }

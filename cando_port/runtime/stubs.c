@@ -5,7 +5,7 @@
  * / exec routines are unreachable in a single-process boot environment,
  * dynamic loading is unsupported, and the JIT memory-protection calls
  * succeed against a static W+X arena (JIT itself stays disabled at
- * runtime until milestone 18).
+ * runtime for now).
  *
  * The library register hooks for the SSL/socket/HTTP modules are also
  * here as no-ops so cando_openlibs() compiles without dragging in the
@@ -37,7 +37,7 @@ void cando_lib_socket_register(struct CandoVM *vm)         { (void)vm; }
 void cando_lib_secure_socket_register(struct CandoVM *vm)  { (void)vm; }
 void cando_lib_httputil_register(struct CandoVM *vm)       { (void)vm; }
 /* http / https built-ins replaced by canboot_cando_open_httplib /
- * canboot_cando_open_httpslib in cando_port/cando_http_lib.c. */
+ * canboot_cando_open_httpslib in cando_port/lib/http.c. */
 void cando_lib_http_register(struct CandoVM *vm)           { (void)vm; }
 void cando_lib_https_register(struct CandoVM *vm)          { (void)vm; }
 
@@ -66,7 +66,7 @@ CandoValue cando_lib_file_stream_from_fp(struct CandoVM *vm,
 
 char *realpath(const char *path, char *out) {
     if (!path) STUB_FAIL_ERRNO(NULL, EINVAL);
-    /* No real fs resolution yet; just copy the input. milestone 11
+    /* No real fs resolution yet; just copy the input. future work
      * binds these to the VFS once cando expects it. */
     if (out) { strncpy(out, path, 4095); out[4095] = '\0'; return out; }
     return (char *)path;
@@ -188,7 +188,7 @@ int uname(struct utsname *u) {
     strncpy(u->sysname,  "canboot",  _UTSNAME_LENGTH);
     strncpy(u->nodename, "canboot",  _UTSNAME_LENGTH);
     strncpy(u->release,  "pre-alpha",_UTSNAME_LENGTH);
-    strncpy(u->version,  "milestone-9", _UTSNAME_LENGTH);
+    strncpy(u->version,  "canboot", _UTSNAME_LENGTH);
     strncpy(u->machine,  "x86_64",   _UTSNAME_LENGTH);
     return 0;
 }

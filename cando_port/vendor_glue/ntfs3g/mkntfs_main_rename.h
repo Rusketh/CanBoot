@@ -13,7 +13,7 @@
  * `ntfs_device_unix_io_ops` via macro substitution. mkntfs.c picks
  * that up and would route open/read/write/stat through unix_io.c's
  * POSIX-syscall implementation - which calls our open() / lseek() /
- * pread() stubs in cando_port/cando_stubs.c, none of which talk to
+ * pread() stubs in cando_port/runtime/stubs.c, none of which talk to
  * the underlying HAL disk. The wrong default ops are why mkntfs
  * sees "Could not open /dev/canboot-vblk" the moment it tries.
  *

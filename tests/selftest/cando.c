@@ -1,7 +1,7 @@
 /*
  * Milestone 9 self-test: prove libcando is linked and the VM can be
  * opened + closed cleanly on bare metal. Actual script execution
- * (cando_dofile on /init.cdo) lands in milestone 10 once the syscall
+ * (cando_dofile on /init.cdo) lands in the cando dostring stage once the syscall
  * + thread bindings are fully shaken out for CanDo's startup path.
  */
 
@@ -79,51 +79,51 @@ static int load_init_cdo(char *out, uint32_t out_size, uint32_t *out_len) {
     return -1;
 }
 
-void canboot_m9_candotest(void) {
-    printf("milestone 9: starting cando link test\n");
+void cando_selftest(void) {
+    printf("selftest: starting cando link test\n");
 
-    printf("milestone 9: addr open=%p openlibs=%p close=%p\n",
+    printf("selftest: addr open=%p openlibs=%p close=%p\n",
            (void *)(uintptr_t)&cando_open,
            (void *)(uintptr_t)&cando_openlibs,
            (void *)(uintptr_t)&cando_close);
 
-    printf("milestone 9: calling cando_open\n");
+    printf("selftest: calling cando_open\n");
     CandoVM *vm = cando_open();
     if (!vm) {
-        printf("milestone 9: FAIL cando_open returned NULL\n");
+        printf("selftest: FAIL cando_open returned NULL\n");
         return;
     }
-    printf("milestone 9: cando_open ok vm=%p\n", (void *)vm);
+    printf("selftest: cando_open ok vm=%p\n", (void *)vm);
 
-    printf("milestone 9: calling cando_openlibs\n");
+    printf("selftest: calling cando_openlibs\n");
     cando_openlibs(vm);
-    printf("milestone 9: cando_openlibs ok\n");
+    printf("selftest: cando_openlibs ok\n");
 
     canboot_cando_open_displaylib(vm);
-    printf("milestone 11: display lib registered (%dx%d)\n",
+    printf("selftest: display lib registered (%dx%d)\n",
            hal_display_width(), hal_display_height());
 
     canboot_cando_open_inputlib(vm);
-    printf("milestone 12: input lib registered\n");
+    printf("selftest: input lib registered\n");
 
     /* Milestone 13: system libs - clock, file, net, tls. */
     canboot_cando_open_timelib(vm);
     canboot_cando_open_filelib(vm);
     canboot_cando_open_netlib(vm);
     canboot_cando_open_tlslib(vm);
-    printf("milestone 13: system libs registered (time/file/net/tls)\n");
+    printf("selftest: system libs registered (time/file/net/tls)\n");
 
     /* Milestone 14: crypto-related libs - rng + hashes + codecs. */
     canboot_cando_open_randomlib(vm);
     canboot_cando_open_cryptolib(vm);
     canboot_cando_open_hexlib(vm);
     canboot_cando_open_base64lib(vm);
-    printf("milestone 14: crypto libs registered (random/crypto/hex/base64)\n");
+    printf("selftest: crypto libs registered (random/crypto/hex/base64)\n");
 
     /* Milestone 15: introspection + structured logging. */
     canboot_cando_open_loglib(vm);
     canboot_cando_open_envlib(vm);
-    printf("milestone 15: env+log libs registered\n");
+    printf("selftest: env+log libs registered\n");
 
     /* Milestone 16: URL-aware net + raw block/PCI + display flush + fmt. */
     canboot_cando_open_urllib(vm);
@@ -133,40 +133,40 @@ void canboot_m9_candotest(void) {
     canboot_cando_open_pcilib(vm);
     canboot_cando_open_fblib(vm);
     canboot_cando_open_fmtlib(vm);
-    printf("milestone 16: extension libs registered (url/http/https/disk/pci/fb/fmt)\n");
+    printf("selftest: extension libs registered (url/http/https/disk/pci/fb/fmt)\n");
 
     /* Milestone 17: partition tables (GPT/MBR) + multi-FS surface. */
     canboot_cando_open_partitionlib(vm);
     canboot_cando_open_fslib(vm);
-    printf("milestone 17: partition+fs libs registered\n");
+    printf("selftest: partition+fs libs registered\n");
 
     /* Milestone 18: image decoders (PNG/JPG/BMP via stb_image) +
      * audio HAL surface (WAV inline, MP3 via minimp3). */
     canboot_cando_open_imagelib(vm);
     canboot_cando_open_audiolib(vm);
-    printf("milestone 18: image+audio libs registered\n");
+    printf("selftest: image+audio libs registered\n");
 
     /* Milestone 10: load /init.cdo from disk and run it through cando_dostring. */
     static char init_src[32768];
     uint32_t init_len = 0;
     if (load_init_cdo(init_src, sizeof(init_src), &init_len) != 0) {
-        printf("milestone 10: FAIL could not load /init.cdo\n");
+        printf("selftest: FAIL could not load /init.cdo\n");
         cando_close(vm);
         return;
     }
-    printf("milestone 10: loaded /init.cdo (%u bytes)\n", (unsigned)init_len);
+    printf("selftest: loaded /init.cdo (%u bytes)\n", (unsigned)init_len);
 
-    printf("milestone 10: --- init.cdo output begin ---\n");
+    printf("selftest: --- init.cdo output begin ---\n");
     int rc = cando_dostring(vm, init_src, "init.cdo");
-    printf("milestone 10: --- init.cdo output end ---\n");
+    printf("selftest: --- init.cdo output end ---\n");
     if (rc != 0) {
         const char *err = cando_errmsg(vm);
-        printf("milestone 10: FAIL cando_dostring rc=%d err=%s\n",
+        printf("selftest: FAIL cando_dostring rc=%d err=%s\n",
                rc, err ? err : "(none)");
         cando_close(vm);
         return;
     }
-    printf("milestone 10: cando_dostring ok rc=%d\n", rc);
+    printf("selftest: cando_dostring ok rc=%d\n", rc);
 
     /* Milestone 11: assert known pixel colours match what init.cdo painted.
      * The script paints three rects + a line + a text label; we sample
@@ -184,23 +184,23 @@ void canboot_m9_candotest(void) {
     for (size_t i = 0; i < sizeof(probes)/sizeof(probes[0]); i++) {
         uint32_t got = hal_display_get_pixel(probes[i].x, probes[i].y);
         if (got == probes[i].want) {
-            printf("milestone 11: probe %s @ (%d,%d) ok = 0x%06x\n",
+            printf("selftest: probe %s @ (%d,%d) ok = 0x%06x\n",
                    probes[i].what, probes[i].x, probes[i].y, (unsigned)got);
         } else {
-            printf("milestone 11: FAIL probe %s @ (%d,%d) got=0x%06x want=0x%06x\n",
+            printf("selftest: FAIL probe %s @ (%d,%d) got=0x%06x want=0x%06x\n",
                    probes[i].what, probes[i].x, probes[i].y,
                    (unsigned)got, (unsigned)probes[i].want);
             probe_fails++;
         }
     }
     if (probe_fails == 0) {
-        printf("milestone 11: display test ok\n");
+        printf("selftest: display test ok\n");
     }
 
-    printf("milestone 9: calling cando_close\n");
+    printf("selftest: calling cando_close\n");
     cando_close(vm);
-    printf("milestone 9: cando_close ok\n");
+    printf("selftest: cando_close ok\n");
 
-    printf("milestone 9: cando link test ok\n");
-    printf("milestone 10: init.cdo executed ok\n");
+    printf("selftest: cando link test ok\n");
+    printf("selftest: init.cdo executed ok\n");
 }

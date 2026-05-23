@@ -9,7 +9,7 @@
  *
  * Walks every block device looking for the first FAT32 mount that
  * contains `name`, falling back to the ISO9660 root if no FAT32 match.
- * That matches what canboot_m8_disktest does for /init.cdo and keeps
+ * That matches what disk_selftest does for /init.cdo and keeps
  * the script layer indifferent to whether the FS is mounted off the
  * ESP, an attached FAT32 disk, or a backup ISO.
  *

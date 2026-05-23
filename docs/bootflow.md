@@ -81,16 +81,16 @@ shims in `kernel/kmain.c` (x86_64) and `kernel/kmain_aarch64.c`
 for arch-conditional sections that handle GDT/IDT (x86_64 only) and
 virtio-gpu fallback (aarch64 only when AAVMF doesn't expose GOP).
 
-`kmain_body` then runs the milestone bring-up in order:
+`kmain_body` then runs the bring-up stages in order:
 
 | Step | What |
 |------|------|
 | Validate `boot_info` magic + version | |
 | Print boot summary on serial | "canboot: kmain reached" etc. |
 | Init HAL: PCI -> input -> disk -> net -> display -> audio | |
-| Run milestone self-tests m5..m11 | proves each driver |
+| Run all selftests under tests/selftest/ | proves each driver |
 | Init CanDo VM | `cando_open` + `cando_openlibs` |
-| Register all cando_port/cando_*_lib.c bindings | |
+| Register all cando_port/lib/*.c bindings | |
 | Load `/init.cdo` from FAT32 / ISO9660 | |
 | `cando_dostring(init_src)` | script runs |
 | Enter input pump loop | audio + input stay live |
@@ -111,13 +111,13 @@ canboot: platform-tables=0x...
 canboot: pci devs=6
 canboot: virtio-input present
 canboot: input loop start
-... milestone outputs ...
-milestone 18: image+audio libs registered
-milestone 10: --- init.cdo output begin ---
+... selftest output ...
+selftest: image+audio libs registered
+selftest: --- init.cdo output begin ---
 canboot-cando-runtime-marker init.cdo executed inside vm
 ... init.cdo output ...
-milestone 10: --- init.cdo output end ---
-milestone 10: cando_dostring ok rc=0
+selftest: --- init.cdo output end ---
+selftest: cando_dostring ok rc=0
 canboot: aarch64 hello world boot complete
 ok
 ```

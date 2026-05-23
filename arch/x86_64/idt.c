@@ -3,7 +3,7 @@
  * CPU exception (#PF, #GP, #UD, ...) and halts. Interrupts above
  * vector 31 are masked out (we install no IRQ handlers); hardware
  * interrupts are never enabled until the preemptive scheduler
- * milestone.
+ * lands (future work).
  */
 
 #include <stdint.h>

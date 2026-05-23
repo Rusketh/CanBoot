@@ -114,15 +114,15 @@ static bool run_udp_echo(void) {
     udp_remove(pcb);
 
     if (!ok) {
-        printf("milestone 6: FAIL udp echo timeout\n");
+        printf("selftest: FAIL udp echo timeout\n");
         return false;
     }
     if (g_udp_rxlen != plen || memcmp(g_udp_rxbuf, payload, plen) != 0) {
-        printf("milestone 6: FAIL udp echo mismatch len=%u\n",
+        printf("selftest: FAIL udp echo mismatch len=%u\n",
                (unsigned)g_udp_rxlen);
         return false;
     }
-    printf("milestone 6: udp echo ok (%u bytes)\n", (unsigned)plen);
+    printf("selftest: udp echo ok (%u bytes)\n", (unsigned)plen);
     return true;
 }
 
@@ -218,48 +218,48 @@ static bool run_http_get(void) {
     }
 
     if (!wait_for(&g_tcp_done, 5000)) {
-        printf("milestone 6: FAIL http timeout\n");
+        printf("selftest: FAIL http timeout\n");
         return false;
     }
     if (g_tcp_fail) {
-        printf("milestone 6: FAIL http transport\n");
+        printf("selftest: FAIL http transport\n");
         return false;
     }
     g_tcp_body[g_tcp_body_len] = '\0';
     if (g_tcp_status != 200) {
-        printf("milestone 6: FAIL http status=%d\n", g_tcp_status);
+        printf("selftest: FAIL http status=%d\n", g_tcp_status);
         return false;
     }
     if (strstr(g_tcp_body, "canboot-hello") == NULL) {
-        printf("milestone 6: FAIL http body='%.32s'\n", g_tcp_body);
+        printf("selftest: FAIL http body='%.32s'\n", g_tcp_body);
         return false;
     }
-    printf("milestone 6: http get ok (status=%d body='%s')\n",
+    printf("selftest: http get ok (status=%d body='%s')\n",
            g_tcp_status, g_tcp_body);
     return true;
 }
 
 /* ---- Entry ------------------------------------------------------------ */
 
-void canboot_m6_nettest(void) {
-    printf("milestone 6: starting net test\n");
+void net_selftest(void) {
+    printf("selftest: starting net test\n");
 
     lwip_init();
 
     if (!canboot_virtio_net_init()) {
-        printf("milestone 6: virtio-net absent, skipping\n");
+        printf("selftest: virtio-net absent, skipping\n");
         return;
     }
-    printf("milestone 6: virtio-net mac=%02x:%02x:%02x:%02x:%02x:%02x\n",
+    printf("selftest: virtio-net mac=%02x:%02x:%02x:%02x:%02x:%02x\n",
            hal_net_mac()[0], hal_net_mac()[1], hal_net_mac()[2],
            hal_net_mac()[3], hal_net_mac()[4], hal_net_mac()[5]);
 
     struct netif *nif = canboot_virtio_net_netif();
-    printf("milestone 6: netif flags=0x%02x mtu=%u link_up=%d up=%d\n",
+    printf("selftest: netif flags=0x%02x mtu=%u link_up=%d up=%d\n",
            (unsigned)nif->flags, (unsigned)nif->mtu,
            netif_is_link_up(nif), netif_is_up(nif));
     err_t derr = dhcp_start(nif);
-    printf("milestone 6: dhcp_start err=%d sys_now=%u\n", (int)derr, (unsigned)sys_now());
+    printf("selftest: dhcp_start err=%d sys_now=%u\n", (int)derr, (unsigned)sys_now());
 
     /* Wait up to 15s for a DHCP lease. */
     uint64_t hz = canboot_tsc_hz();
@@ -279,7 +279,7 @@ void canboot_m6_nettest(void) {
         if (now != last_log) {
             last_log = now;
             struct dhcp *d = netif_dhcp_data(nif);
-            printf("milestone 6: dhcp t=%us state=%d tries=%u tx_call=%u tx_kick=%u tx_done=%u rx_done=%u\n",
+            printf("selftest: dhcp t=%us state=%d tries=%u tx_call=%u tx_kick=%u tx_done=%u rx_done=%u\n",
                    (unsigned)now,
                    d ? (int)d->state : -1,
                    d ? (unsigned)d->tries : 0u,
@@ -291,7 +291,7 @@ void canboot_m6_nettest(void) {
         arch_relax();
     }
     if (!got_lease) {
-        printf("milestone 6: FAIL dhcp timeout\n");
+        printf("selftest: FAIL dhcp timeout\n");
         return;
     }
     char ip[16], gw[16], nm[16];
@@ -310,7 +310,7 @@ void canboot_m6_nettest(void) {
              ip4_addr2(netif_ip4_netmask(nif)),
              ip4_addr3(netif_ip4_netmask(nif)),
              ip4_addr4(netif_ip4_netmask(nif)));
-    printf("milestone 6: dhcp lease ip=%s gw=%s mask=%s\n", ip, gw, nm);
+    printf("selftest: dhcp lease ip=%s gw=%s mask=%s\n", ip, gw, nm);
 
     /* Let ARP settle and any pending DHCP traffic flush. */
     pump_for(500);
@@ -318,5 +318,5 @@ void canboot_m6_nettest(void) {
     if (!run_udp_echo()) return;
     if (!run_http_get())  return;
 
-    printf("milestone 6: net test ok\n");
+    printf("selftest: net test ok\n");
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build a BIOS-bootable El Torito ISO that GRUB2 will hand off to canboot
-# via Multiboot2. UEFI/hybrid variants land in later milestones.
+# via Multiboot2. UEFI/hybrid variants land in future work.
 
 set -euo pipefail
 
@@ -20,7 +20,7 @@ trap 'rm -rf "$WORKDIR"' EXIT
 mkdir -p "$WORKDIR/boot/grub"
 cp "$KERNEL" "$WORKDIR/boot/canboot.elf"
 
-# Embed /init.cdo at the ISO root so the milestone 8 disk test can find
+# Embed /init.cdo at the ISO root so the disk selftest can find
 # it via ISO9660 when no attached FAT32 disk is present.
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 INIT_CDO="$ROOT_DIR/initramfs/init.cdo"

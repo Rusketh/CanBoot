@@ -35,7 +35,7 @@
 #include "fs/ntfs.h"
 #include "fs/iso9660.h"
 
-/* libntfs-3g glue (cando_port/ntfs3g_canboot_glue.c). Linked but not
+/* libntfs-3g glue (cando_port/vendor_glue/ntfs3g/glue.c). Linked but not
  * yet exercised against a real NTFS volume - the next PR adds a CI
  * mkfs.ntfs test image. Declared inline so we don't have to add yet
  * another header just for these four entry points. */
@@ -48,7 +48,7 @@ int canboot_ntfs3g_delete(int handle, const char *path);
 int canboot_ntfs3g_label (int handle, char *out, int cap);
 int canboot_ntfs_format  (struct canboot_disk *d, uint64_t off, uint64_t sz, const char *label);
 
-/* lwext4 glue (cando_port/lwext4_canboot_glue.c). Block offsets here
+/* lwext4 glue (cando_port/vendor_glue/lwext4/glue.c). Block offsets here
  * are in 512-byte sectors, matching the underlying canboot_disk LBA. */
 int canboot_ext4_open  (struct canboot_disk *d, uint64_t lba_off, uint64_t lba_cnt);
 int canboot_ext4_close (int handle);

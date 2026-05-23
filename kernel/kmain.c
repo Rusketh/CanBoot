@@ -5,7 +5,7 @@
  * framebuffer to prove access, and prints "ok" so smoke tests pass.
  *
  * No dynamic memory, no preemption, no JIT yet. Just a deterministic
- * report-and-halt loop until later milestones bring up the HAL.
+ * report-and-halt loop until future work bring up the HAL.
  */
 
 #include <stdbool.h>
@@ -319,17 +319,17 @@ static void kmain_body(struct boot_info *bi) {
     /* Milestone 5: stand up the cooperative scheduler and run the
      * picolibc + pthread self-test. */
     extern void canboot_pthread_init(void);
-    extern void canboot_m5_selftest(void);
+    extern void runtime_selftest(void);
     canboot_pthread_init();
-    canboot_m5_selftest();
+    runtime_selftest();
 
     /* Milestone 6: lwIP + virtio-net + DHCP + UDP echo + HTTP GET. */
-    extern void canboot_m6_nettest(void);
-    canboot_m6_nettest();
+    extern void net_selftest(void);
+    net_selftest();
 
     /* Milestone 8: HAL disk + ISO9660 + FAT32 read/write; load /init.cdo. */
-    extern void canboot_m8_disktest(void);
-    canboot_m8_disktest();
+    extern void disk_selftest(void);
+    disk_selftest();
 
     /* Milestone 18: Intel HDA audio probe. Best-effort; the cando
      * audio library still works against the stub backend if no real
@@ -349,17 +349,17 @@ static void kmain_body(struct boot_info *bi) {
      * function-pointer call sites deep in libcando the same way it does
      * for libmbedtls (see m7 followup). The cando link itself is verified
      * unconditionally; running the VM lands when the UEFI relocation
-     * issue is sorted out in its own milestone. */
-    extern void canboot_m9_candotest(void);
-    canboot_m9_candotest();
+     * issue is sorted out in its own work item. */
+    extern void cando_selftest(void);
+    cando_selftest();
 
-    /* Milestone 7: Mbed TLS handshake + HTTPS GET + session resumption.
+    /* TLS selftest: Mbed TLS handshake + HTTPS GET + session resumption.
      * Currently BIOS-only - the UEFI build of Mbed TLS triggers a
-     * heap/relocation corruption inside the handshake that needs its
-     * own milestone to chase. Skipping the test on the UEFI source
-     * lets milestone 7 land cleanly while we keep the BIOS coverage. */
-    extern void canboot_m7_tlstest(void);
-    canboot_m7_tlstest();
+     * heap/relocation corruption inside the handshake that's tracked
+     * separately. Skipping the test on the UEFI source lets TLS land
+     * cleanly while we keep the BIOS coverage. */
+    extern void tls_selftest(void);
+    tls_selftest();
 
     hal_console_write("ok\n");
 

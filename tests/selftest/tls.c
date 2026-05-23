@@ -32,7 +32,7 @@ static int last_mbedtls_err;
 static void log_err(const char *step, int rc) {
     char buf[128];
     mbedtls_strerror(rc, buf, sizeof(buf));
-    printf("milestone 7: FAIL %s rc=%d (%s)\n", step, rc, buf);
+    printf("selftest: FAIL %s rc=%d (%s)\n", step, rc, buf);
 }
 
 static inline uint64_t rdtsc_now_local(void) {
@@ -73,7 +73,7 @@ static int do_handshake(mbedtls_ssl_context *ssl,
     }
 
     if (canboot_lwip_bio_connect(bio, dst, HTTPS_PORT, 5000) != 0) {
-        printf("milestone 7: FAIL tcp connect\n");
+        printf("selftest: FAIL tcp connect\n");
         return -1;
     }
 
@@ -100,7 +100,7 @@ static int do_handshake(mbedtls_ssl_context *ssl,
     if (flags != 0) {
         char vbuf[256];
         mbedtls_x509_crt_verify_info(vbuf, sizeof(vbuf), "  ! ", flags);
-        printf("milestone 7: FAIL verify flags=0x%08lx %s\n",
+        printf("selftest: FAIL verify flags=0x%08lx %s\n",
                (unsigned long)flags, vbuf);
         return -1;
     }
@@ -158,8 +158,8 @@ static int graceful_close(mbedtls_ssl_context *ssl,
     return 0;
 }
 
-void canboot_m7_tlstest(void) {
-    printf("milestone 7: starting tls test\n");
+void tls_selftest(void) {
+    printf("selftest: starting tls test\n");
 
     mbedtls_x509_crt ca;
     mbedtls_entropy_context entropy;
@@ -185,7 +185,7 @@ void canboot_m7_tlstest(void) {
         log_err("ctr_drbg_seed", rc);
         goto out;
     }
-    printf("milestone 7: drbg seeded\n");
+    printf("selftest: drbg seeded\n");
 
     if ((rc = mbedtls_x509_crt_parse(&ca,
                                      (const unsigned char *)canboot_test_ca_pem,
@@ -193,7 +193,7 @@ void canboot_m7_tlstest(void) {
         log_err("x509_crt_parse", rc);
         goto out;
     }
-    printf("milestone 7: ca loaded subject='%s'\n",
+    printf("selftest: ca loaded subject='%s'\n",
            ca.subject.val.p ? (const char *)"canboot-test (parsed)" : "?");
 
     if ((rc = mbedtls_ssl_config_defaults(&conf,
@@ -210,7 +210,7 @@ void canboot_m7_tlstest(void) {
 
     /* Force TLS 1.2 only - TLS 1.3 + tickets exposed a heap-corruption
      * issue inside the UEFI link of Mbed TLS that needs its own
-     * milestone to untangle; pinning to 1.2 keeps milestone 7 closeable
+     * future work; pinning to 1.2 keeps the TLS selftest closed-loop
      * today. TLS 1.2 with tickets still exercises full PKI + AEAD +
      * ticket-based resumption. */
     mbedtls_ssl_conf_min_tls_version(&conf, MBEDTLS_SSL_VERSION_TLS1_2);
@@ -226,7 +226,7 @@ void canboot_m7_tlstest(void) {
     rc = do_handshake(&ssl, &conf, &ca, &drbg, &bio, &dst,
                       NULL, &version1, &cipher1, &hs1_us);
     if (rc != 0) goto out;
-    printf("milestone 7: handshake ok proto=%s cipher=%s in %u us\n",
+    printf("selftest: handshake ok proto=%s cipher=%s in %u us\n",
            version1 ? version1 : "?", cipher1 ? cipher1 : "?", hs1_us);
 
     char body[256];
@@ -235,12 +235,12 @@ void canboot_m7_tlstest(void) {
     char *cr = body;
     while (*cr && !(cr[0] == '\r' && cr[1] == '\n' && cr[2] == '\r' && cr[3] == '\n')) cr++;
     const char *payload = *cr ? cr + 4 : body;
-    printf("milestone 7: https get rx=%d bytes payload='%s'\n", n, payload);
+    printf("selftest: https get rx=%d bytes payload='%s'\n", n, payload);
     if (!strstr(payload, HTTPS_BODY)) {
-        printf("milestone 7: FAIL https body mismatch\n");
+        printf("selftest: FAIL https body mismatch\n");
         goto out;
     }
-    printf("milestone 7: https get ok\n");
+    printf("selftest: https get ok\n");
 
     /* Save session for resumption. */
     if ((rc = mbedtls_ssl_get_session(&ssl, &saved)) != 0) {
@@ -257,7 +257,7 @@ void canboot_m7_tlstest(void) {
     rc = do_handshake(&ssl, &conf, &ca, &drbg, &bio, &dst,
                       &saved, &version2, &cipher2, &hs2_us);
     if (rc != 0) goto out;
-    printf("milestone 7: handshake#2 ok proto=%s cipher=%s in %u us\n",
+    printf("selftest: handshake#2 ok proto=%s cipher=%s in %u us\n",
            version2 ? version2 : "?", cipher2 ? cipher2 : "?", hs2_us);
 
     /* Resumption proxy: a fresh handshake on emulated CPU takes well
@@ -265,15 +265,15 @@ void canboot_m7_tlstest(void) {
      * only re-derives keys + verifies one MAC and lands well under
      * half that. A 2x speedup is a comfortable lower bound. */
     if (hs2_us * 2 >= hs1_us) {
-        printf("milestone 7: FAIL resumption not faster (hs1=%u us hs2=%u us)\n",
+        printf("selftest: FAIL resumption not faster (hs1=%u us hs2=%u us)\n",
                hs1_us, hs2_us);
         goto out;
     }
-    printf("milestone 7: session resumption ok (hs1=%u us hs2=%u us)\n",
+    printf("selftest: session resumption ok (hs1=%u us hs2=%u us)\n",
            hs1_us, hs2_us);
     graceful_close(&ssl, &bio);
 
-    printf("milestone 7: tls test ok\n");
+    printf("selftest: tls test ok\n");
 
 out:
     mbedtls_ssl_session_free(&saved);

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""HTTPS server for the milestone-7 TLS smoke test.
+"""HTTPS server for the TLS selftest.
 
 Serves 'canboot-secure' over TLS on 127.0.0.1:8443 (reachable from the
 QEMU guest as 10.0.2.2:8443 via SLIRP). Uses the pinned self-signed

@@ -2,8 +2,8 @@
  * Minimal framebuffer driver: clear and rectangle fill. Used to prove
  * the loader-provided framebuffer descriptor in boot_info is valid on
  * both BIOS (Multiboot2 FB tag) and UEFI (GOP). 32 bpp packed pixel
- * only for milestone 3; 24 bpp and channel-mask-aware encoding land
- * alongside the bitmap-font text console in a later milestone.
+ * for now; 24 bpp and channel-mask-aware encoding land
+ * alongside the bitmap-font text console later.
  */
 
 #include <stdint.h>

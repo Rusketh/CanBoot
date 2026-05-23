@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build a small FAT32 disk image carrying /init.cdo at the root for the
-# milestone 8 disk test. Attached to QEMU as virtio-blk.
+# disk selftest. Attached to QEMU as virtio-blk.
 
 set -euo pipefail
 

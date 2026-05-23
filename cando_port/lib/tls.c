@@ -6,7 +6,7 @@
  *     port     numeric TCP port (default 443)
  *     path     URL path (default "/")
  *     hostname optional SNI / cert-CN, defaults to "canboot-test" so
- *              the bundled CA in canboot_test_ca.c continues to verify
+ *              the bundled CA in tests/selftest/ca.c continues to verify
  *
  * Returns the response body as a string on a 200 with chain-validated
  * cert, or null on any failure (connect / handshake / status != 200).

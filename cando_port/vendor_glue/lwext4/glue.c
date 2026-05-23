@@ -27,7 +27,7 @@
 #include "ext4_super.h"
 
 #include "hal/disk.h"
-#include "lwext4_canboot_io.h"
+#include "io.h"
 
 #define HSLOTS 4
 

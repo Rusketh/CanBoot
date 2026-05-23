@@ -24,40 +24,40 @@ set(CANBOOT_KERNEL_COMMON
     kernel/kmain.c
     kernel/env.c
     kernel/fb.c
-    kernel/m5_selftest.c
-    kernel/m6_nettest.c
-    kernel/m7_tlstest.c
-    kernel/m8_disktest.c
-    kernel/m9_candotest.c
-    kernel/canboot_test_ca.c
-    cando_port/cando_stubs.c
-    cando_port/cando_display_lib.c
-    cando_port/cando_input_lib.c
-    cando_port/cando_time_lib.c
-    cando_port/cando_file_lib.c
-    cando_port/cando_net_lib.c
-    cando_port/cando_tls_lib.c
-    cando_port/cando_random_lib.c
-    cando_port/cando_crypto_lib.c
-    cando_port/cando_encoding_lib.c
-    cando_port/cando_log_lib.c
-    cando_port/cando_env_lib.c
-    cando_port/cando_url_lib.c
-    cando_port/cando_http_lib.c
-    cando_port/cando_disk_lib.c
-    cando_port/cando_pci_lib.c
-    cando_port/cando_fb_lib.c
-    cando_port/cando_fmt_lib.c
-    cando_port/cando_partition_lib.c
-    cando_port/cando_fs_lib.c
-    cando_port/ntfs3g_canboot_io.c
-    cando_port/ntfs3g_canboot_glue.c
-    cando_port/lwext4_canboot_io.c
-    cando_port/lwext4_canboot_glue.c
-    cando_port/cando_image_lib.c
-    cando_port/stb_image_canboot.c
-    cando_port/cando_audio_lib.c
-    cando_port/minimp3_canboot.c
+    tests/selftest/runtime.c
+    tests/selftest/net.c
+    tests/selftest/tls.c
+    tests/selftest/disk.c
+    tests/selftest/cando.c
+    tests/selftest/ca.c
+    cando_port/runtime/stubs.c
+    cando_port/lib/display.c
+    cando_port/lib/input.c
+    cando_port/lib/time.c
+    cando_port/lib/file.c
+    cando_port/lib/net.c
+    cando_port/lib/tls.c
+    cando_port/lib/random.c
+    cando_port/lib/crypto.c
+    cando_port/lib/encoding.c
+    cando_port/lib/log.c
+    cando_port/lib/env.c
+    cando_port/lib/url.c
+    cando_port/lib/http.c
+    cando_port/lib/disk.c
+    cando_port/lib/pci.c
+    cando_port/lib/fb.c
+    cando_port/lib/fmt.c
+    cando_port/lib/partition.c
+    cando_port/lib/fs.c
+    cando_port/vendor_glue/ntfs3g/io.c
+    cando_port/vendor_glue/ntfs3g/glue.c
+    cando_port/vendor_glue/lwext4/io.c
+    cando_port/vendor_glue/lwext4/glue.c
+    cando_port/lib/image.c
+    cando_port/vendor_glue/stb/image.c
+    cando_port/lib/audio.c
+    cando_port/vendor_glue/minimp3/decoder.c
     hal/audio/audio_stub.c
     fs/partition.c
     fs/ntfs.c
@@ -97,8 +97,8 @@ set(CANBOOT_LWIP_SOURCES
 # its source files directly into the kernel rather than going through
 # its CMakeLists, which would pull in find_package(OpenSSL) - we don't
 # ship OpenSSL on bare metal. The dropped SSL/socket/HTTP libs are
-# stubbed via cando_port/cando_stubs.c (no-op register hooks); real
-# Mbed TLS + lwIP-backed bindings land in a later milestone.
+# stubbed via cando_port/runtime/stubs.c (no-op register hooks); real
+# Mbed TLS + lwIP-backed bindings land later.
 set(CANDO_DIR ${CMAKE_SOURCE_DIR}/vendor/cando)
 set(CANBOOT_CANDO_SOURCES
     ${CANDO_DIR}/source/cando_lib.c
@@ -132,7 +132,7 @@ set(CANBOOT_CANDO_SOURCES
     ${CANDO_DIR}/source/lib/jit.c
     ${CANDO_DIR}/source/lib/app.c
     ${CANDO_DIR}/source/lib/math.c
-    # ${CANDO_DIR}/source/lib/file.c   -- replaced by cando_port/cando_file_lib.c
+    # ${CANDO_DIR}/source/lib/file.c   -- replaced by cando_port/lib/file.c
     ${CANDO_DIR}/source/lib/eval.c
     ${CANDO_DIR}/source/lib/string.c
     ${CANDO_DIR}/source/lib/libutil.c
@@ -151,7 +151,7 @@ set(CANBOOT_CANDO_SOURCES
     ${CANDO_DIR}/source/lib/console_lineedit.c
     ${CANDO_DIR}/source/lib/console_dispatch.c
     ${CANDO_DIR}/source/lib/process.c
-    # ${CANDO_DIR}/source/lib/net.c    -- replaced by cando_port/cando_net_lib.c
+    # ${CANDO_DIR}/source/lib/net.c    -- replaced by cando_port/lib/net.c
     ${CANDO_DIR}/source/lib/object.c
     ${CANDO_DIR}/source/lib/meta.c
     ${CANDO_DIR}/source/lib/stream.c
@@ -160,10 +160,10 @@ set(CANBOOT_CANDO_SOURCES
 # ---------------------------------------------------------------------------
 # ntfs-3g library sources. Vendored under vendor/ntfs-3g, compiled
 # against vendor/ntfs-3g_canboot/config.h with the pre-include shim
-# at cando_port/ntfs3g_canboot_shim.h. Skips win32_io.c (Windows-only).
+# at cando_port/vendor_glue/ntfs3g/shim.h. Skips win32_io.c (Windows-only).
 # unix_io.c is included for its declarations; NO_NTFS_DEVICE_DEFAULT_IO_OPS
 # in config.h elides the default ops table - we register our own via
-# cando_port/ntfs3g_canboot_io.c.
+# cando_port/vendor_glue/ntfs3g/io.c.
 # ---------------------------------------------------------------------------
 set(NTFS3G_DIR ${CMAKE_SOURCE_DIR}/vendor/ntfs-3g)
 set(CANBOOT_NTFS3G_SOURCES
@@ -216,9 +216,9 @@ set(CANBOOT_NTFS3G_MKFS_SOURCES
 # lwext4 - vendored ext2/3/4 filesystem. We pull in the standard library
 # source set against vendor/lwext4/include/ext4_config.h's defaults
 # (CONFIG_USE_DEFAULT_CFG=1). The block-device bridge to canboot's HAL
-# disk lives in cando_port/lwext4_canboot_io.c; the canboot_ext4_*
+# disk lives in cando_port/vendor_glue/lwext4/io.c; the canboot_ext4_*
 # wrappers (open/read/write/delete/mkfs) live in
-# cando_port/lwext4_canboot_glue.c.
+# cando_port/vendor_glue/lwext4/glue.c.
 # ---------------------------------------------------------------------------
 set(LWEXT4_DIR ${CMAKE_SOURCE_DIR}/vendor/lwext4)
 set(CANBOOT_LWEXT4_SOURCES
@@ -247,7 +247,7 @@ set(CANBOOT_LWEXT4_SOURCES
 
 # ---------------------------------------------------------------------------
 # picolibc - cross-built for the current arch via ExternalProject. The
-# x86_64 build has used this since milestone 5; aarch64 m5 hooks into
+# x86_64 build has used this first; aarch64 hooks into
 # the same machinery via cmake/picolibc-aarch64.cross.in.
 # ---------------------------------------------------------------------------
 if(CANBOOT_ARCH STREQUAL "x86_64" OR CANBOOT_ARCH STREQUAL "aarch64")
@@ -298,10 +298,9 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
         hal/audio/intel_hda.c
     )
 elseif(CANBOOT_ARCH STREQUAL "aarch64")
-    # Minimal first-cut aarch64 build: bootstrap + entry trampoline +
-    # PL011 console + a stub kmain that mirrors x86_64's milestone-1
-    # "ok on serial" deliverable. Subsequent aarch64 milestones port
-    # picolibc / lwIP / cando / etc. one PR at a time.
+    # aarch64 direct-kernel build: bootstrap + entry trampoline + PL011
+    # console + the same kmain body as x86_64, with the aarch64-specific
+    # HAL drivers (PL011, virtio-gpu, virtio-snd) compiled in.
     set(KERNEL_SOURCES
         arch/aarch64/bootstrap.S
         arch/aarch64/aarch64_entry.c
@@ -309,14 +308,14 @@ elseif(CANBOOT_ARCH STREQUAL "aarch64")
         kernel/kmain_aarch64.c
         kernel/env.c
         kernel/fb.c
-        kernel/m5_selftest.c
+        tests/selftest/runtime.c
         hal/console/serial_aarch64.c
         hal/input/input_stub_aarch64.c
         rt/picolibc_port/syscalls.c
         rt/pthread_stub/pthread.c
     )
 else()
-    message(FATAL_ERROR "Arch ${CANBOOT_ARCH} bring-up lands in a later milestone")
+    message(FATAL_ERROR "Arch ${CANBOOT_ARCH} bring-up lands later")
 endif()
 
 add_executable(${KERNEL_NAME} ${KERNEL_SOURCES})
@@ -328,24 +327,24 @@ add_executable(${KERNEL_NAME} ${KERNEL_SOURCES})
 # transitively. Applied to both the x86_64 BIOS+UEFI and aarch64 EFI
 # targets because the source set is shared.
 set_source_files_properties(${CANBOOT_NTFS3G_SOURCES} PROPERTIES
-    COMPILE_FLAGS "-include ${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_canboot_shim.h -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g -I${CMAKE_SOURCE_DIR}/cando_port/shims -DHAVE_CONFIG_H=1 -w"
+    COMPILE_FLAGS "-include ${CMAKE_SOURCE_DIR}/cando_port/vendor_glue/ntfs3g/shim.h -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g -I${CMAKE_SOURCE_DIR}/cando_port/shims -DHAVE_CONFIG_H=1 -w"
 )
 
 # mkntfs.c and friends need:
 #  - to NOT see NO_NTFS_DEVICE_DEFAULT_IO_OPS (since mkntfs.c #errors
 #    out when that's set - it needs the default ops table to allocate
 #    the device. We provide our HAL ops under that name in
-#    cando_port/ntfs3g_canboot_io.c).
+#    cando_port/vendor_glue/ntfs3g/io.c).
 #  - main renamed to mkntfs_main_canboot so the kernel's real entry
 #    is unaffected.
 #  - getopt.h provided by our shim - cando_port/shims/getopt.h.
 #  - -fcommon so tentative defs across mkntfs.c + sd.c don't conflict
 #    (the upstream relies on the pre-C99 behaviour).
 set_source_files_properties(${CANBOOT_NTFS3G_MKFS_SOURCES} PROPERTIES
-    COMPILE_FLAGS "-include ${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_canboot_shim.h -include ${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_mkntfs_main_rename.h -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/ntfsprogs -I${CMAKE_SOURCE_DIR}/cando_port/shims -DCANBOOT_MKNTFS=1 -fno-plt -fvisibility=hidden -fcommon -DHAVE_CONFIG_H=1 -w"
+    COMPILE_FLAGS "-include ${CMAKE_SOURCE_DIR}/cando_port/vendor_glue/ntfs3g/shim.h -include ${CMAKE_SOURCE_DIR}/cando_port/vendor_glue/ntfs3g/mkntfs_main_rename.h -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/ntfsprogs -I${CMAKE_SOURCE_DIR}/cando_port/shims -DCANBOOT_MKNTFS=1 -fno-plt -fvisibility=hidden -fcommon -DHAVE_CONFIG_H=1 -w"
 )
-set_source_files_properties(cando_port/ntfs3g_canboot_io.c cando_port/ntfs3g_canboot_glue.c PROPERTIES
-    COMPILE_FLAGS "-include ${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_canboot_shim.h -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g -DHAVE_CONFIG_H=1 -w"
+set_source_files_properties(cando_port/vendor_glue/ntfs3g/io.c cando_port/vendor_glue/ntfs3g/glue.c PROPERTIES
+    COMPILE_FLAGS "-include ${CMAKE_SOURCE_DIR}/cando_port/vendor_glue/ntfs3g/shim.h -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g -DHAVE_CONFIG_H=1 -w"
 )
 
 # lwext4 per-source compile flags. CONFIG_USE_DEFAULT_CFG=1 makes the
@@ -355,21 +354,21 @@ set_source_files_properties(cando_port/ntfs3g_canboot_io.c cando_port/ntfs3g_can
 # would be flooded during mount + every mkfs. Both source sets
 # (vendored lwext4 + our two glue files) share the same include
 # layout. -w suppresses upstream warnings we have no business policing.
-set_source_files_properties(${CANBOOT_LWEXT4_SOURCES} cando_port/lwext4_canboot_io.c cando_port/lwext4_canboot_glue.c PROPERTIES
+set_source_files_properties(${CANBOOT_LWEXT4_SOURCES} cando_port/vendor_glue/lwext4/io.c cando_port/vendor_glue/lwext4/glue.c PROPERTIES
     COMPILE_FLAGS "-I${CMAKE_SOURCE_DIR}/vendor/lwext4/include -I${CMAKE_SOURCE_DIR}/vendor/lwext4_canboot -I${CMAKE_SOURCE_DIR}/cando_port -DCONFIG_USE_DEFAULT_CFG=1 -DCONFIG_DEBUG_PRINTF=0 -w"
 )
 
 # stb_image's single-header body lands in stb_image_canboot.c; the
 # header lives in vendor/stb. -w suppresses the noisy warnings the
 # vendored decoder triggers under -Wall.
-set_source_files_properties(cando_port/stb_image_canboot.c PROPERTIES
+set_source_files_properties(cando_port/vendor_glue/stb/image.c PROPERTIES
     COMPILE_FLAGS "-I${CMAKE_SOURCE_DIR}/vendor/stb -w"
 )
 
 # minimp3's single-header body lands in minimp3_canboot.c. Same
 # pattern as stb_image. The decoder is heavy on -Wall warnings
 # (-Wstrict-aliasing in particular) that we don't police upstream.
-set_source_files_properties(cando_port/minimp3_canboot.c PROPERTIES
+set_source_files_properties(cando_port/vendor_glue/minimp3/decoder.c PROPERTIES
     COMPILE_FLAGS "-I${CMAKE_SOURCE_DIR}/vendor/minimp3 -w"
 )
 
@@ -633,9 +632,9 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
             math(EXPR _efi_obj_seq "${_efi_obj_seq} + 1")
             set(_obj "${CMAKE_BINARY_DIR}/efi_${_efi_obj_seq}_${_name}.o")
             set(_extra_flags "")
-            if(_src_abs MATCHES "/libntfs-3g/" OR _src_abs MATCHES "/ntfs3g_canboot_")
+            if(_src_abs MATCHES "/libntfs-3g/" OR _src_abs MATCHES "/vendor_glue/ntfs3g/")
                 set(_extra_flags
-                    "-include" "${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_canboot_shim.h"
+                    "-include" "${CMAKE_SOURCE_DIR}/cando_port/vendor_glue/ntfs3g/shim.h"
                     -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot
                     -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include
                     -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g
@@ -644,20 +643,20 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
                 )
             elseif(_src_abs MATCHES "/ntfsprogs/")
                 set(_extra_flags
-                    "-include" "${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_canboot_shim.h"
+                    "-include" "${CMAKE_SOURCE_DIR}/cando_port/vendor_glue/ntfs3g/shim.h"
                     -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot
                     -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include
                     -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g
                     -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/ntfsprogs
                     -DCANBOOT_MKNTFS=1
-                    "-include" "${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_mkntfs_main_rename.h"
+                    "-include" "${CMAKE_SOURCE_DIR}/cando_port/vendor_glue/ntfs3g/mkntfs_main_rename.h"
                     -fno-plt
                     -fvisibility=hidden
                     -fcommon
                     -DHAVE_CONFIG_H=1
                     -w
                 )
-            elseif(_src_abs MATCHES "/lwext4/" OR _src_abs MATCHES "/lwext4_canboot_")
+            elseif(_src_abs MATCHES "/lwext4/" OR _src_abs MATCHES "/vendor_glue/lwext4/")
                 set(_extra_flags
                     -I${CMAKE_SOURCE_DIR}/vendor/lwext4/include
                     -I${CMAKE_SOURCE_DIR}/vendor/lwext4_canboot
@@ -666,12 +665,12 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
                     -DCONFIG_DEBUG_PRINTF=0
                     -w
                 )
-            elseif(_src_abs MATCHES "/stb_image_canboot")
+            elseif(_src_abs MATCHES "/vendor_glue/stb/image")
                 set(_extra_flags
                     -I${CMAKE_SOURCE_DIR}/vendor/stb
                     -w
                 )
-            elseif(_src_abs MATCHES "/minimp3_canboot")
+            elseif(_src_abs MATCHES "/vendor_glue/minimp3/decoder")
                 set(_extra_flags
                     -I${CMAKE_SOURCE_DIR}/vendor/minimp3
                     -w
@@ -770,7 +769,7 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
 endif()
 
 # ---------------------------------------------------------------------------
-# aarch64 UEFI loader (milestone 14): cross-builds vendor/gnu-efi for
+# aarch64 UEFI loader: cross-builds vendor/gnu-efi for
 # aarch64, then links boot/uefi/efi_main_aarch64.c against it to produce
 # canboot-aarch64-uefi.efi - a PE32+ EFI application that AAVMF loads,
 # collects boot_info from, ExitBootServices, and hands off to the same
@@ -831,7 +830,7 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
      # ExitBootServices). Direct -kernel still uses the input stub
      # since we don't do PCI bring-up there.
     # cando vendor sources, minus the x86_64-only JIT machine-code
-    # emitter (cando_port/jit_codegen_stub_aarch64.c stubs it out).
+    # emitter (cando_port/jit/codegen_stub_aarch64.c stubs it out).
     set(CANBOOT_CANDO_AARCH64_SOURCES "")
     foreach(_csrc ${CANBOOT_CANDO_SOURCES})
         if(NOT _csrc MATCHES "/jit/codegen\\.c$")
@@ -843,12 +842,12 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
         boot/uefi/efi_main_aarch64.c
         kernel/kmain_aarch64.c
         kernel/fb.c
-        kernel/m5_selftest.c
-        kernel/m6_nettest.c
-        kernel/m7_tlstest.c
-        kernel/m8_disktest.c
-        kernel/m9_candotest.c
-        kernel/canboot_test_ca.c
+        tests/selftest/runtime.c
+        tests/selftest/net.c
+        tests/selftest/tls.c
+        tests/selftest/disk.c
+        tests/selftest/cando.c
+        tests/selftest/ca.c
         hal/console/serial_aarch64.c
         hal/pci/pci_aarch64.c
         hal/virtio/virtio_pci.c
@@ -867,37 +866,37 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
         net/mbedtls_port/lwip_bio.c
         rt/picolibc_port/syscalls.c
         rt/pthread_stub/pthread.c
-        cando_port/cando_stubs.c
-        cando_port/cando_display_lib.c
-        cando_port/cando_input_lib.c
-        cando_port/cando_time_lib.c
-        cando_port/cando_file_lib.c
-        cando_port/cando_net_lib.c
-        cando_port/cando_tls_lib.c
-        cando_port/cando_random_lib.c
-        cando_port/cando_crypto_lib.c
-        cando_port/cando_encoding_lib.c
-        cando_port/cando_log_lib.c
-        cando_port/cando_env_lib.c
-        cando_port/cando_url_lib.c
-        cando_port/cando_http_lib.c
-        cando_port/cando_disk_lib.c
-        cando_port/cando_pci_lib.c
-        cando_port/cando_fb_lib.c
-        cando_port/cando_fmt_lib.c
-        cando_port/cando_partition_lib.c
-        cando_port/cando_fs_lib.c
-        cando_port/ntfs3g_canboot_io.c
-        cando_port/ntfs3g_canboot_glue.c
-        cando_port/lwext4_canboot_io.c
-        cando_port/lwext4_canboot_glue.c
-        cando_port/cando_image_lib.c
-        cando_port/stb_image_canboot.c
-        cando_port/cando_audio_lib.c
-        cando_port/minimp3_canboot.c
+        cando_port/runtime/stubs.c
+        cando_port/lib/display.c
+        cando_port/lib/input.c
+        cando_port/lib/time.c
+        cando_port/lib/file.c
+        cando_port/lib/net.c
+        cando_port/lib/tls.c
+        cando_port/lib/random.c
+        cando_port/lib/crypto.c
+        cando_port/lib/encoding.c
+        cando_port/lib/log.c
+        cando_port/lib/env.c
+        cando_port/lib/url.c
+        cando_port/lib/http.c
+        cando_port/lib/disk.c
+        cando_port/lib/pci.c
+        cando_port/lib/fb.c
+        cando_port/lib/fmt.c
+        cando_port/lib/partition.c
+        cando_port/lib/fs.c
+        cando_port/vendor_glue/ntfs3g/io.c
+        cando_port/vendor_glue/ntfs3g/glue.c
+        cando_port/vendor_glue/lwext4/io.c
+        cando_port/vendor_glue/lwext4/glue.c
+        cando_port/lib/image.c
+        cando_port/vendor_glue/stb/image.c
+        cando_port/lib/audio.c
+        cando_port/vendor_glue/minimp3/decoder.c
         hal/audio/audio_stub.c
         hal/audio/virtio_snd.c
-        cando_port/jit_codegen_stub_aarch64.c
+        cando_port/jit/codegen_stub_aarch64.c
         fs/partition.c
         fs/ntfs.c
         kernel/env.c
@@ -920,9 +919,9 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
         math(EXPR _efi_obj_seq "${_efi_obj_seq} + 1")
         set(_obj "${CMAKE_BINARY_DIR}/efi_aarch64_${_efi_obj_seq}_${_name}.o")
         set(_extra_flags "")
-        if(_src_abs MATCHES "/libntfs-3g/" OR _src_abs MATCHES "/ntfs3g_canboot_")
+        if(_src_abs MATCHES "/libntfs-3g/" OR _src_abs MATCHES "/vendor_glue/ntfs3g/")
             set(_extra_flags
-                "-include" "${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_canboot_shim.h"
+                "-include" "${CMAKE_SOURCE_DIR}/cando_port/vendor_glue/ntfs3g/shim.h"
                 -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot
                 -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include
                 -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g
@@ -931,8 +930,8 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
             )
         elseif(_src_abs MATCHES "/ntfsprogs/")
             set(_extra_flags
-                "-include" "${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_canboot_shim.h"
-                "-include" "${CMAKE_SOURCE_DIR}/cando_port/ntfs3g_mkntfs_main_rename.h"
+                "-include" "${CMAKE_SOURCE_DIR}/cando_port/vendor_glue/ntfs3g/shim.h"
+                "-include" "${CMAKE_SOURCE_DIR}/cando_port/vendor_glue/ntfs3g/mkntfs_main_rename.h"
                 -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g_canboot
                 -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include
                 -I${CMAKE_SOURCE_DIR}/vendor/ntfs-3g/include/ntfs-3g
@@ -944,7 +943,7 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
                 -DHAVE_CONFIG_H=1
                 -w
             )
-        elseif(_src_abs MATCHES "/lwext4/" OR _src_abs MATCHES "/lwext4_canboot_")
+        elseif(_src_abs MATCHES "/lwext4/" OR _src_abs MATCHES "/vendor_glue/lwext4/")
             set(_extra_flags
                 -I${CMAKE_SOURCE_DIR}/vendor/lwext4/include
                 -I${CMAKE_SOURCE_DIR}/vendor/lwext4_canboot
@@ -953,12 +952,12 @@ if(CANBOOT_ARCH STREQUAL "aarch64")
                 -DCONFIG_DEBUG_PRINTF=0
                 -w
             )
-        elseif(_src_abs MATCHES "/stb_image_canboot")
+        elseif(_src_abs MATCHES "/vendor_glue/stb/image")
             set(_extra_flags
                 -I${CMAKE_SOURCE_DIR}/vendor/stb
                 -w
             )
-        elseif(_src_abs MATCHES "/minimp3_canboot")
+        elseif(_src_abs MATCHES "/vendor_glue/minimp3/decoder")
             set(_extra_flags
                 -I${CMAKE_SOURCE_DIR}/vendor/minimp3
                 -w

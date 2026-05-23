@@ -29,7 +29,7 @@ Best fit when the library:
 git submodule add https://github.com/nothings/stb.git vendor/stb
 
 # 2. Write a thin .c wrapper.
-cat > cando_port/stb_image_canboot.c <<'EOF'
+cat > cando_port/vendor_glue/stb/image.c <<'EOF'
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
@@ -42,10 +42,10 @@ cat > cando_port/stb_image_canboot.c <<'EOF'
 EOF
 
 # 3. Add to CMakeLists.txt (twice — main + EFI loops):
-#    cando_port/stb_image_canboot.c
+#    cando_port/vendor_glue/stb/image.c
 
 # 4. Per-source compile flags pointing at the header:
-#    set_source_files_properties(cando_port/stb_image_canboot.c PROPERTIES
+#    set_source_files_properties(cando_port/vendor_glue/stb/image.c PROPERTIES
 #        COMPILE_FLAGS "-I${CMAKE_SOURCE_DIR}/vendor/stb -w")
 #
 #    (-w silences upstream warnings — we don't police the vendor.)
@@ -140,7 +140,7 @@ set_source_files_properties(${VENDOR_SOURCES} PROPERTIES
 )
 ```
 
-`cando_port/ntfs3g_canboot_shim.h` is a good example — it provides
+`cando_port/vendor_glue/ntfs3g/shim.h` is a good example — it provides
 `struct hd_geometry`, `LC_ALL`, `ntfs_log_handler` typedefs, etc.
 before any libntfs source sees `<linux/...>` headers.
 
@@ -171,7 +171,7 @@ for the current target.
 
 ### POSIX stub catch-all
 
-`cando_port/cando_stubs.c` is the dumping ground for "this library
+`cando_port/runtime/stubs.c` is the dumping ground for "this library
 called `setlocale`, `geteuid`, `openlog`, `random`, …" — write a
 no-op or a sensible stub, document why, move on.
 

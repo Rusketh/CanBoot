@@ -68,15 +68,15 @@ side — embedded NULs are fine.
 
 ## Registering the library
 
-Three places to add a reference, all in `kernel/m9_candotest.c`:
+Three places to add a reference, all in `tests/selftest/cando.c`:
 
 ```c
 // Forward declaration:
 void canboot_cando_open_thinglib(CandoVM *vm);
 
-// In canboot_m9_candotest(), pick the right milestone block:
+// In cando_selftest(), pick the right block:
 canboot_cando_open_thinglib(vm);
-printf("milestone NN: thing lib registered\n");
+printf("selftest: thing lib registered\n");
 ```
 
 Then in `CMakeLists.txt`, add the source file to:
@@ -107,7 +107,7 @@ this'll collapse. For now, copy the pattern.
 
 If your library does work that other scripts will call from tight
 loops (millions of calls per boot), see how `time.ms` is wired in
-`cando_port/cando_time_lib.c` — the function calls
+`cando_port/lib/time.c` — the function calls
 `canboot_audio_pump_default()` between iterations so audio playback
 continues during `for (...) { time.ms(); ... }` loops. Most libraries
 don't need this.

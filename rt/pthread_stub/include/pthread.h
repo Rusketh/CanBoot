@@ -11,7 +11,7 @@
  * surface mirrors POSIX so CanDo's existing pthread call sites compile
  * unchanged once we vendor it.
  *
- * Promoted to a preemptive scheduler in a later milestone once the LAPIC
+ * Promoted to a preemptive scheduler later once the LAPIC
  * timer is wired and we have an IDT.
  */
 

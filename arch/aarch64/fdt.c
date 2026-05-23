@@ -1,6 +1,6 @@
 /*
  * Minimal flattened-device-tree walker. We need just enough to satisfy
- * milestone-3 boot_info population on the direct -kernel path: find
+ * boot_info population on the direct -kernel path: find
  * /memory@* nodes and pull their reg property so kmain can dump and
  * use a canboot_mmap_entry list.
  *

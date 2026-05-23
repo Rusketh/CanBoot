@@ -23,7 +23,7 @@
 
 static void hex_dump_first(const char *what, const uint8_t *buf, size_t n) {
     size_t show = n < 64 ? n : 64;
-    printf("milestone 8: %s first=%zu bytes='", what, show);
+    printf("selftest: %s first=%zu bytes='", what, show);
     for (size_t i = 0; i < show; i++) {
         char c = (char)buf[i];
         if (c == '\n') { printf("\\n"); continue; }
@@ -38,7 +38,7 @@ static bool try_fat32(struct canboot_disk *d, char *out, uint32_t *out_size,
                       bool *out_writable, const char **out_disk) {
     struct canboot_fat32 fs;
     if (!canboot_fat32_open(d, &fs)) return false;
-    printf("milestone 8: fat32 mount disk=%s bps=%u spc=%u root_cluster=%u\n",
+    printf("selftest: fat32 mount disk=%s bps=%u spc=%u root_cluster=%u\n",
            d->name, fs.bytes_per_sector, fs.sectors_per_cluster,
            fs.root_cluster);
 
@@ -62,14 +62,14 @@ static bool try_fat32(struct canboot_disk *d, char *out, uint32_t *out_size,
                                                   back, sizeof(back) - 1,
                                                   &bsize);
             if (r > 0 && strstr(back, "write-probe-marker") != NULL) {
-                printf("milestone 8: fat32 write+read ok (%u bytes)\n",
+                printf("selftest: fat32 write+read ok (%u bytes)\n",
                        (unsigned)r);
             } else {
-                printf("milestone 8: FAIL fat32 write-probe round-trip\n");
+                printf("selftest: FAIL fat32 write-probe round-trip\n");
                 return true; /* read still succeeded - flag but don't abort */
             }
         } else {
-            printf("milestone 8: FAIL fat32 write-probe\n");
+            printf("selftest: FAIL fat32 write-probe\n");
         }
     }
     return true;
@@ -79,7 +79,7 @@ static bool try_iso(struct canboot_disk *d, char *out, uint32_t *out_size,
                     const char **out_disk) {
     struct canboot_iso iso;
     if (!canboot_iso_open(d, &iso)) return false;
-    printf("milestone 8: iso9660 mount disk=%s root_lba=%u root_size=%u\n",
+    printf("selftest: iso9660 mount disk=%s root_lba=%u root_size=%u\n",
            d->name, iso.root_lba, iso.root_size);
 
     uint32_t lba = 0, size = 0;
@@ -91,15 +91,15 @@ static bool try_iso(struct canboot_disk *d, char *out, uint32_t *out_size,
     return true;
 }
 
-void canboot_m8_disktest(void) {
-    printf("milestone 8: starting disk test\n");
+void disk_selftest(void) {
+    printf("selftest: starting disk test\n");
 
     hal_disk_init();
     uint32_t nd = hal_disk_count();
-    printf("milestone 8: discovered %u block device(s)\n", (unsigned)nd);
+    printf("selftest: discovered %u block device(s)\n", (unsigned)nd);
     for (uint32_t i = 0; i < nd; i++) {
         struct canboot_disk *d = hal_disk_get(i);
-        printf("milestone 8:   [%u] name=%s kind=%u bs=%u blocks=%llu write=%d\n",
+        printf("selftest:   [%u] name=%s kind=%u bs=%u blocks=%llu write=%d\n",
                (unsigned)i, d->name, d->kind, d->block_size,
                (unsigned long long)d->block_count, d->writable ? 1 : 0);
     }
@@ -114,7 +114,7 @@ void canboot_m8_disktest(void) {
         struct canboot_disk *d = hal_disk_get(i);
         if (d->kind == CANBOOT_DISK_KIND_CDROM) continue;
         if (try_fat32(d, file_buf, &file_size, &from_write, &from_disk)) {
-            printf("milestone 8: loaded /%s from fat32 disk=%s size=%u\n",
+            printf("selftest: loaded /%s from fat32 disk=%s size=%u\n",
                    INIT_CDO_NAME, from_disk, file_size);
             break;
         }
@@ -125,7 +125,7 @@ void canboot_m8_disktest(void) {
         for (uint32_t i = 0; i < nd; i++) {
             struct canboot_disk *d = hal_disk_get(i);
             if (try_iso(d, file_buf, &file_size, &from_disk)) {
-                printf("milestone 8: loaded /%s from iso disk=%s size=%u\n",
+                printf("selftest: loaded /%s from iso disk=%s size=%u\n",
                        INIT_CDO_NAME, from_disk, file_size);
                 break;
             }
@@ -133,7 +133,7 @@ void canboot_m8_disktest(void) {
     }
 
     if (!from_disk) {
-        printf("milestone 8: FAIL /init.cdo not found on any block device\n");
+        printf("selftest: FAIL /init.cdo not found on any block device\n");
         return;
     }
 
@@ -141,9 +141,9 @@ void canboot_m8_disktest(void) {
     hex_dump_first("init.cdo", (const uint8_t *)file_buf, file_size);
 
     if (strstr(file_buf, "canboot-init-marker") == NULL) {
-        printf("milestone 8: FAIL init.cdo marker missing\n");
+        printf("selftest: FAIL init.cdo marker missing\n");
         return;
     }
-    printf("milestone 8: init.cdo marker ok\n");
-    printf("milestone 8: disk test ok\n");
+    printf("selftest: init.cdo marker ok\n");
+    printf("selftest: disk test ok\n");
 }

@@ -17,7 +17,7 @@ qemu-system-x86_64 \
 ```
 
 Add `-device virtio-keyboard-pci -netdev user,id=n0 -device virtio-net-pci,netdev=n0`
-for the milestone-4 input + milestone-6 networking tests respectively.
+for the input + networking selftests respectively.
 
 ### x86_64 UEFI
 
@@ -147,7 +147,7 @@ sudo efibootmgr --create --disk /dev/sda --part 1 \
 The pieces are in place but the netboot bundle isn't currently in the
 release. `scripts/mkpxe.sh` (planned) will produce a tarball with kernel
 + initramfs + `dnsmasq.conf` template + `grub-netboot.cfg`. Track via
-the milestone-16 issue in the upstream repo.
+the issue in the upstream repo.
 
 ## Customising `/init.cdo`
 
@@ -183,4 +183,4 @@ hardware, hook up a USB-to-serial adapter to the appropriate header
    keep working for diagnostic interaction).
 
 See [bootflow.md](bootflow.md) for the wire-level handoff and
-[architecture.md](architecture.md) for what each kernel milestone does.
+[architecture.md](architecture.md) for what each subsystem does.

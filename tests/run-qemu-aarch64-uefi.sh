@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Boot the aarch64 UEFI PE/COFF via qemu-system-aarch64 + AAVMF firmware,
-# and assert the milestone-2-equivalent markers appear on PL011 serial
+# and assert the early boot markers appear on PL011 serial
 # within TIMEOUT seconds.
 
 set -euo pipefail
@@ -203,7 +203,7 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'canboot: boot_info v1 source=uefi'
         check 'canboot: mmap entries='
         check 'canboot: platform-tables='
-        check 'canboot: handshake confirmed (aarch64 milestone-3)'
+        check 'canboot: handshake confirmed (aarch64 boot_info)'
         check 'canboot: pci devs='
         check 'canboot: virtio-input present'
         check 'canboot: input loop start'
@@ -213,27 +213,27 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
             echo "$stripped" | sed 's/^/  | /' >&2
             exit 1
         fi
-        check 'milestone 5: starting self-test'
-        check 'milestone 5: self-test ok'
-        check 'milestone 6: udp echo ok'
-        check 'milestone 6: http get ok'
-        check 'milestone 7: handshake ok'
-        check 'milestone 7: https get ok'
-        check 'milestone 7: session resumption ok'
-        check 'milestone 7: tls test ok'
-        check 'milestone 8: init.cdo marker ok'
-        check 'milestone 8: disk test ok'
-        check 'milestone 9: cando_open ok'
-        check 'milestone 9: cando_openlibs ok'
-        check 'milestone 9: cando_close ok'
-        check 'milestone 9: cando link test ok'
-        check 'milestone 10: cando_dostring ok'
-        check 'milestone 10: init.cdo executed ok'
+        check 'selftest: starting self-test'
+        check 'selftest: self-test ok'
+        check 'selftest: udp echo ok'
+        check 'selftest: http get ok'
+        check 'selftest: handshake ok'
+        check 'selftest: https get ok'
+        check 'selftest: session resumption ok'
+        check 'selftest: tls test ok'
+        check 'selftest: init.cdo marker ok'
+        check 'selftest: disk test ok'
+        check 'selftest: cando_open ok'
+        check 'selftest: cando_openlibs ok'
+        check 'selftest: cando_close ok'
+        check 'selftest: cando link test ok'
+        check 'selftest: cando_dostring ok'
+        check 'selftest: init.cdo executed ok'
         check 'canboot: virtio-gpu fb '
-        check 'milestone 11: display lib registered'
-        check 'milestone 11: display test ok'
-        check 'milestone 12: input lib registered'
-        check 'milestone 13: system libs registered'
+        check 'selftest: display lib registered'
+        check 'selftest: display test ok'
+        check 'selftest: input lib registered'
+        check 'selftest: system libs registered'
         check 'cando time.ms ='
         check 'cando file.exists(init.cdo) = true'
         check 'cando file.read = hello-from-cando'
@@ -241,7 +241,7 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'cando net.httpGet = canboot-hello'
         check 'cando tls.httpsGet = canboot-secure'
         check 'cando sys libs end'
-        check 'milestone 14: crypto libs registered'
+        check 'selftest: crypto libs registered'
         check 'cando hex.encode(canboot) = 63616e626f6f74'
         check 'cando hex.decode(63616e626f6f74) = canboot'
         check 'cando base64.encode(canboot) = Y2FuYm9vdA=='
@@ -249,7 +249,7 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'cando crypto.sha256Hex(empty) = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
         check 'cando crypto.hmacSha256Hex(k, m) = f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8'
         check 'cando crypto libs end'
-        check 'milestone 15: env+log libs registered'
+        check 'selftest: env+log libs registered'
         check 'cando env.source = uefi'
         check 'cando env.fbFormat = rgb'
         check 'INFO  info-level message from cando'
@@ -264,7 +264,7 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
             exit 1
         fi
 
-        check 'milestone 16: extension libs registered'
+        check 'selftest: extension libs registered'
         check 'cando url.scheme = https'
         check 'cando url.host = 10.0.2.2'
         check 'cando url.port = 8443'
@@ -275,7 +275,7 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'cando disk.blockSize(0) = 512'
         check 'cando fmt.sprintf = hex=1234 dec=42 str=hi'
         check 'cando ext libs end'
-        check 'milestone 17: partition+fs libs registered'
+        check 'selftest: partition+fs libs registered'
         check 'cando partition.scheme(0) = none'
         check 'cando fs.detect(0,0) = fat32'
         check 'cando part libs end'
@@ -419,7 +419,7 @@ body = data[44:]
 nz = sum(1 for b in body if b != 0)
 sys.exit(0 if nz > 16 else 1)
 " 2>/dev/null; then
-                echo "milestone 18: audio capture has non-silent body ($(stat -c '%s' "$AUDIO_WAV") bytes)"
+                echo "selftest: audio capture has non-silent body ($(stat -c '%s' "$AUDIO_WAV") bytes)"
             else
                 echo "smoke test FAILED: audio wav body is silent (no non-zero samples)" >&2
                 exit 1

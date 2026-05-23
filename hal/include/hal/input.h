@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 /*
- * HAL input surface. Polling-only in this milestone: every input device
+ * HAL input surface. Polling-only for now: every input device
  * driver (PS/2 today, virtio-input today, USB-HID later) pushes events
  * into a single shared ring buffer; consumers drain it via
  * hal_input_poll() or hal_input_getc().

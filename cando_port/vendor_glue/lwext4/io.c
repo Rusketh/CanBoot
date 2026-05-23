@@ -23,7 +23,7 @@
 
 #include "hal/disk.h"
 
-#include "lwext4_canboot_io.h"
+#include "io.h"
 
 #define CB_EXT4_BSIZE   512u
 #define CB_MAX_BATCH    32u

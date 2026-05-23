@@ -1,5 +1,5 @@
 /*
- * cando input module - exposes the milestone-4 HAL input queue to
+ * cando input module - exposes the HAL input queue to
  * cando scripts as `input.*`:
  *
  *   input.poll()            -> number (ASCII code) or null
@@ -7,7 +7,7 @@
  *   input.flush()           -> drain remaining events (returns count)
  *   input.events()          -> total events received since boot
  *
- * The waitKey timeout uses our TSC-calibrated clock from milestone 6;
+ * The waitKey timeout uses our TSC-calibrated clock from the net layer;
  * during the wait we cooperatively pump the HAL input devices so PS/2
  * + virtio-input keep delivering.
  */

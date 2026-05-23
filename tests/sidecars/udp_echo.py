@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tiny UDP echo server used by the milestone-6 smoke test."""
+"""Tiny UDP echo server used by the net selftest."""
 
 import socket
 import sys

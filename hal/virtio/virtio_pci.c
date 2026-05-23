@@ -5,7 +5,7 @@
  * provides the small virtqueue helpers everything above it needs.
  *
  * All MMIO assumes BAR addresses are within the identity-mapped first
- * 4 GiB - true for QEMU's PCIe layout and confirmed by milestone-3's
+ * 4 GiB - true for QEMU's PCIe layout and confirmed by the BIOS path's
  * bootstrap that now maps four PDs.
  */
 

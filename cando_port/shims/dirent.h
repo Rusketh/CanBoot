@@ -1,7 +1,7 @@
 #ifndef CANBOOT_SHIM_DIRENT_H
 #define CANBOOT_SHIM_DIRENT_H
 /* Bare-metal shim. cando's lib/file.c uses opendir/readdir/closedir
- * for directory enumeration; we route them to our VFS in milestone 11.
+ * for directory enumeration; we route them to our VFS later.
  * For now the calls return NULL at runtime via the syscall stubs. */
 #include <stddef.h>
 #include <sys/types.h>

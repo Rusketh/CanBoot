@@ -8,7 +8,7 @@
  *   the virt machine, real hardware exposes the true rate).
  *
  * canboot_tsc_hz() returns whichever counter Hz so callers that drive
- * their own deadlines (m6_nettest etc.) share the same clock.
+ * their own deadlines (net_selftest etc.) share the same clock.
  */
 
 #include <stdint.h>

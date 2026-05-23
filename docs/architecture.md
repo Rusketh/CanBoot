@@ -2,7 +2,7 @@
 
 A small freestanding kernel that boots on UEFI or BIOS firmware,
 brings up enough hardware to host the CanDo language VM, and runs
-`/init.cdo` from disk. Hardware bring-up is split into "milestones"
+`/init.cdo` from disk. Hardware bring-up is split into stages
 roughly along device lines (console, input, network, TLS, disk,
 display, audio, cando VM).
 
@@ -37,7 +37,7 @@ display, audio, cando VM).
                               |
                               v
                   cando VM: cando_open + cando_openlibs
-                  + register all the cando_port/cando_*_lib.c
+                  + register all the cando_port/lib/*.c
                   bindings + cando_dostring("/init.cdo")
                               |
                               v

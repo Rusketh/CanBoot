@@ -7,7 +7,7 @@
 /*
  * Early console used during bring-up before the framebuffer/text console
  * subsystems are wired up. Backed by a platform serial port (16550 UART on
- * x86_64, PL011 on aarch64). Later milestones add a richer hal_console_*
+ * x86_64, PL011 on aarch64). Future work add a richer hal_console_*
  * surface for cursor/colour/raw-input/mouse that CanDo's `console` module
  * binds to.
  */

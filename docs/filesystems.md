@@ -1,7 +1,7 @@
 # Filesystems
 
 CanBoot ships four filesystem drivers, each plumbed through a
-common `(disk, partition)` dispatch in `cando_port/cando_fs_lib.c`.
+common `(disk, partition)` dispatch in `cando_port/lib/fs.c`.
 
 | FS | Vendored library | Read | Write | mkfs |
 |----|------------------|------|-------|------|
@@ -25,7 +25,7 @@ LBA 16 ── ISO PVD ────────── + offset 1: "CD001"  -> iso
 ```
 
 Order matters because some signatures overlap. The order above is
-fixed in `detect_fs()` in `cando_port/cando_fs_lib.c`.
+fixed in `detect_fs()` in `cando_port/lib/fs.c`.
 
 ## FAT32
 
@@ -51,18 +51,18 @@ extensions.
 Driver from upstream `tuxera/ntfs-3g` vendored at `vendor/ntfs-3g`.
 The library expects POSIX (`open`/`pread`/`pwrite` on a block device);
 the canboot port reroutes those calls through a custom
-`struct ntfs_device_operations` (`cando_port/ntfs3g_canboot_io.c`)
+`struct ntfs_device_operations` (`cando_port/vendor_glue/ntfs3g/io.c`)
 that bridges to the HAL disk read/write at 32-sector batches
 (matches virtio-blk's `MAX_BLOCKS_PER_REQ`).
 
 `mkfs` runs the vendored `mkntfs` from `ntfsprogs`. The compile sleeves:
 
-- `cando_port/ntfs3g_canboot_shim.h` is force-included before every
+- `cando_port/vendor_glue/ntfs3g/shim.h` is force-included before every
   libntfs source: provides `struct hd_geometry`, `LC_ALL`, etc.
 - `cando_port/ntfs3g_mkntfs_main_rename.h` renames `main` ->
   `mkntfs_main_canboot` and overrides the `ntfs_device_default_io_ops`
   macro so mkntfs sees our HAL bridge.
-- `cando_port/cando_stubs.c` provides POSIX stubs that mkntfs touches
+- `cando_port/runtime/stubs.c` provides POSIX stubs that mkntfs touches
   on startup (getopt_long, srandom/random, setlocale, etc.).
 
 A `-f` (quick format) flag is always passed so mkntfs skips its
@@ -72,7 +72,7 @@ device-wide zero pass.
 
 Driver from `gkostka/lwext4` vendored at `vendor/lwext4`. Build flags
 `-DCONFIG_USE_DEFAULT_CFG=1 -DCONFIG_DEBUG_PRINTF=0`. The HAL bridge
-(`cando_port/lwext4_canboot_io.c`) implements the four-call lwext4
+(`cando_port/vendor_glue/lwext4/io.c`) implements the four-call lwext4
 block device interface (open / bread / bwrite / close) over the HAL
 disk API.
 
