@@ -180,6 +180,30 @@ Host build tools required: `gcc`, `cmake`, `ninja-build`, `meson`,
 `python3`, `grub-pc-bin`, `grub-common`, `gnu-efi`, `ovmf`, `xorriso`,
 `mtools`, `dosfstools`, `qemu-system-x86`.
 
+## Documentation
+
+Full docs live under [`docs/`](docs/). Highlights:
+
+- [`docs/building.md`](docs/building.md) — full build dep list + cross-compile
+  setup for both architectures.
+- [`docs/running.md`](docs/running.md) — QEMU + real-hardware boot.
+- [`docs/release.md`](docs/release.md) — release artifacts + verification.
+- [`docs/api/`](docs/api/) — per-cando-library reference (audio, image, fs,
+  display, input, time, net, http, https, tls, crypto, random, hex, base64,
+  url, fmt, file, fb, env, log, disk, partition, pci).
+- [`docs/architecture.md`](docs/architecture.md),
+  [`docs/hal.md`](docs/hal.md),
+  [`docs/bootflow.md`](docs/bootflow.md),
+  [`docs/filesystems.md`](docs/filesystems.md),
+  [`docs/networking.md`](docs/networking.md),
+  [`docs/audio-stack.md`](docs/audio-stack.md) — subsystem deep dives.
+- [`docs/testing.md`](docs/testing.md),
+  [`docs/adding-libs.md`](docs/adding-libs.md),
+  [`docs/vendoring.md`](docs/vendoring.md) — contributing.
+
+Prebuilt nightly + stable images live on
+[the Releases page](https://github.com/Rusketh/CanBoot/releases).
+
 ## Layout
 
 | Path | Purpose |

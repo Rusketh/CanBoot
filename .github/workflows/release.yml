@@ -1,0 +1,270 @@
+name: Release
+
+# Releases fire on two triggers:
+#  - Push of any tag matching v* (e.g. v0.4.0) -> "stable" release at that tag.
+#  - Push to main -> "nightly" rolling release. Always overwritten in place at
+#    the `nightly` tag, so the URL stays stable and old artifacts are not
+#    indefinitely retained.
+on:
+  push:
+    branches: [main]
+    tags:    ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Override release tag (default: derived from trigger)'
+        required: false
+        type: string
+
+permissions:
+  contents: write   # softprops/action-gh-release uploads assets via the
+                    # GitHub Releases API, which requires write access to
+                    # repository contents.
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.arch }} ${{ matrix.firmware }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            firmware: bios
+          - arch: x86_64
+            firmware: uefi
+          - arch: aarch64
+            firmware: direct
+          - arch: aarch64
+            firmware: uefi
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build deps (x86_64)
+        if: matrix.arch == 'x86_64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build gcc binutils \
+            meson python3 \
+            grub-pc-bin grub-common \
+            gnu-efi ovmf \
+            xorriso mtools dosfstools \
+            qemu-system-x86
+
+      - name: Install build deps (aarch64)
+        if: matrix.arch == 'aarch64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build make \
+            meson python3 \
+            gcc-aarch64-linux-gnu \
+            qemu-system-arm qemu-system-misc \
+            qemu-efi-aarch64 \
+            mtools dosfstools \
+            ntfs-3g e2fsprogs
+
+      - name: Configure (x86_64)
+        if: matrix.arch == 'x86_64'
+        run: cmake -B build -G Ninja -DCANBOOT_ARCH=x86_64
+
+      - name: Configure (aarch64)
+        if: matrix.arch == 'aarch64'
+        run: cmake -B build-aarch64 -G Ninja
+              -DCANBOOT_ARCH=aarch64
+              -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-aarch64.cmake
+
+      # ---- x86_64 BIOS ----------------------------------------------
+      - name: Build kernel ELF (x86_64 BIOS)
+        if: matrix.arch == 'x86_64' && matrix.firmware == 'bios'
+        run: |
+          cmake --build build --target canboot-x86_64 --verbose
+          bash scripts/mkiso-bios.sh \
+            build/canboot-x86_64.elf \
+            build/canboot-x86_64-bios.iso
+
+      - name: Stage BIOS artifacts
+        if: matrix.arch == 'x86_64' && matrix.firmware == 'bios'
+        run: |
+          mkdir -p stage
+          cp build/canboot-x86_64.elf       stage/canboot-x86_64.elf
+          cp build/canboot-x86_64-bios.iso  stage/canboot-x86_64-bios.iso
+          sha256sum stage/* > stage/SHA256SUMS-x86_64-bios.txt
+
+      # ---- x86_64 UEFI ----------------------------------------------
+      - name: Build UEFI binary (x86_64)
+        if: matrix.arch == 'x86_64' && matrix.firmware == 'uefi'
+        run: |
+          cmake --build build --target canboot-uefi --verbose
+          bash scripts/mkiso-uefi.sh \
+            build/canboot-x86_64-uefi.efi \
+            build/canboot-x86_64-uefi.iso
+
+      - name: Stage UEFI artifacts (x86_64)
+        if: matrix.arch == 'x86_64' && matrix.firmware == 'uefi'
+        run: |
+          mkdir -p stage
+          cp build/canboot-x86_64-uefi.efi  stage/canboot-x86_64-uefi.efi
+          cp build/canboot-x86_64-uefi.iso  stage/canboot-x86_64-uefi.iso
+          sha256sum stage/* > stage/SHA256SUMS-x86_64-uefi.txt
+
+      # ---- aarch64 direct (-kernel) ---------------------------------
+      - name: Build aarch64 direct (.elf + .bin)
+        if: matrix.arch == 'aarch64' && matrix.firmware == 'direct'
+        run: cmake --build build-aarch64 --target canboot-aarch64-bin --verbose
+
+      - name: Stage aarch64 direct artifacts
+        if: matrix.arch == 'aarch64' && matrix.firmware == 'direct'
+        run: |
+          mkdir -p stage
+          cp build-aarch64/canboot-aarch64.elf  stage/canboot-aarch64.elf
+          cp build-aarch64/canboot-aarch64.bin  stage/canboot-aarch64.bin
+          sha256sum stage/* > stage/SHA256SUMS-aarch64-direct.txt
+
+      # ---- aarch64 UEFI ---------------------------------------------
+      - name: Build aarch64 UEFI binary
+        if: matrix.arch == 'aarch64' && matrix.firmware == 'uefi'
+        run: |
+          cmake --build build-aarch64 --target canboot-uefi --verbose
+          bash scripts/mkdisk-aarch64-uefi.sh \
+            build-aarch64/canboot-aarch64-uefi.efi \
+            build-aarch64/canboot-aarch64-uefi.img
+
+      - name: Stage aarch64 UEFI artifacts
+        if: matrix.arch == 'aarch64' && matrix.firmware == 'uefi'
+        run: |
+          mkdir -p stage
+          cp build-aarch64/canboot-aarch64-uefi.efi  stage/canboot-aarch64-uefi.efi
+          cp build-aarch64/canboot-aarch64-uefi.img  stage/canboot-aarch64-uefi.img
+          sha256sum stage/* > stage/SHA256SUMS-aarch64-uefi.txt
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: canboot-${{ matrix.arch }}-${{ matrix.firmware }}
+          path: stage/
+          retention-days: 14
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # tag history for changelog generation
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Collect release files
+        run: |
+          mkdir -p release
+          find artifacts/ -type f \( -name '*.elf' -o -name '*.bin' -o -name '*.efi' \
+                                  -o -name '*.iso' -o -name '*.img' \
+                                  -o -name 'SHA256SUMS-*.txt' \) \
+              -exec cp {} release/ \;
+          # Aggregate per-artifact SHA256SUMS files into one for the release.
+          ( cd release && cat SHA256SUMS-*.txt | sort -u > SHA256SUMS.txt && \
+                          rm -f SHA256SUMS-*.txt )
+          echo "=== Release contents ==="
+          ls -la release/
+
+      - name: Decide tag + prerelease state
+        id: meta
+        run: |
+          if [ -n "${{ inputs.tag }}" ]; then
+              TAG="${{ inputs.tag }}"
+              PRE=false
+          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+              TAG="${GITHUB_REF#refs/tags/}"
+              PRE=false
+          else
+              TAG="nightly"
+              PRE=true
+          fi
+          {
+              echo "tag=$TAG"
+              echo "prerelease=$PRE"
+          } >>"$GITHUB_OUTPUT"
+          echo "Selected tag=$TAG prerelease=$PRE"
+
+      - name: Build release notes
+        id: notes
+        run: |
+          {
+              echo "## CanBoot ${{ steps.meta.outputs.tag }}"
+              echo ""
+              if [ "${{ steps.meta.outputs.prerelease }}" = "true" ]; then
+                  echo "Rolling nightly build from \`main\`. Overwritten on every push."
+              else
+                  echo "Stable release tagged \`${{ steps.meta.outputs.tag }}\`."
+              fi
+              echo ""
+              echo "### Artifacts"
+              echo ""
+              echo "| Target | File | Notes |"
+              echo "|--------|------|-------|"
+              echo "| x86_64 BIOS | canboot-x86_64-bios.iso  | Hybrid ISO, boot via GRUB / Multiboot2 |"
+              echo "| x86_64 BIOS | canboot-x86_64.elf       | Kernel ELF (Multiboot2) |"
+              echo "| x86_64 UEFI | canboot-x86_64-uefi.iso  | Bootable UEFI ISO (ESP + EFI/BOOT/BOOTX64.EFI) |"
+              echo "| x86_64 UEFI | canboot-x86_64-uefi.efi  | PE/COFF UEFI app, drop onto an ESP |"
+              echo "| aarch64 direct | canboot-aarch64.elf   | Raw ELF; \`qemu-system-aarch64 -kernel\` |"
+              echo "| aarch64 direct | canboot-aarch64.bin   | Flat binary (no ELF wrapper) |"
+              echo "| aarch64 UEFI | canboot-aarch64-uefi.efi | PE/COFF for AAVMF / EDK2 |"
+              echo "| aarch64 UEFI | canboot-aarch64-uefi.img | Raw FAT32 ESP image with BOOTAA64.EFI |"
+              echo "| any         | SHA256SUMS.txt            | sha256(asset) for each file above |"
+              echo ""
+              echo "### Verify"
+              echo ""
+              echo "\`\`\`"
+              echo "sha256sum -c SHA256SUMS.txt"
+              echo "\`\`\`"
+              echo ""
+              echo "### Quick start"
+              echo ""
+              echo "\`\`\`"
+              echo "qemu-system-x86_64 -cdrom canboot-x86_64-uefi.iso \\"
+              echo "  -bios /usr/share/OVMF/OVMF_CODE.fd \\"
+              echo "  -serial stdio -display none"
+              echo "\`\`\`"
+              echo ""
+              echo "See [docs/](https://github.com/${{ github.repository }}/tree/main/docs)"
+              echo "for the full cando API reference and the per-platform run guides."
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: Publish (nightly = move tag in place)
+        if: steps.meta.outputs.prerelease == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: "CanBoot nightly"
+          body_path: release-notes.md
+          prerelease: true
+          files: release/*
+          make_latest: false
+
+      - name: Publish (stable = pin to the tag)
+        if: steps.meta.outputs.prerelease == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: "CanBoot ${{ steps.meta.outputs.tag }}"
+          body_path: release-notes.md
+          prerelease: false
+          files: release/*
+          make_latest: true
