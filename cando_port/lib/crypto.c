@@ -46,6 +46,8 @@
 #include "mbedtls/sha512.h"
 #include "mbedtls/ctr_drbg.h"
 #include "mbedtls/entropy.h"
+#include "mbedtls/pkcs5.h"
+#include "mbedtls/hkdf.h"
 
 #include "core/value.h"
 #include "vm/vm.h"
@@ -626,6 +628,114 @@ static int c_b64url_encode (CandoVM *vm, int argc, CandoValue *args)
 static int c_b64url_decode (CandoVM *vm, int argc, CandoValue *args)
 { return do_b64_decode(vm, argc, args, b64_value_url, true, "crypto.base64url.decode"); }
 
+/* ---- crypto.pbkdf2 / crypto.hkdf ------------------------------------ */
+/*
+ * Standard CanDo signatures (vendor/cando/source/lib/crypto.c lines
+ * 1956-1958):
+ *
+ *   crypto.pbkdf2(password, salt, iterations, keylen,
+ *                 digest = "sha256", enc = "hex") -> string
+ *   crypto.hkdf(secret, salt, info, length,
+ *               digest = "sha256", enc = "hex") -> string
+ *
+ * Defaults follow CanDo's docs: SHA-256 digest, hex output. Output
+ * length cap (256 bytes) is per call — large enough for an X25519
+ * keypair seed or a TLS 1.3 traffic key while keeping a static
+ * scratch buffer on the freestanding heap.
+ */
+
+/* Resolve the digest arg or default to SHA-256. */
+static mbedtls_md_type_t kdf_digest(CandoValue *args, int argc, int idx,
+                                    const char *for_call, CandoVM *vm,
+                                    int *err)
+{
+    *err = 0;
+    const char *name = libutil_arg_cstr_at(args, argc, idx);
+    if (!name || !*name) return MBEDTLS_MD_SHA256;
+    mbedtls_md_type_t md = resolve_md(name);
+    if (md == MBEDTLS_MD_NONE) {
+        *err = canboot_error_throw(vm, "EINVAL",
+            "%s: unsupported digest '%s'", for_call, name);
+    }
+    return md;
+}
+
+static int c_pbkdf2(CandoVM *vm, int argc, CandoValue *args) {
+    CandoString *ps = libutil_arg_str_at(args, argc, 0);
+    CandoString *ss = libutil_arg_str_at(args, argc, 1);
+    if (!ps || !ss) {
+        return canboot_error_throw(vm, "EINVAL",
+            "crypto.pbkdf2: password and salt required");
+    }
+    int iter = (int)libutil_arg_num_at(args, argc, 2, 1);
+    int klen = (int)libutil_arg_num_at(args, argc, 3, 32);
+    if (iter < 1 || iter > 10000000) {
+        return canboot_error_throw(vm, "EINVAL",
+            "crypto.pbkdf2: iterations must be 1..10000000");
+    }
+    if (klen < 1 || klen > 256) {
+        return canboot_error_throw(vm, "EINVAL",
+            "crypto.pbkdf2: keylen must be 1..256");
+    }
+
+    int derr = 0;
+    mbedtls_md_type_t md = kdf_digest(args, argc, 4, "crypto.pbkdf2", vm, &derr);
+    if (derr) return derr;
+    CryptoEnc enc = enc_from_arg(args, argc, 5);
+
+    unsigned char out[256];
+    int rc = mbedtls_pkcs5_pbkdf2_hmac_ext(
+        md,
+        (const unsigned char *)ps->data, ps->length,
+        (const unsigned char *)ss->data, ss->length,
+        (unsigned)iter, (uint32_t)klen, out);
+    if (rc != 0) {
+        return canboot_error_throw(vm, "EIO",
+            "crypto.pbkdf2: mbedtls failed (rc=%d)", rc);
+    }
+    return push_digest(vm, out, (size_t)klen, enc, "crypto.pbkdf2");
+}
+
+static int c_hkdf(CandoVM *vm, int argc, CandoValue *args) {
+    CandoString *secret = libutil_arg_str_at(args, argc, 0);
+    CandoString *salt   = libutil_arg_str_at(args, argc, 1);
+    CandoString *info   = libutil_arg_str_at(args, argc, 2);
+    if (!secret) {
+        return canboot_error_throw(vm, "EINVAL",
+            "crypto.hkdf: secret (input keying material) required");
+    }
+    int len = (int)libutil_arg_num_at(args, argc, 3, 32);
+    if (len < 1 || len > 256) {
+        return canboot_error_throw(vm, "EINVAL",
+            "crypto.hkdf: length must be 1..256");
+    }
+    int derr = 0;
+    mbedtls_md_type_t md = kdf_digest(args, argc, 4, "crypto.hkdf", vm, &derr);
+    if (derr) return derr;
+    CryptoEnc enc = enc_from_arg(args, argc, 5);
+
+    const mbedtls_md_info_t *md_info = mbedtls_md_info_from_type(md);
+    if (!md_info) {
+        return canboot_error_throw(vm, "EINVAL",
+            "crypto.hkdf: digest not available in this build");
+    }
+
+    unsigned char out[256];
+    int rc = mbedtls_hkdf(
+        md_info,
+        salt   ? (const unsigned char *)salt->data   : NULL,
+        salt   ? salt->length                        : 0,
+        (const unsigned char *)secret->data, secret->length,
+        info   ? (const unsigned char *)info->data   : NULL,
+        info   ? info->length                        : 0,
+        out, (size_t)len);
+    if (rc != 0) {
+        return canboot_error_throw(vm, "EIO",
+            "crypto.hkdf: mbedtls failed (rc=%d)", rc);
+    }
+    return push_digest(vm, out, (size_t)len, enc, "crypto.hkdf");
+}
+
 /* ---- Registration --------------------------------------------------- */
 
 static const LibutilMethodEntry crypto_methods[] = {
@@ -645,6 +755,11 @@ static const LibutilMethodEntry crypto_methods[] = {
     { "randomBytes",     c_random_bytes         },
     { "randomInt",       c_random_int           },
     { "randomUUID",      c_random_uuid          },
+
+    /* KDFs — PBKDF2-HMAC and HKDF (RFC 5869). Output length capped
+     * at 256 bytes per call. Defaults: SHA-256 digest, hex encoding. */
+    { "pbkdf2",          c_pbkdf2               },
+    { "hkdf",            c_hkdf                 },
 
     /* Legacy canboot-specific aliases (kept for smoke tests + existing
      * scripts coded to the older surface). */
