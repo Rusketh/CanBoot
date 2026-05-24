@@ -33,6 +33,10 @@
 
 struct CandoVM;
 void cando_lib_crypto_register(struct CandoVM *vm)         { (void)vm; }
+/* `os` built-in replaced by canboot_cando_open_oslib in
+ * cando_port/lib/os.c. CanDo's upstream os.c uses POSIX getenv,
+ * system(), gethostname, sysinfo, etc. — none available on canboot. */
+void cando_lib_os_register(struct CandoVM *vm)             { (void)vm; }
 void cando_lib_socket_register(struct CandoVM *vm)         { (void)vm; }
 void cando_lib_secure_socket_register(struct CandoVM *vm)  { (void)vm; }
 void cando_lib_httputil_register(struct CandoVM *vm)       { (void)vm; }
@@ -97,6 +101,8 @@ pid_t fork(void)                                    { STUB_FAIL_ERRNO((pid_t)-1,
 int   execvp(const char *f, char *const argv[])     { (void)f; (void)argv; STUB_FAIL_ERRNO(-1, ENOSYS); }
 pid_t waitpid(pid_t pid, int *status, int options)  { (void)pid; (void)status; (void)options; STUB_FAIL_ERRNO((pid_t)-1, ECHILD); }
 int   dup2(int oldfd, int newfd)                    { (void)oldfd; (void)newfd; STUB_FAIL_ERRNO(-1, EBADF); }
+/* getpid is already provided by rt/picolibc_port/syscalls.c (returns 1).
+ * getppid lives here because picolibc doesn't ship a stub for it. */
 pid_t getppid(void)                                 { return 0; }
 
 /* ---- Scheduling / threading ------------------------------------------ */

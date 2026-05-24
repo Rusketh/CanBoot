@@ -22,6 +22,8 @@ void        cando_openlibs(CandoVM *vm);
 void        cando_close(CandoVM *vm);
 int         cando_dostring(CandoVM *vm, const char *src, const char *name);
 const char *cando_errmsg(CandoVM *vm);
+void        canboot_cando_open_errorlib(CandoVM *vm);
+void        canboot_cando_open_oslib(CandoVM *vm);
 void        canboot_cando_open_displaylib(CandoVM *vm);
 void        canboot_cando_open_inputlib(CandoVM *vm);
 void        canboot_cando_open_timelib(CandoVM *vm);
@@ -98,6 +100,18 @@ void cando_selftest(void) {
     printf("selftest: calling cando_openlibs\n");
     cando_openlibs(vm);
     printf("selftest: cando_openlibs ok\n");
+
+    /* Error CLASS first — every other lib may use canboot_error_* to
+     * produce structured errors that script-side code unwraps as
+     * Error instances (code/message/cause). */
+    canboot_cando_open_errorlib(vm);
+    printf("selftest: error lib registered\n");
+
+    /* CanDo's `os` surface — drop-in for vendor/cando/source/lib/os.c
+     * (bare-metal subset). Provides platform identity, memory totals,
+     * uptime, and the halt path. */
+    canboot_cando_open_oslib(vm);
+    printf("selftest: os lib registered\n");
 
     canboot_cando_open_displaylib(vm);
     printf("selftest: display lib registered (%dx%d)\n",
