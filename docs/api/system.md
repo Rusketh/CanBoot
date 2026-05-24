@@ -158,10 +158,11 @@ fmt.sprintf("addr=%s port=%d", host, port)
 // -> "addr=10.0.2.2 port=8443"
 ```
 
-⚠ Picolibc is built with `format-default=integer`, so `%f` of a
-floating-point value renders as the literal `*float*` placeholder.
-For now, convert to integer milliseconds (or some other integer
-unit) before printing.
+`%f` and `%g` of a floating-point value render normally — picolibc
+is built with `format-default=double`. The earlier `*float*`
+placeholder is gone; scripts can pass `time.now()`, `audio.getDuration(s)`,
+`audio.getVolume(s)`, etc. directly to `fmt.sprintf("%.2f", ...)` /
+`util.format`.
 
 ### `fmt.u16le(n) -> string`
 

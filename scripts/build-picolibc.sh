@@ -21,7 +21,7 @@ OPTS=(
     --buildtype release
     -Dmultilib=false
     -Datomic-ungetc=false
-    -Dformat-default=integer
+    -Dformat-default=double
     -Dpicocrt=false
     -Dpicocrt-lib=false
     -Dassert-verbose=false
