@@ -130,7 +130,7 @@ set(CANBOOT_CANDO_SOURCES
     ${CANDO_DIR}/source/lib/csv.c
     ${CANDO_DIR}/source/lib/yaml.c
     ${CANDO_DIR}/source/lib/thread.c
-    ${CANDO_DIR}/source/lib/os.c
+    # ${CANDO_DIR}/source/lib/os.c     -- replaced by cando_port/lib/os.c
     ${CANDO_DIR}/source/lib/datetime.c
     ${CANDO_DIR}/source/lib/array.c
     ${CANDO_DIR}/source/lib/console.c
