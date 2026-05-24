@@ -76,69 +76,28 @@ foreach(_csrc ${CANBOOT_CANDO_SOURCES})
 endforeach()
 
 set(EFI_AARCH64_SOURCES
+    # aarch64-specific kernel + EFI entry.
     boot/uefi/efi_main_aarch64.c
     kernel/kmain_aarch64.c
-    kernel/fb.c
-    tests/selftest/runtime.c
-    tests/selftest/net.c
-    tests/selftest/tls.c
-    tests/selftest/disk.c
-    tests/selftest/cando.c
-    tests/selftest/ca.c
+
+    # aarch64-specific HAL: PL011 console, PCIe ECAM, virtio-gpu (no
+    # firmware framebuffer on virt; we drive the scanout ourselves),
+    # virtio-sound (Intel HDA isn't available on the aarch64 virt
+    # machine), JIT codegen stub (the x86_64 emitter doesn't compile
+    # under aarch64).
     hal/console/serial_aarch64.c
     hal/pci/pci_aarch64.c
-    hal/virtio/virtio_pci.c
-    hal/input/input_queue.c
-    hal/input/virtio_input.c
-    hal/net/virtio_net.c
-    hal/disk/disk.c
-    hal/disk/virtio_blk.c
-    hal/display/display.c
     hal/display/virtio_gpu.c
-    fs/iso9660.c
-    fs/fat32.c
-    net/lwip_port/sys_arch.c
-    net/mbedtls_port/entropy.c
-    net/mbedtls_port/inet_pton.c
-    net/mbedtls_port/lwip_bio.c
-    rt/picolibc_port/syscalls.c
-    rt/pthread_stub/pthread.c
-    cando_port/runtime/stubs.c
-    cando_port/lib/error.c
-    cando_port/lib/os.c
-    cando_port/lib/display.c
-    cando_port/lib/input.c
-    cando_port/lib/time.c
-    cando_port/lib/file.c
-    cando_port/lib/net.c
-    cando_port/lib/tls.c
-    cando_port/lib/random.c
-    cando_port/lib/crypto.c
-    cando_port/lib/encoding.c
-    cando_port/lib/log.c
-    cando_port/lib/env.c
-    cando_port/lib/url.c
-    cando_port/lib/http.c
-    cando_port/lib/disk.c
-    cando_port/lib/pci.c
-    cando_port/lib/fb.c
-    cando_port/lib/fmt.c
-    cando_port/lib/partition.c
-    cando_port/lib/fs.c
-    cando_port/vendor_glue/ntfs3g/io.c
-    cando_port/vendor_glue/ntfs3g/glue.c
-    cando_port/vendor_glue/lwext4/io.c
-    cando_port/vendor_glue/lwext4/glue.c
-    cando_port/lib/image.c
-    cando_port/vendor_glue/stb/image.c
-    cando_port/lib/audio.c
-    cando_port/vendor_glue/minimp3/decoder.c
-    hal/audio/audio_stub.c
     hal/audio/virtio_snd.c
     cando_port/jit/codegen_stub_aarch64.c
-    fs/partition.c
-    fs/ntfs.c
-    kernel/env.c
+
+    # Everything else is the same set both arches build. Sourced
+    # from cmake/sources.cmake so adding a new cando_port/lib/*.c
+    # reaches the aarch64-UEFI build without per-arch source-list
+    # maintenance (the silent-drift class of bug that produced the
+    # b09db43 missing-symbol regression).
+    ${CANBOOT_PORTABLE_SOURCES}
+
     ${CANBOOT_NTFS3G_SOURCES}
     ${CANBOOT_NTFS3G_MKFS_SOURCES}
     ${CANBOOT_LWEXT4_SOURCES}

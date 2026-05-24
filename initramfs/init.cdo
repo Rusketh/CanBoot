@@ -277,12 +277,11 @@ VAR tone = fmt.sineWave16(440, sr, ns);
 
 VAR src = audio.newSource(hdr + tone);
 print("cando audio.newSource =", src);
-// Per-source state exercise. We avoid printing the float-typed
-// duration / volume directly because picolibc is built with
-// format-default=integer and a bare %g print of a float renders
-// as the "*float*" placeholder - which still proves the call
-// returned, but is noisy in the smoke log. The numeric values
-// are exercised through isPlaying / isLooping / activeCount.
+// Per-source state exercise. Numeric values are exercised through
+// isPlaying / isLooping / activeCount (boolean / integer results) —
+// keeps the smoke log diff-friendly. Float-typed accessors
+// (getDuration, getVolume, tell) are available; picolibc supports
+// %f / %g formatting after the format-default=double flip.
 audio.setVolume(src, 0.75);
 print("cando audio.play(src) =", audio.play(src));
 print("cando audio.isPlaying(src) =", audio.isPlaying(src));

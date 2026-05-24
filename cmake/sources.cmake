@@ -3,25 +3,53 @@
 # Source-list variables shared between the kernel ELF and the UEFI
 # loader builds. All entries are paths relative to ${CMAKE_SOURCE_DIR}.
 #
-# Consumers: the top-level CMakeLists assembles KERNEL_SOURCES from
-# these for the BIOS/direct-kernel ELF; cmake/uefi_*.cmake reassemble
-# them with EFI-flavoured per-source compile flags.
+# Layering:
+#
+#   CANBOOT_PORTABLE_SOURCES
+#       Files that compile cleanly under any canboot build target —
+#       the cando bindings, runtime stubs, vendor glue, filesystems,
+#       lwIP/Mbed TLS ports, picolibc syscall stubs, device-class
+#       HAL (virtio-pci, virtio-input, virtio-net, virtio-blk, the
+#       linear-framebuffer painter). New cando_port/lib/* files go
+#       here and reach every target automatically — no per-build
+#       source-list drift.
+#
+#   CANBOOT_KERNEL_COMMON
+#       PORTABLE_SOURCES + x86_64-specific kernel bits (IDT, BIOS
+#       kmain, 16550 UART, PS/2, AHCI, x86_64 PCI). Consumed by the
+#       top-level CMakeLists for the BIOS kernel ELF and by
+#       cmake/uefi_x86_64.cmake for the UEFI loader build.
+#
+#   EFI_AARCH64_SOURCES  (in cmake/uefi_aarch64.cmake)
+#       PORTABLE_SOURCES + aarch64-specific bits (PL011, AAVMF EFI
+#       entry, aarch64 PCIe, virtio-gpu, virtio-snd, JIT codegen
+#       stub). Defined alongside the aarch64 EFI build itself.
+#
+#   CANBOOT_LWIP_SOURCES / CANBOOT_CANDO_SOURCES /
+#   CANBOOT_NTFS3G_SOURCES / CANBOOT_NTFS3G_MKFS_SOURCES /
+#   CANBOOT_LWEXT4_SOURCES
+#       Vendored library source sets. Pulled in by every build that
+#       needs them.
 
-# Sources shared between the BIOS kernel and the UEFI loader. These get
-# compiled twice with different flags (kernel-model vs PIC EFI) and
-# linked into each target separately.
-set(CANBOOT_KERNEL_COMMON
-    arch/x86_64/idt.c
-    arch/x86_64/idt_stubs.S
-    kernel/kmain.c
+# ---------------------------------------------------------------------------
+# Portable canboot sources — shared by every build target.
+# ---------------------------------------------------------------------------
+set(CANBOOT_PORTABLE_SOURCES
     kernel/env.c
     kernel/fb.c
+
+    # Selftest harness compiled into the kernel; assertions land on
+    # serial via printf for the QEMU smoke runners.
     tests/selftest/runtime.c
     tests/selftest/net.c
     tests/selftest/tls.c
     tests/selftest/disk.c
     tests/selftest/cando.c
     tests/selftest/ca.c
+
+    # CanDo runtime + binding surface (cando_port/lib/* and friends).
+    # Any new lib in cando_port/lib/ should be added here so every
+    # target picks it up — do not duplicate into per-build lists.
     cando_port/runtime/stubs.c
     cando_port/lib/error.c
     cando_port/lib/os.c
@@ -44,36 +72,64 @@ set(CANBOOT_KERNEL_COMMON
     cando_port/lib/fmt.c
     cando_port/lib/partition.c
     cando_port/lib/fs.c
+    cando_port/lib/image.c
+    cando_port/lib/audio.c
+
+    # Vendor-library glue (called from cando_port/lib/* surfaces).
     cando_port/vendor_glue/ntfs3g/io.c
     cando_port/vendor_glue/ntfs3g/glue.c
     cando_port/vendor_glue/lwext4/io.c
     cando_port/vendor_glue/lwext4/glue.c
-    cando_port/lib/image.c
     cando_port/vendor_glue/stb/image.c
-    cando_port/lib/audio.c
     cando_port/vendor_glue/minimp3/decoder.c
-    hal/audio/audio_stub.c
+
+    # Filesystem drivers.
     fs/partition.c
     fs/ntfs.c
     fs/iso9660.c
     fs/fat32.c
+
+    # Device-class HAL: works on every bus + transport canboot
+    # supports (PCI/PCIe via virtio-pci, virtio-* devices, framebuffer
+    # painter, audio mixer back-end stub).
+    hal/audio/audio_stub.c
     hal/disk/disk.c
     hal/disk/virtio_blk.c
-    hal/disk/ahci.c
     hal/display/display.c
-    hal/console/serial_x86.c
     hal/input/input_queue.c
-    hal/input/ps2.c
     hal/input/virtio_input.c
     hal/net/virtio_net.c
-    hal/pci/pci_x86.c
     hal/virtio/virtio_pci.c
+
+    # Networking + TLS port shims.
     net/lwip_port/sys_arch.c
     net/mbedtls_port/entropy.c
     net/mbedtls_port/inet_pton.c
     net/mbedtls_port/lwip_bio.c
+
+    # Freestanding runtime: picolibc syscall shims, cooperative
+    # pthread fiber stub.
     rt/picolibc_port/syscalls.c
     rt/pthread_stub/pthread.c
+)
+
+# ---------------------------------------------------------------------------
+# x86_64 kernel + UEFI source list. PORTABLE + x86_64-specific HAL.
+# ---------------------------------------------------------------------------
+set(CANBOOT_KERNEL_COMMON
+    # x86_64-specific kernel.
+    arch/x86_64/idt.c
+    arch/x86_64/idt_stubs.S
+    kernel/kmain.c
+
+    # x86_64-specific HAL: 16550 UART (COM1), PS/2 i8042, AHCI SATA,
+    # x86_64 PCI config-space (port I/O).
+    hal/console/serial_x86.c
+    hal/input/ps2.c
+    hal/disk/ahci.c
+    hal/pci/pci_x86.c
+
+    ${CANBOOT_PORTABLE_SOURCES}
 )
 
 # lwIP brought in via the vendored Filelists.cmake.

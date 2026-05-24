@@ -38,11 +38,14 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 #include <string.h>
 
 #include "mbedtls/md.h"
 #include "mbedtls/sha256.h"
 #include "mbedtls/sha512.h"
+#include "mbedtls/ctr_drbg.h"
+#include "mbedtls/entropy.h"
 
 #include "core/value.h"
 #include "vm/vm.h"
@@ -383,6 +386,246 @@ static int c_hmac_sha256_hex_legacy(CandoVM *vm, int argc, CandoValue *args) {
     return c_hmac(vm, 4, tmp);
 }
 
+/* ---- crypto.randomBytes / randomInt / randomUUID -------------------- */
+/*
+ * Mbed TLS CTR-DRBG seeded once from mbedtls_entropy_func. Same RNG
+ * source the canboot `random` module uses; this lib also exposes it
+ * under CanDo's `crypto.*` names so a script written for host CanDo
+ * doesn't need to reach for two different namespaces.
+ */
+
+static mbedtls_entropy_context  g_rng_ent;
+static mbedtls_ctr_drbg_context g_rng_drbg;
+static int                      g_rng_seeded;
+
+static int rng_seed(void) {
+    if (g_rng_seeded) return 0;
+    mbedtls_entropy_init(&g_rng_ent);
+    mbedtls_ctr_drbg_init(&g_rng_drbg);
+    int rc = mbedtls_ctr_drbg_seed(&g_rng_drbg, mbedtls_entropy_func, &g_rng_ent,
+                                   (const unsigned char *)"canboot-crypto", 14);
+    if (rc != 0) return rc;
+    g_rng_seeded = 1;
+    return 0;
+}
+
+static int rng_draw(unsigned char *out, size_t n) {
+    if (rng_seed() != 0) return -1;
+    while (n) {
+        size_t chunk = n > MBEDTLS_CTR_DRBG_MAX_REQUEST ? MBEDTLS_CTR_DRBG_MAX_REQUEST : n;
+        if (mbedtls_ctr_drbg_random(&g_rng_drbg, out, chunk) != 0) return -1;
+        out += chunk;
+        n   -= chunk;
+    }
+    return 0;
+}
+
+/* crypto.randomBytes(n, enc?) -> string (default enc "hex") */
+static int c_random_bytes(CandoVM *vm, int argc, CandoValue *args) {
+    int n = (int)libutil_arg_num_at(args, argc, 0, 16);
+    if (n < 0 || n > 4096) {
+        return canboot_error_throw(vm, "EINVAL",
+            "crypto.randomBytes: size must be 0..4096");
+    }
+    static unsigned char buf[4096];
+    if (rng_draw(buf, (size_t)n) != 0) {
+        return canboot_error_throw(vm, "EIO",
+            "crypto.randomBytes: DRBG generation failed");
+    }
+    CryptoEnc enc = enc_from_arg(args, argc, 1);
+    return push_digest(vm, buf, (size_t)n, enc, "crypto.randomBytes");
+}
+
+/* crypto.randomInt(min, max) -> number — uniform in [min, max] */
+static int c_random_int(CandoVM *vm, int argc, CandoValue *args) {
+    int64_t lo = (int64_t)libutil_arg_num_at(args, argc, 0, 0);
+    int64_t hi = (int64_t)libutil_arg_num_at(args, argc, 1, lo + 1);
+    if (hi < lo) { int64_t t = lo; lo = hi; hi = t; }
+    uint64_t span = (uint64_t)(hi - lo) + 1ull;
+    uint64_t r;
+    if (rng_draw((unsigned char *)&r, sizeof(r)) != 0) {
+        return canboot_error_throw(vm, "EIO",
+            "crypto.randomInt: DRBG generation failed");
+    }
+    int64_t pick = lo + (int64_t)(r % span);
+    cando_vm_push(vm, cando_number((f64)pick));
+    return 1;
+}
+
+/* crypto.randomUUID() -> string (RFC 4122 v4, 36 chars with dashes) */
+static int c_random_uuid(CandoVM *vm, int argc, CandoValue *args) {
+    (void)argc; (void)args;
+    unsigned char b[16];
+    if (rng_draw(b, 16) != 0) {
+        return canboot_error_throw(vm, "EIO",
+            "crypto.randomUUID: DRBG generation failed");
+    }
+    /* v4 bit-twiddling per RFC 4122. */
+    b[6] = (b[6] & 0x0F) | 0x40;
+    b[8] = (b[8] & 0x3F) | 0x80;
+    char out[37];
+    int o = 0;
+    static const int dash_after[] = {4, 6, 8, 10};
+    int g = 0;
+    for (int i = 0; i < 16; i++) {
+        out[o++] = hex_digits[b[i] >> 4];
+        out[o++] = hex_digits[b[i] & 0xF];
+        if (g < 4 && (i + 1) == dash_after[g]) {
+            out[o++] = '-';
+            g++;
+        }
+    }
+    out[o] = '\0';
+    CandoString *s = cando_string_new(out, (uint32_t)o);
+    cando_vm_push(vm, cando_string_value(s));
+    return 1;
+}
+
+/* ---- crypto.base64 / crypto.base64url ------------------------------- */
+/*
+ * Standard alphabet plus the RFC 4648 URL-safe variant ('+' -> '-',
+ * '/' -> '_'). Both encoders pad with '='; the url-safe decoder also
+ * accepts unpadded input (common in JWT contexts).
+ */
+
+static const char b64_std[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static const char b64_url[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+static int b64_value_std(char c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return 26 + (c - 'a');
+    if (c >= '0' && c <= '9') return 52 + (c - '0');
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1;
+}
+
+static int b64_value_url(char c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return 26 + (c - 'a');
+    if (c >= '0' && c <= '9') return 52 + (c - '0');
+    if (c == '-') return 62;
+    if (c == '_') return 63;
+    return -1;
+}
+
+static int do_b64_encode(CandoVM *vm, int argc, CandoValue *args,
+                         const char *alphabet, const char *for_call)
+{
+    CandoString *s = libutil_arg_str_at(args, argc, 0);
+    if (!s) {
+        return canboot_error_throw(vm, "EINVAL",
+            "%s: bytes argument required", for_call);
+    }
+    if ((size_t)s->length > 6144) {
+        return canboot_error_throw(vm, "ENOMEM",
+            "%s: input too large (max 6144 bytes)", for_call);
+    }
+    static char out[8192];
+    const unsigned char *src = (const unsigned char *)s->data;
+    size_t n = s->length;
+    size_t out_n = 0;
+    size_t i = 0;
+    while (i + 3 <= n) {
+        uint32_t v = ((uint32_t)src[i]   << 16)
+                   | ((uint32_t)src[i+1] <<  8)
+                   |  (uint32_t)src[i+2];
+        out[out_n++] = alphabet[(v >> 18) & 0x3F];
+        out[out_n++] = alphabet[(v >> 12) & 0x3F];
+        out[out_n++] = alphabet[(v >>  6) & 0x3F];
+        out[out_n++] = alphabet[(v      ) & 0x3F];
+        i += 3;
+    }
+    if (i + 1 == n) {
+        uint32_t v = (uint32_t)src[i] << 16;
+        out[out_n++] = alphabet[(v >> 18) & 0x3F];
+        out[out_n++] = alphabet[(v >> 12) & 0x3F];
+        out[out_n++] = '=';
+        out[out_n++] = '=';
+    } else if (i + 2 == n) {
+        uint32_t v = ((uint32_t)src[i]   << 16)
+                   | ((uint32_t)src[i+1] <<  8);
+        out[out_n++] = alphabet[(v >> 18) & 0x3F];
+        out[out_n++] = alphabet[(v >> 12) & 0x3F];
+        out[out_n++] = alphabet[(v >>  6) & 0x3F];
+        out[out_n++] = '=';
+    }
+    CandoString *r = cando_string_new(out, (uint32_t)out_n);
+    cando_vm_push(vm, cando_string_value(r));
+    return 1;
+}
+
+static int do_b64_decode(CandoVM *vm, int argc, CandoValue *args,
+                         int (*val_fn)(char), bool tolerate_unpadded,
+                         const char *for_call)
+{
+    CandoString *s = libutil_arg_str_at(args, argc, 0);
+    if (!s) {
+        return canboot_error_throw(vm, "EINVAL",
+            "%s: string argument required", for_call);
+    }
+    const char *src = s->data;
+    size_t n = s->length;
+
+    /* For URL-safe input we synthesise the padding so the rest of the
+     * loop is mod-4. Standard base64 requires correct padding. */
+    char padded[8192];
+    if (tolerate_unpadded && (n % 4) != 0) {
+        size_t pad = 4 - (n % 4);
+        if (n + pad > sizeof(padded)) {
+            return canboot_error_throw(vm, "ENOMEM",
+                "%s: input too large (max %zu chars)", for_call,
+                sizeof(padded) - 4);
+        }
+        memcpy(padded, src, n);
+        for (size_t k = 0; k < pad; k++) padded[n + k] = '=';
+        src = padded;
+        n  += pad;
+    }
+    if (n % 4 != 0) {
+        return canboot_error_throw(vm, "EINVAL",
+            "%s: length not a multiple of 4", for_call);
+    }
+    static char out[6144];
+    if ((n / 4) * 3 > sizeof(out)) {
+        return canboot_error_throw(vm, "ENOMEM",
+            "%s: input too large for output buffer", for_call);
+    }
+    size_t out_n = 0;
+    for (size_t i = 0; i < n; i += 4) {
+        int a = val_fn(src[i]);
+        int b = val_fn(src[i + 1]);
+        int c = src[i + 2] == '=' ? -2 : val_fn(src[i + 2]);
+        int d = src[i + 3] == '=' ? -2 : val_fn(src[i + 3]);
+        if (a < 0 || b < 0 || c == -1 || d == -1) {
+            return canboot_error_throw(vm, "EINVAL",
+                "%s: malformed input", for_call);
+        }
+        uint32_t v = ((uint32_t)a << 18) | ((uint32_t)b << 12)
+                   | ((uint32_t)(c < 0 ? 0 : c) << 6) | (uint32_t)(d < 0 ? 0 : d);
+        out[out_n++] = (char)((v >> 16) & 0xFF);
+        if (c >= 0) out[out_n++] = (char)((v >> 8) & 0xFF);
+        if (d >= 0) out[out_n++] = (char)( v       & 0xFF);
+    }
+    CandoString *r = cando_string_new(out, (uint32_t)out_n);
+    cando_vm_push(vm, cando_string_value(r));
+    return 1;
+}
+
+static int c_b64_encode    (CandoVM *vm, int argc, CandoValue *args)
+{ return do_b64_encode(vm, argc, args, b64_std, "crypto.base64.encode"); }
+
+static int c_b64_decode    (CandoVM *vm, int argc, CandoValue *args)
+{ return do_b64_decode(vm, argc, args, b64_value_std, false, "crypto.base64.decode"); }
+
+static int c_b64url_encode (CandoVM *vm, int argc, CandoValue *args)
+{ return do_b64_encode(vm, argc, args, b64_url, "crypto.base64url.encode"); }
+
+static int c_b64url_decode (CandoVM *vm, int argc, CandoValue *args)
+{ return do_b64_decode(vm, argc, args, b64_value_url, true, "crypto.base64url.decode"); }
+
 /* ---- Registration --------------------------------------------------- */
 
 static const LibutilMethodEntry crypto_methods[] = {
@@ -396,6 +639,12 @@ static const LibutilMethodEntry crypto_methods[] = {
     { "hash",            c_hash                 },
     { "hmac",            c_hmac                 },
     { "timingSafeEqual", c_timing_safe_equal    },
+
+    /* RNG — same DRBG source as the canboot `random` lib, also
+     * exposed under CanDo's `crypto.*` names. */
+    { "randomBytes",     c_random_bytes         },
+    { "randomInt",       c_random_int           },
+    { "randomUUID",      c_random_uuid          },
 
     /* Legacy canboot-specific aliases (kept for smoke tests + existing
      * scripts coded to the older surface). */
@@ -413,20 +662,26 @@ void canboot_cando_open_cryptolib(CandoVM *vm) {
     libutil_register_methods(vm, obj, crypto_methods,
                              sizeof(crypto_methods) / sizeof(crypto_methods[0]));
 
-    /* crypto.hex sub-namespace. */
-    CandoValue hex_val = cando_bridge_new_object(vm);
-    CdoObject *hex_obj = cando_bridge_resolve(vm, cando_as_handle(hex_val));
-    libutil_set_method(vm, hex_obj, "encode", c_hex_encode);
-    libutil_set_method(vm, hex_obj, "decode", c_hex_decode);
-
-    /* Attach crypto.hex as a field on the crypto object. Field key is
-     * an interned CdoString; cdo_object_rawset retains the value's
-     * inner refs so we release the key after the call. */
-    CdoString *k = cdo_string_intern("hex", 3);
-    cdo_object_rawset(obj, k,
-                      cando_bridge_to_cdo(vm, hex_val),
-                      FIELD_NONE);
-    cdo_string_release(k);
+    /* Sub-namespaces: crypto.hex, crypto.base64, crypto.base64url.
+     * Each lives as a field on the crypto object so calls dispatch
+     * through the standard __index chain. */
+    struct { const char *name; CandoNativeFn enc_fn; CandoNativeFn dec_fn; } subs[] = {
+        { "hex",       c_hex_encode,    c_hex_decode    },
+        { "base64",    c_b64_encode,    c_b64_decode    },
+        { "base64url", c_b64url_encode, c_b64url_decode },
+    };
+    for (size_t i = 0; i < sizeof(subs) / sizeof(subs[0]); i++) {
+        CandoValue sub_val = cando_bridge_new_object(vm);
+        CdoObject *sub_obj = cando_bridge_resolve(vm, cando_as_handle(sub_val));
+        libutil_set_method(vm, sub_obj, "encode", subs[i].enc_fn);
+        libutil_set_method(vm, sub_obj, "decode", subs[i].dec_fn);
+        CdoString *k = cdo_string_intern(subs[i].name,
+                                          (uint32_t)strlen(subs[i].name));
+        cdo_object_rawset(obj, k,
+                          cando_bridge_to_cdo(vm, sub_val),
+                          FIELD_NONE);
+        cdo_string_release(k);
+    }
 
     cando_vm_set_global(vm, "crypto", obj_val, true);
 }
