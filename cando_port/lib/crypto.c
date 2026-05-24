@@ -48,6 +48,7 @@
 #include "mbedtls/entropy.h"
 #include "mbedtls/pkcs5.h"
 #include "mbedtls/hkdf.h"
+#include "mbedtls/cipher.h"
 
 #include "core/value.h"
 #include "vm/vm.h"
@@ -736,6 +737,168 @@ static int c_hkdf(CandoVM *vm, int argc, CandoValue *args) {
     return push_digest(vm, out, (size_t)len, enc, "crypto.hkdf");
 }
 
+/* ---- crypto.encrypt / crypto.decrypt -------------------------------- */
+/*
+ * CanDo signature (vendor/cando/source/lib/crypto.c lines 755-):
+ *
+ *   crypto.encrypt(algo, key, iv, data, aad?, encoding?) -> string|object
+ *   crypto.decrypt(algo, key, iv, data, aad?, encoding?) -> string
+ *
+ * Non-AEAD modes (CBC, CTR) return the encoded ciphertext directly.
+ * AEAD modes (GCM, ChaCha20-Poly1305) return { ciphertext, tag } —
+ * tag is a 16-byte auth tag that crypto.decrypt also expects.
+ *
+ * THIS COMMIT scopes to non-AEAD ciphers only (AES-128/192/256-CBC,
+ * AES-128/192/256-CTR). AEAD lands in a follow-up so the
+ * object-return shape gets focused review.
+ *
+ *   algo:     "aes-128-cbc" | "aes-192-cbc" | "aes-256-cbc" |
+ *             "aes-128-ctr" | "aes-192-ctr" | "aes-256-ctr"
+ *   key:      bytes (16 / 24 / 32 for AES-128 / 192 / 256)
+ *   iv:       16 raw bytes
+ *   data:     plaintext (encrypt) or ciphertext (decrypt)
+ *   aad:      reserved (ignored for non-AEAD; throws if non-empty
+ *             with a non-AEAD cipher to surface mistakes)
+ *   encoding: "hex" | "bytes" — default "bytes" per CanDo
+ *
+ * Block-cipher padding is PKCS#7 (CBC default in mbedtls). CTR is
+ * unpadded (stream-cipher mode). The total output buffer is sized
+ * to plaintext + block + safety; capped at 8192 bytes for the
+ * static scratch buffer.
+ */
+
+static const mbedtls_cipher_info_t *cipher_info_from(const char *algo) {
+    if (!algo) return NULL;
+    /* Mbed TLS expects upper-case names ("AES-256-CBC"); convert. */
+    char up[32];
+    size_t i = 0;
+    for (; algo[i] && i + 1 < sizeof(up); i++) {
+        char c = algo[i];
+        if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+        up[i] = c;
+    }
+    up[i] = '\0';
+    return mbedtls_cipher_info_from_string(up);
+}
+
+static bool cipher_is_aead(const mbedtls_cipher_info_t *info) {
+    mbedtls_cipher_mode_t mode = mbedtls_cipher_info_get_mode(info);
+    return mode == MBEDTLS_MODE_GCM
+        || mode == MBEDTLS_MODE_CCM
+        || mode == MBEDTLS_MODE_CHACHAPOLY;
+}
+
+static CryptoEnc enc_from_arg_or_bytes(CandoValue *args, int argc, int idx) {
+    /* Like enc_from_arg but bytes-by-default to match CanDo's encrypt /
+     * decrypt convention (the data is binary). */
+    const char *s = libutil_arg_cstr_at(args, argc, idx);
+    if (!s) return ENC_BYTES;
+    if (strcmp(s, "hex")    == 0) return ENC_HEX;
+    if (strcmp(s, "bytes")  == 0) return ENC_BYTES;
+    if (strcmp(s, "binary") == 0) return ENC_BYTES;
+    return ENC_BAD;
+}
+
+static int run_cipher(CandoVM *vm, int op /* MBEDTLS_ENCRYPT / DECRYPT */,
+                      int argc, CandoValue *args, const char *for_call)
+{
+    const char *algo_name = libutil_arg_cstr_at(args, argc, 0);
+    CandoString *key  = libutil_arg_str_at(args, argc, 1);
+    CandoString *iv   = libutil_arg_str_at(args, argc, 2);
+    CandoString *data = libutil_arg_str_at(args, argc, 3);
+    if (!algo_name || !key || !iv || !data) {
+        return canboot_error_throw(vm, "EINVAL",
+            "%s: expected (algo, key, iv, data, aad?, encoding?)", for_call);
+    }
+
+    const mbedtls_cipher_info_t *info = cipher_info_from(algo_name);
+    if (!info) {
+        return canboot_error_throw(vm, "EINVAL",
+            "%s: unsupported cipher '%s'", for_call, algo_name);
+    }
+    if (cipher_is_aead(info)) {
+        return canboot_error_throw(vm, "EINVAL",
+            "%s: AEAD modes (GCM/Poly1305) not yet supported "
+            "— land in a follow-up commit", for_call);
+    }
+
+    size_t key_bytes = mbedtls_cipher_info_get_key_bitlen(info) / 8;
+    size_t iv_bytes  = mbedtls_cipher_info_get_iv_size(info);
+    if (key->length != key_bytes) {
+        return canboot_error_throw(vm, "EINVAL",
+            "%s: key must be %zu bytes for %s (got %u)",
+            for_call, key_bytes, algo_name, key->length);
+    }
+    if (iv->length != iv_bytes) {
+        return canboot_error_throw(vm, "EINVAL",
+            "%s: iv must be %zu bytes for %s (got %u)",
+            for_call, iv_bytes, algo_name, iv->length);
+    }
+
+    /* aad (arg 4) is reserved for AEAD; non-AEAD ignores. encoding is
+     * arg 5 (or 4 when aad is absent). Detect which by length of the
+     * positional. */
+    int enc_idx = 4;
+    CandoString *aad = libutil_arg_str_at(args, argc, 4);
+    if (aad && aad->length > 0) {
+        /* aad supplied with a non-AEAD cipher — surface the mistake
+         * rather than silently dropping it. */
+        return canboot_error_throw(vm, "EINVAL",
+            "%s: aad provided with non-AEAD cipher '%s' — aad is "
+            "only meaningful with GCM/Poly1305", for_call, algo_name);
+    }
+    if (aad) enc_idx = 5;
+    CryptoEnc enc = enc_from_arg_or_bytes(args, argc, enc_idx);
+    if (enc == ENC_BAD) {
+        return canboot_error_throw(vm, "EINVAL",
+            "%s: unsupported encoding (use 'hex' or 'bytes')", for_call);
+    }
+
+    if ((size_t)data->length > 8192 - 32) {
+        return canboot_error_throw(vm, "ENOMEM",
+            "%s: data too large (max 8160 bytes)", for_call);
+    }
+
+    mbedtls_cipher_context_t ctx;
+    mbedtls_cipher_init(&ctx);
+    int rc = mbedtls_cipher_setup(&ctx, info);
+    if (rc == 0) {
+        rc = mbedtls_cipher_setkey(&ctx,
+            (const unsigned char *)key->data, (int)(key_bytes * 8),
+            op == MBEDTLS_ENCRYPT ? MBEDTLS_ENCRYPT : MBEDTLS_DECRYPT);
+    }
+    if (rc == 0 && mbedtls_cipher_info_get_mode(info) == MBEDTLS_MODE_CBC) {
+        rc = mbedtls_cipher_set_padding_mode(&ctx, MBEDTLS_PADDING_PKCS7);
+    }
+    if (rc != 0) {
+        mbedtls_cipher_free(&ctx);
+        return canboot_error_throw(vm, "EIO",
+            "%s: cipher setup failed (rc=%d)", for_call, rc);
+    }
+
+    static unsigned char out_buf[8192];
+    size_t out_len = sizeof(out_buf);
+    rc = mbedtls_cipher_crypt(&ctx,
+        (const unsigned char *)iv->data, iv_bytes,
+        (const unsigned char *)data->data, data->length,
+        out_buf, &out_len);
+    mbedtls_cipher_free(&ctx);
+
+    if (rc != 0) {
+        return canboot_error_throw(vm, "EIO",
+            "%s: cipher_crypt failed (rc=%d)", for_call, rc);
+    }
+    return push_digest(vm, out_buf, out_len, enc, for_call);
+}
+
+static int c_encrypt(CandoVM *vm, int argc, CandoValue *args) {
+    return run_cipher(vm, MBEDTLS_ENCRYPT, argc, args, "crypto.encrypt");
+}
+
+static int c_decrypt(CandoVM *vm, int argc, CandoValue *args) {
+    return run_cipher(vm, MBEDTLS_DECRYPT, argc, args, "crypto.decrypt");
+}
+
 /* ---- Registration --------------------------------------------------- */
 
 static const LibutilMethodEntry crypto_methods[] = {
@@ -760,6 +923,12 @@ static const LibutilMethodEntry crypto_methods[] = {
      * at 256 bytes per call. Defaults: SHA-256 digest, hex encoding. */
     { "pbkdf2",          c_pbkdf2               },
     { "hkdf",            c_hkdf                 },
+
+    /* Symmetric ciphers — non-AEAD modes only (AES-CBC, AES-CTR).
+     * AEAD (GCM, Poly1305) lands in a follow-up commit because of
+     * its richer object return shape ({ciphertext, tag}). */
+    { "encrypt",         c_encrypt              },
+    { "decrypt",         c_decrypt              },
 
     /* Legacy canboot-specific aliases (kept for smoke tests + existing
      * scripts coded to the older surface). */
