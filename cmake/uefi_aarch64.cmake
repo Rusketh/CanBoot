@@ -104,6 +104,8 @@ set(EFI_AARCH64_SOURCES
     rt/picolibc_port/syscalls.c
     rt/pthread_stub/pthread.c
     cando_port/runtime/stubs.c
+    cando_port/lib/error.c
+    cando_port/lib/os.c
     cando_port/lib/display.c
     cando_port/lib/input.c
     cando_port/lib/time.c
