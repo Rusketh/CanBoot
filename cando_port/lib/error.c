@@ -251,22 +251,22 @@ static int mod_new(CandoVM *vm, int argc, CandoValue *args) {
 /* Registration                                                           */
 /* ---------------------------------------------------------------------- */
 
+/* TEMPORARY DIAGNOSTIC: the previous full registration body crashed
+ * the aarch64 UEFI smoke with a synchronous exception right after
+ * cando_openlibs() returned. The crash was inside one of the
+ * cando_lib_meta_register / cando_lib_meta_table /
+ * cando_lib_meta_define calls or the subsequent module-global setup.
+ *
+ * To unblock CI while we localise the fault, this registration is
+ * a no-op. The script-facing `Error` global is therefore NOT defined
+ * — but the C helpers canboot_error_throw / canboot_error_push /
+ * canboot_error_value are still usable by other cando_port libs
+ * (they create Error instances directly via make_error, which
+ * doesn't depend on this registration running).
+ *
+ * Once the smoke test passes with this stub, we re-add the meta
+ * + module global wiring one piece at a time, with diagnostic
+ * markers in tests/selftest/cando.c to identify the faulty call. */
 void canboot_cando_open_errorlib(CandoVM *vm) {
-    /* _meta global must exist before we hang methods off _meta.error. */
-    cando_lib_meta_register(vm);
-
-    /* _meta.error — method dispatch table for Error instances. */
-    CdoObject *meta = cando_lib_meta_table(vm, "error");
-    if (meta) {
-        cando_lib_meta_define(vm, meta, "code",     m_code);
-        cando_lib_meta_define(vm, meta, "message",  m_message);
-        cando_lib_meta_define(vm, meta, "cause",    m_cause);
-        cando_lib_meta_define(vm, meta, "toString", m_to_string);
-    }
-
-    /* Global `Error` module with `.new(code, message[, cause])`. */
-    CandoValue mod = cando_bridge_new_object(vm);
-    CdoObject *mod_obj = cando_bridge_resolve(vm, cando_as_handle(mod));
-    libutil_set_method(vm, mod_obj, "new", mod_new);
-    cando_vm_set_global(vm, "Error", mod, true);
+    (void)vm;
 }
