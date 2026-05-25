@@ -123,6 +123,15 @@ relocations are incompatible with the gnu-efi PIC link, so that build runs
 uniprocessor. See `rt/sched/include/sched/sched.h` and
 `arch/x86_64/smp.h`.
 
+**JIT** — the vendored CanDo ships a real tracing JIT
+(`vendor/cando/source/jit/codegen.c`) gated behind `jit.on()`. It works on
+x86_64: a hot loop is recorded, compiled to machine code in the JIT arena,
+and executed, producing results identical to the interpreter
+(`jit.stats().traces_compiled` reflects the compiled traces). aarch64 has
+no native emitter yet (`cando_port/jit/codegen_stub_aarch64.c` returns
+false), so hot traces fall back to the interpreter — correct, no speed-up.
+init.cdo exercises both on every boot.
+
 **Network + TLS** — lwIP 2.2.1 in NO_SYS mode over virtio-net (DHCP /
 UDP / TCP / HTTP); Mbed TLS 3.6.x LTS with hardware entropy
 (RDSEED/RDRAND + TSC jitter fallback), session tickets, and a
@@ -153,7 +162,8 @@ rt/                      picolibc syscall stubs, thread scheduler (sched),
 cando_port/
   lib/                   CanDo language bindings (one per namespace)
   runtime/               POSIX function stubs
-  jit/                   per-arch JIT codegen stubs
+  jit/                   aarch64 codegen stub (x86_64 uses vendored CanDo
+                         codegen.c, a working machine-code emitter)
   vendor_glue/           lwext4 / ntfs-3g / minimp3 / stb glue
   shims/                 POSIX header shims for bare-metal builds
 vendor/                  submodules: cando, picolibc, lwip, mbedtls,

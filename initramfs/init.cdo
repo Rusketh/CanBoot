@@ -437,6 +437,31 @@ IF (TS_fail == 0) {
 }
 print("cando test suite end");
 
+// ---- JIT: profile a compute-heavy loop, compile it, verify parity ----
+// On x86_64 the vendored CanDo codegen (vendor/cando/source/jit/codegen.c)
+// emits real machine code for hot traces; on aarch64 codegen is stubbed
+// so this runs interpreted (traces_compiled stays 0). Either way the
+// result must be identical with JIT on vs off.
+print("cando jit begin");
+VAR jheavy = FUNCTION(n) {
+    VAR acc = 0;
+    VAR i = 0;
+    WHILE (i < n) { acc = acc + (i * 3) - (i / 2); i = i + 1; }
+    RETURN acc;
+};
+jit.reset();
+VAR jit_off = jheavy(100000);
+jit.on();
+VAR jit_on = 0;
+VAR jit_rep = 0;
+WHILE (jit_rep < 30) { jit_on = jheavy(100000); jit_rep = jit_rep + 1; }
+VAR jit_st = jit.stats();
+jit.off();
+print("cando jit match =", jit_off == jit_on);
+print("cando jit traces_compiled =", jit_st.traces_compiled);
+IF (jit_st.traces_compiled >= 1) { print("cando jit compiled ok"); }
+print("cando jit end");
+
 // ---- Display showcase: a results dashboard painted via the gui.cdo
 // widget toolkit, include()d off the boot volume. The realpath stack
 // overflow that used to fault the VM on include() is fixed, so the

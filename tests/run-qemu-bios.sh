@@ -297,6 +297,10 @@ PY
         check 'selftest: cando_dostring ok'
         check 'selftest: init.cdo executed ok'
         check 'selftest: display lib registered'
+        check 'cando jit match = true'
+
+        check 'cando jit compiled ok'
+
         check 'cando gui included ok ver 1.0.0'
 
         check 'cando gui dashboard painted'
