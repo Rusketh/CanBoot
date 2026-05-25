@@ -43,11 +43,40 @@ FOR (VAR i = 0; i < disk.count(); i = i + 1) {
 }
 ```
 
+### `disk.writable(i) -> bool`
+
+`true` if the device accepts writes. CD-ROM / read-only media report
+`false`.
+
+### `disk.read(i, lba, count) -> string|null`
+
+Read `count` blocks starting at `lba` from disk `i`. Returns the raw
+bytes as a binary string (length = `count * blockSize`), or `null` on
+error / out-of-range / if the request exceeds the 64 KiB transfer cap.
+
+```cdo
+VAR mbr = disk.read(0, 0, 1);          // first sector
+print("MBR sig:", hex.encode(mbr));
+```
+
+### `disk.write(i, lba, data) -> bool`
+
+Write `data` to disk `i` starting at `lba`. `data`'s length **must be
+a whole multiple of the block size** — partial-block writes are
+rejected. Capped at 64 KiB per call. Returns `true` on success.
+
+⚠ Raw writes bypass every filesystem. Writing to a live filesystem's
+blocks corrupts it.
+
 ### Behaviour
 
-- This API doesn't read or write the device. It only exposes
-  enumeration. To read raw blocks, go through [`fs.*`](#fs) /
-  [`file.*`](#file) or write at the C level.
+- **Transfer cap**: a single `disk.read` / `disk.write` moves at most
+  64 KiB. For larger ranges, loop.
+- **Block alignment**: writes must be block-multiple-sized; a short
+  buffer returns `false` rather than being padded.
+- **Binary-safe reads**: `disk.read` returns a length-carrying string,
+  so embedded NULs survive — pair with [`hex`](crypto.md#hex) for a
+  printable dump.
 - Up to 8 disks discoverable. Past 8 the HAL ignores additional
   devices.
 
@@ -55,48 +84,97 @@ FOR (VAR i = 0; i < disk.count(); i = i + 1) {
 
 ## partition
 
-Read-only enumeration. Partition creation / resize / delete happens at
-the C level (`fs/partition.c`); the cando surface exposes only
-inspection.
+Read **and write** GPT / MBR partition tables. `disk` is the disk
+index from [`disk.count()`](#disk); `idx` is the zero-based partition
+index within that disk's table.
 
-### `partition.scheme(disk) -> string`
+### Inspect
 
-Partition table format on `disk`. One of:
+#### `partition.scheme(disk) -> string`
 
-- `"gpt"` — GPT signature + valid header
-- `"mbr"` — MBR signature without GPT
-- `"none"` — neither (whole-disk filesystem)
+Partition table format. `"gpt"`, `"mbr"`, or `"none"` (whole-disk
+filesystem, no table).
 
-### `partition.count(disk) -> number`
+#### `partition.count(disk) -> number`
 
-Number of partitions in the table. `0` for `"none"` scheme.
+Number of partitions in the table. `0` for `"none"`.
 
-### `partition.entry(disk, idx) -> string`
+#### `partition.start(disk, idx) -> number`
 
-Human-readable summary of partition `idx`:
+First LBA of partition `idx` (inclusive). `null` for out-of-range.
+
+#### `partition.end(disk, idx) -> number`
+
+Last LBA (inclusive).
+
+#### `partition.size(disk, idx) -> number`
+
+Length in LBAs (`end - start + 1`).
+
+#### `partition.type(disk, idx) -> string`
+
+MBR type byte as 2 hex digits (`"83"` Linux, `"07"` NTFS, `"0c"` FAT32
+LBA) or the GPT type GUID. `null` for out-of-range.
+
+#### `partition.name(disk, idx) -> string`
+
+GPT partition name (UTF-16 decoded to ASCII); empty for MBR. `null`
+for out-of-range.
+
+#### `partition.list(disk) -> string`
+
+Newline-separated summary, one line per partition:
 
 ```
-"start=2048 size=131072 type=83 name=ROOT"
+0  start=2048     size=204800    type=0c  name=
+1  start=206848   size=8388608   type=83  name=root
 ```
 
-Fields:
+### Mutate
 
-- `start` — first LBA (inclusive)
-- `size`  — count in LBAs
-- `type`  — MBR type byte (0x83 for Linux) or GPT type UUID's first byte
-- `name`  — GPT partition name (empty for MBR)
+⚠ These write the partition table to disk immediately (no "apply"
+step). They don't touch filesystem contents, but repartitioning over
+a live filesystem makes it unreachable.
 
-The exact format is intentionally a single string rather than a
-structured object so scripts can `print()` it cleanly and parse with
-regex if needed.
+#### `partition.initGpt(disk) -> bool`
+
+Write a fresh empty GPT (primary at LBA 1, backup at the last LBA,
+protective MBR at LBA 0, CRC32s computed). Wipes any existing table.
+
+#### `partition.initMbr(disk) -> bool`
+
+Write a fresh empty MBR table (signature `0x55AA`, four zeroed
+primaries).
+
+#### `partition.create(disk, startLba, endLba, type, name) -> number`
+
+Add a partition spanning `[startLba, endLba]` (inclusive) with `type`
+byte (e.g. `131` = 0x83 Linux) and GPT `name` (ignored for MBR).
+Returns the new index, or `-1` on failure (table full, overlap, etc.).
+
+```cdo
+partition.initGpt(0);
+VAR idx = partition.create(0, 2048, 1050623, 131, "root");
+```
+
+#### `partition.delete(disk, idx) -> bool`
+
+Remove partition `idx`. Other partitions keep their indices (the slot
+is zeroed, not compacted).
+
+#### `partition.resize(disk, idx, newEndLba) -> bool`
+
+Change partition `idx`'s end LBA (start is fixed). `false` if the new
+end overlaps the next partition or runs off the disk.
 
 ### Behaviour
 
-- GPT primary header at LBA 1 is the only one consulted. If the
-  primary is corrupted but the backup at the last LBA is valid, this
-  API reports `"none"`. The C-level `canboot_part_list` does try the
-  backup; the cando surface doesn't expose that yet.
-- Up to 128 partitions per disk are enumerated.
+- GPT writes keep the primary (LBA 1) + backup (last LBA) headers in
+  sync with matching CRC32s, so the result passes `gdisk -l` / Linux
+  kernel validation.
+- `create` / `resize` validate overlap + disk bounds before writing;
+  on rejection the on-disk table is untouched.
+- Up to 128 GPT partitions / 4 MBR primaries.
 - For "what filesystem is on this partition", see [`fs.detect`](#fs).
 
 ---
@@ -201,6 +279,20 @@ Remove the file at `path`. Returns `true` if a file was removed or
 
 Doesn't recurse into directories.
 
+#### `fs.list(disk, part) -> string`
+
+Newline-separated names of every entry in the partition's root
+directory. Empty string if the partition is empty or the FS type
+isn't listable.
+
+Currently lists FAT32 (whole-disk) and NTFS roots; ext4 + ISO9660
+directory listing isn't wired into this call yet and returns an
+empty string.
+
+```cdo
+print(fs.list(1, 0));
+```
+
 ### Format
 
 #### `fs.mkfs(disk, part, type, label) -> bool`
@@ -290,20 +382,29 @@ print(names);   // INIT.CDO\nPROBE.PNG\n...
 
 ### `pci.count() -> number`
 
-Number of PCI functions discovered. Includes all buses / devices /
-functions populated at HAL init.
+Number of PCI functions discovered (all buses / devices / functions).
+
+### `pci.vendor(i) -> string|null`
+
+Vendor ID of function `i` as 4 hex digits (e.g. `"1af4"` virtio,
+`"8086"` Intel). `null` for out-of-range.
+
+### `pci.device(i) -> string|null`
+
+Device ID of function `i` as 4 hex digits.
+
+### `pci.class(i) -> string|null`
+
+Class triple `"CC:SC:PI"` — class code, subclass, programming
+interface, each 2 hex digits (e.g. `"06:00:00"` host bridge).
+
+### `pci.address(i) -> string|null`
+
+Bus/device/function address as `"BB:DD.F"`.
 
 ### `pci.list() -> string`
 
-Newline-separated lines, one per function, in the format:
-
-```
-BB:DD.F VEND:DEV class=CC:SC:PI
-```
-
-- `BB:DD.F` — bus / device / function in hex
-- `VEND:DEV` — vendor + device ID
-- `class=CC:SC:PI` — class / subclass / programming interface
+Newline-separated, one line per function: `address vendor:device class=CC:SC:PI`.
 
 ```
 00:00.0 1b36:0008 class=06:00:00
@@ -316,10 +417,12 @@ BB:DD.F VEND:DEV class=CC:SC:PI
 
 ### Behaviour
 
-- Up to 256 functions enumerated. The HAL scans buses 0..127 / devs
-  0..31 / funcs 0..7.
+- Up to 256 functions enumerated (buses 0..127 / devs 0..31 /
+  funcs 0..7).
+- Accessors (`vendor` / `device` / `class` / `address`) return `null`
+  for an out-of-range index; `pci.list()` dumps everything.
 - No BAR / capability inspection at the cando level — that lives in
-  the HAL for drivers. The cando surface is for "what's on the bus";
+  the HAL for drivers. The cando surface is "what's on the bus";
   drivers use the C API directly.
 
 ## See also
