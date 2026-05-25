@@ -1,6 +1,6 @@
 # Boot flow
 
-CanBoot has three loaders, all of which converge on a single
+CanBoot has four loaders, all of which converge on a single
 `kmain(struct boot_info *)`:
 
 1. **x86_64 BIOS** — GRUB chainloads our Multiboot2 ELF.
@@ -28,7 +28,7 @@ arch/x86_64/bootstrap.S receives control in protected mode (32-bit):
 arch/x86_64/bios_entry.c (now in 64-bit long mode):
   - parses MB2 tags via arch/x86_64/mb2_parse.c
   - populates boot_info from MB2 fb tag + mmap + cmdline tags
-  - calls kmain_body(&boot_info)
+  - calls kmain(&boot_info)
 ```
 
 ## x86_64 UEFI path
@@ -40,48 +40,56 @@ boot/uefi/efi_main.c entry:
   - InitializeLib (gnu-efi runtime initialisation)
   - LocateProtocol(GOP) for the framebuffer descriptor
   - Walk the EFI configuration table for the ACPI 2.0 RSDP
-  - AllocatePages(EfiLoaderData, ...) for the main stack
-    (keeps the main stack OUT of the .data section so we don't
-     blow past AAVMF / OVMF's load envelope)
   - GetMemoryMap (typically twice — once to size, once to populate)
-  - ExitBootServices(image, map_key)
-  - switch sp to the AllocatePages-allocated stack
-  - call kmain_body(&boot_info)
+  - ExitBootServices(image, map_key) (retried once if the map shifted)
+  - call kmain(&boot_info)
 ```
+
+`kmain()` (kernel/kmain.c) immediately switches off the firmware stack
+onto a static 256 KiB stack — the firmware stack is too small for
+Mbed TLS's >150 KiB TLS-handshake frames — before running any bring-up.
 
 ## aarch64 paths
 
 The UEFI path mirrors x86_64's almost exactly — same gnu-efi-derived
-entry, GOP / mmap / ACPI-or-FDT lookups, ExitBootServices.
+entry, GOP / mmap / ACPI-or-FDT lookups, ExitBootServices — then
+allocates a 32 MiB stack via `AllocatePages`, switches `sp` onto it,
+and calls `kmain(&boot_info)` (boot/uefi/efi_main_aarch64.c).
 
-The direct (`-kernel`) path skips all of that:
+The direct (`-kernel`) path skips all of that. QEMU honours the
+Linux/ARM64 boot protocol, loading the flat `.bin` at physical
+`0x40080000` (RAM base `0x40000000` + the 0x80000 `text_offset` in the
+boot header) with the **MMU off** — no virtual mapping:
 
 ```
-QEMU loads the flat .bin at the kernel virt address (per the linker
-script: 0xffff_0000_4008_0000 -> 0x4008_0000 physical on QEMU virt).
-
 arch/aarch64/bootstrap.S:
+  - stash the FDT pointer (x0 at entry) in x19
   - if started at EL2 (QEMU's default), drop to EL1 via the
-    ERET trick (set ELR/SPSR, eret)
+    ERET trick (set HCR_EL2.RW, SPSR/ELR, eret)
+  - enable EL1 FP/SIMD access (picolibc uses NEON)
+  - set sp to top of the static main stack
   - zero .bss
-  - set sp to top of static main stack
-  - br aarch64_kmain_entry
+  - restore the FDT pointer into x0 and bl aarch64_kmain_entry
 
 arch/aarch64/aarch64_entry.c:
-  - parse FDT via arch/aarch64/fdt.c (memory layout, PCI ECAM base)
-  - populate boot_info
-  - call kmain_body(&boot_info)
+  - parse FDT via arch/aarch64/fdt.c (memory layout into boot_info.mmap)
+  - stash the FDT pointer in boot_info.acpi_rsdp
+  - call kmain(&boot_info)
 ```
 
 ## Convergence point
 
-All four paths land in `kmain_body(struct boot_info *)`. Per-arch
-shims in `kernel/kmain.c` (x86_64) and `kernel/kmain_aarch64.c`
-(aarch64) call it. The body itself is identical across arches except
-for arch-conditional sections that handle GDT/IDT (x86_64 only) and
-virtio-gpu fallback (aarch64 only when AAVMF doesn't expose GOP).
+All four loaders call the single entry symbol
+`kmain(struct boot_info *)`, which has two arch-specific definitions:
+`kernel/kmain.c` (x86_64) and `kernel/kmain_aarch64.c` (aarch64). Each
+switches onto a large dedicated stack first, then runs the same
+bring-up sequence — the x86_64 path factors the body into a static
+`kmain_body()`; the aarch64 path inlines it. The sequence is identical
+across arches except for arch-conditional sections that handle GDT/IDT
+(x86_64 only) and virtio-gpu fallback (aarch64 only, when AAVMF doesn't
+expose GOP).
 
-`kmain_body` then runs the bring-up stages in order:
+`kmain` then runs the bring-up stages in order:
 
 | Step | What |
 |------|------|

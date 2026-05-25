@@ -21,7 +21,7 @@ qemu-system-x86_64 -cdrom canboot-x86_64-uefi.iso \
     -serial stdio -display none
 
 # aarch64 -kernel direct
-qemu-system-aarch64 -M virt -cpu cortex-a72 -m 512M \
+qemu-system-aarch64 -M virt -cpu cortex-a72 -m 256M \
     -kernel canboot-aarch64.bin -serial stdio -display none
 
 # aarch64 UEFI
@@ -60,6 +60,7 @@ with method-style calls.
 | [disk](api/disk.md)           | Raw block device enumeration, name, blockSize, blocks |
 | [display](api/display.md)     | Framebuffer painter: clear, fillRect, line, text, image, pixel, getPixel |
 | [env](api/env.md)             | Boot source + framebuffer + memory-map introspection |
+| [Error](api/error.md)         | Structured `(value, err)` error class (code / message / cause) |
 | [fb](api/fb.md)               | Framebuffer flush / present for explicit-scanout devices |
 | [file](api/file.md)           | Single-disk root-dir file ops (read/write/list/exists/size) |
 | [fmt](api/fmt.md)             | sprintf + binary little-endian packers + sine-wave generator |
@@ -71,7 +72,8 @@ with method-style calls.
 | [input](api/input.md)         | Keyboard input poll + blocking waitKey + flush |
 | [log](api/log.md)             | Levelled logging with timestamps |
 | [net](api/net.md)             | UDP echo + HTTP GET (raw socket-style) |
-| [partition](api/partition.md) | GPT + MBR partition table read |
+| [os](api/os.md)               | CanDo `os.*` drop-in (bare-metal semantics) |
+| [partition](api/partition.md) | GPT + MBR partition table read + write |
 | [pci](api/pci.md)             | PCI bus walk: count, list with vendor/device/class |
 | [random](api/random.md)       | RDRAND/ARMv8 RNG + jitter; bytes/int/uuid/hex |
 | [time](api/time.md)           | Monotonic clock: ms, us, ticks, sleep |

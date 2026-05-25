@@ -51,6 +51,9 @@ check 'selftest: init.cdo marker ok'
 check 'selftest: cando_open ok'
 check 'selftest: cando_dostring ok'
 check 'selftest: display test ok'
+
+# Script-side assertions — these strings are printed by initramfs/init.cdo
+# as it exercises each binding, not by the C selftest harness:
 check 'cando file.exists(init.cdo) = true'
 check 'cando net.udpEcho = cando-udp-probe'
 check 'cando crypto.sha256Hex(empty) = e3b0c44298fc...'

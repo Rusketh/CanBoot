@@ -46,7 +46,7 @@ qemu-system-x86_64 -bios /usr/share/OVMF/OVMF_CODE.fd \
 
 ```sh
 qemu-system-aarch64 \
-    -machine virt -cpu cortex-a72 -m 512M \
+    -machine virt -cpu cortex-a72 -m 256M \
     -kernel canboot-aarch64.bin \
     -serial stdio -display none -no-reboot
 ```

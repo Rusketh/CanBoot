@@ -33,7 +33,7 @@ speakers:
 ## Source lifecycle
 
 1. **`audio.newSource(bytes)`** triggers `decode_to_hal()` in
-   `cando_audio_lib.c`:
+   `cando_port/lib/audio.c`:
 
    - Sniff format: `RIFF...WAVE` -> WAV decoder (inline);
      `ID3` / MPEG frame sync -> `canboot_mp3_decode` from

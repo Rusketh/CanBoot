@@ -19,9 +19,10 @@ display, audio, cando VM).
             +-------- struct boot_info -------------+
                               |
                               v
-                  kernel/kmain*.c        (per-arch entry)
-                              |
-                              | calls into shared kmain_body()
+                  shared kmain() entry   (per-arch: kernel/kmain.c,
+                              |            kernel/kmain_aarch64.c)
+                              | switches to a large boot stack,
+                              | then runs the bring-up body
                               v
    +-----------------------------------------------------------+
    |  HAL bring-up (in order):                                 |
@@ -48,24 +49,33 @@ display, audio, cando VM).
 
 ## Address space
 
+Both architectures run with a flat (identity) address space — there's
+no higher-half kernel and no per-driver remapping, so MMIO BARs and the
+framebuffer are reachable at their physical addresses throughout.
+
 ### x86_64
 
-Kernel runs at the higher half:
+`arch/x86_64/bootstrap.S` enters long mode with the **first 4 GiB
+identity-mapped via 2 MiB pages** (PML4[0] → PDPT[0..3] → four page
+directories, each entry `present | writable | PS`).
 
 ```
-0xffffffff80100000   .text + .rodata + .data + .bss
-0xffffffff80000000   first 2 GiB of identity-mapped RAM
-0x00000000_00000000  whole 4 GiB also identity-mapped via 2 MiB pages
-                     (so MMIO BARs and the framebuffer are always
-                     reachable without per-driver mmu changes)
+0x00000000_00100000  kernel .text + .rodata + .data + .bss
+                     (KERNEL_LOAD_ADDR, linker/kernel.x86_64.ld)
+0x00000000_00000000  whole 4 GiB identity-mapped via 2 MiB pages
+                     (MMIO BARs + framebuffer reachable directly)
 ```
 
 ### aarch64
 
+The direct `-kernel` path (`arch/aarch64/bootstrap.S`) drops from EL2
+to EL1, enables FP/SIMD (picolibc needs it), and runs with the **MMU
+left off** — flat physical addressing.
+
 ```
-0xffff_0000_4008_0000  kernel virtual base (kernel ELF VMA)
-0xffff_0000_0000_0000  identity-mapped peripherals
-0x0000_0000_4000_0000  RAM physical base on QEMU virt
+0x00000000_40080000  kernel image (RAM base + 0x80000 text_offset,
+                     linker/kernel.aarch64.ld)
+0x00000000_40000000  RAM physical base on QEMU virt
 ```
 
 UEFI loaders do the unfortunate-but-spec-compliant thing where each
@@ -81,12 +91,13 @@ needs:
 
 | Field | What |
 |-------|------|
-| `magic`, `version`     | Sanity check |
-| `boot_source`          | `BIOS` or `UEFI` or `DIRECT` |
-| `cmdline`              | Boot command line |
+| `magic`, `version`     | Sanity check (`'CNBT'`, schema v1) |
+| `boot_source`          | `CANBOOT_BOOT_BIOS_MB2`, `CANBOOT_BOOT_UEFI`, or `CANBOOT_BOOT_UNKNOWN` (the aarch64 direct-kernel path reuses `BIOS_MB2`) |
+| `flags`                | Reserved for future use |
+| `fb`                   | Framebuffer descriptor (addr, w, h, pitch, bpp, channel masks) |
 | `mmap[]`, `mmap_count` | Memory map (usable / reserved / ACPI / etc.) |
-| `fb`                   | Framebuffer descriptor (addr, w, h, pitch, channel masks) |
-| `acpi_rsdp`            | ACPI root pointer (x86_64) or FDT base (aarch64) |
+| `acpi_rsdp`            | ACPI RSDP (x86_64) or FDT base (aarch64) |
+| `cmdline_phys`         | Physical address of the boot command line |
 
 Loaders fill it in before `ExitBootServices` / before jumping out of
 the GRUB stage; the kernel side reads it once and the values are

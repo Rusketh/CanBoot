@@ -1,10 +1,10 @@
 # Adding a new cando library
 
-A cando library is a C file under `cando_port/` that exposes one or
+A cando library is a C file under `cando_port/lib/` that exposes one or
 more functions as methods on a global cando object. New libraries
 land in a few hundred lines of code in a single PR.
 
-## The cando_<name>_lib.c shape
+## The cando_port/lib/&lt;name&gt;.c shape
 
 ```c
 #include "core/value.h"
@@ -68,26 +68,33 @@ side — embedded NULs are fine.
 
 ## Registering the library
 
-Three places to add a reference, all in `tests/selftest/cando.c`:
+Two references in `tests/selftest/cando.c` — a forward declaration and
+a call inside `cando_selftest()`:
 
 ```c
-// Forward declaration:
+// Forward declaration (near the top, with the others):
 void canboot_cando_open_thinglib(CandoVM *vm);
 
-// In cando_selftest(), pick the right block:
+// In cando_selftest(), in the appropriate milestone block:
 canboot_cando_open_thinglib(vm);
 printf("selftest: thing lib registered\n");
 ```
 
-Then in `CMakeLists.txt`, add the source file to:
+Then add the source file to the **single** `CANBOOT_PORTABLE_SOURCES`
+list in `cmake/sources.cmake` (with the other `cando_port/lib/*.c`
+entries):
 
-1. The `CANBOOT_KERNEL_COMMON` list (~line 30) — that gets it into
-   the x86_64 kernel ELF.
-2. The aarch64 EFI source list near the bottom of `CMakeLists.txt`.
-3. The x86_64 EFI source list in the middle of `CMakeLists.txt`.
+```cmake
+set(CANBOOT_PORTABLE_SOURCES
+    ...
+    cando_port/lib/thing.c
+    ...)
+```
 
-Three lists are unfortunate; once we have a proper module system
-this'll collapse. For now, copy the pattern.
+That one list feeds every target — the BIOS/x86_64 kernel ELF (via
+`CANBOOT_KERNEL_COMMON`) and both UEFI loaders (x86_64 inherits
+`CANBOOT_KERNEL_COMMON`; aarch64 pulls `CANBOOT_PORTABLE_SOURCES`
+directly). No per-build duplication.
 
 ## Testing
 
@@ -116,11 +123,11 @@ don't need this.
 
 | Lib | What it shows |
 |-----|---------------|
-| `cando_audio_lib.c` | Multi-state objects (Source pool) + per-instance state + overloaded argc dispatch |
-| `cando_image_lib.c` | Vendored single-header decoder; opaque handles; binary input via `libutil_arg_str_at` |
-| `cando_crypto_lib.c` | Binary output (returns 32-byte SHA digests as cando strings) |
-| `cando_fs_lib.c`     | Dispatching by filesystem type detected at runtime |
-| `cando_fmt_lib.c`    | Format helpers; building binary blobs via `fmt.u16le`/`u32le` |
+| `cando_port/lib/audio.c`  | Multi-state objects (Source pool) + per-instance state + overloaded argc dispatch |
+| `cando_port/lib/image.c`  | Vendored single-header decoder; opaque handles; binary input via `libutil_arg_str_at` |
+| `cando_port/lib/crypto.c` | Binary output (returns 32-byte SHA digests as cando strings) |
+| `cando_port/lib/fs.c`     | Dispatching by filesystem type detected at runtime |
+| `cando_port/lib/fmt.c`    | Format helpers; building binary blobs via `fmt.u16le`/`u32le` |
 
 ## Picking a name
 
