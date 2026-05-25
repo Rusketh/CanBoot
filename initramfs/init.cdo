@@ -105,6 +105,14 @@ print("cando net.httpGet =", net.httpGet("10.0.2.2", 8080, "/"));
 // test CA (SNI defaults to "canboot-test" which matches the cert).
 print("cando tls.httpsGet =", tls.httpsGet("10.0.2.2", 8443, "/"));
 
+// DNS + TLS 1.3 chain: resolve "canboot.test" via the lwIP DNS resolver
+// (fixed-answer sidecar -> 10.0.2.2), then complete a TLS handshake to
+// the https sidecar by hostname. The Mbed TLS client preset negotiates
+// 1.3 with the python ssl server; tls.version() reports the result.
+print("cando net.lookup(canboot.test) =", net.lookup("canboot.test"));
+print("cando tls via dns =", tls.httpsGet("canboot.test", 8443, "/"));
+print("cando tls.version =", tls.version());
+
 print("cando sys libs end");
 
 // ---- Milestone 14: crypto libs (random / crypto / hex / base64) -----

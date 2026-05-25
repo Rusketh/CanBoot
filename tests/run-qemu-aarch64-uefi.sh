@@ -226,6 +226,10 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'selftest: handshake ok'
         check 'selftest: https get ok'
         check 'selftest: session resumption ok'
+
+        check 'selftest: tls1.3 handshake ok'
+
+        check 'selftest: tls1.3 https get ok'
         check 'selftest: tls test ok'
         check 'selftest: init.cdo marker ok'
         check 'selftest: disk test ok'
@@ -246,6 +250,10 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'cando net.udpEcho = cando-udp-probe'
         check 'cando net.httpGet = canboot-hello'
         check 'cando tls.httpsGet = canboot-secure'
+        check 'cando tls via dns = canboot-secure'
+
+        check 'cando tls.version = TLSv1.3'
+
         check 'cando sys libs end'
         check 'selftest: crypto libs registered'
         check 'cando hex.encode(canboot) = 63616e626f6f74'

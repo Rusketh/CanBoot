@@ -66,6 +66,15 @@ Port:
 platform timing callback; the BIO layer handles its own connect /
 handshake timeouts against the TSC clock.
 
+Both TLS 1.2 and TLS 1.3 are enabled (PSA crypto + HKDF + ECDH). The TLS
+selftest (`tests/selftest/tls.c`) runs a 1.2 handshake with ticket-based
+resumption and then a forced TLS 1.3 handshake + HTTPS GET against the
+sidecar; cando's `tls.httpsGet` uses the default client preset, which
+negotiates 1.3 with a 1.3-capable server (`tls.version()` reports the
+negotiated protocol). An earlier heap-corruption seen with TLS 1.3 on the
+UEFI link was a symptom of the old 16 MiB static heap and disappeared once
+the heap was backed by the usable mmap regions.
+
 ## DHCP at boot
 
 `tests/selftest/net.c` is what kicks DHCP. The netif starts in

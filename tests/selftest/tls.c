@@ -208,11 +208,9 @@ void tls_selftest(void) {
     mbedtls_ssl_conf_rng(&conf, mbedtls_ctr_drbg_random, &drbg);
     mbedtls_ssl_conf_session_tickets(&conf, MBEDTLS_SSL_SESSION_TICKETS_ENABLED);
 
-    /* Force TLS 1.2 only - TLS 1.3 + tickets exposed a heap-corruption
-     * issue inside the UEFI link of Mbed TLS that needs its own
-     * future work; pinning to 1.2 keeps the TLS selftest closed-loop
-     * today. TLS 1.2 with tickets still exercises full PKI + AEAD +
-     * ticket-based resumption. */
+    /* Pin the first two handshakes to TLS 1.2 so the ticket-based
+     * resumption path (a 1.2 feature) is exercised deterministically;
+     * a forced TLS 1.3 handshake follows further down. */
     mbedtls_ssl_conf_min_tls_version(&conf, MBEDTLS_SSL_VERSION_TLS1_2);
     mbedtls_ssl_conf_max_tls_version(&conf, MBEDTLS_SSL_VERSION_TLS1_2);
 
@@ -271,6 +269,42 @@ void tls_selftest(void) {
     }
     printf("selftest: session resumption ok (hs1=%u us hs2=%u us)\n",
            hs1_us, hs2_us);
+    graceful_close(&ssl, &bio);
+
+    /* ---- Handshake #3: forced TLS 1.3 ------------------------------- *
+     * Retune the same config to TLS 1.3 only and run a fresh handshake +
+     * HTTPS GET against the sidecar (Python's ssl server negotiates 1.3).
+     * Exercises the 1.3 key schedule (HKDF), X25519/ECDHE key share, and
+     * the AEAD record layer - a distinct code path from the 1.2 test. */
+    mbedtls_ssl_conf_min_tls_version(&conf, MBEDTLS_SSL_VERSION_TLS1_3);
+    mbedtls_ssl_conf_max_tls_version(&conf, MBEDTLS_SSL_VERSION_TLS1_3);
+    mbedtls_ssl_free(&ssl);
+    mbedtls_ssl_init(&ssl);
+
+    const char *version3 = NULL, *cipher3 = NULL;
+    uint32_t hs3_us = 0;
+    rc = do_handshake(&ssl, &conf, &ca, &drbg, &bio, &dst,
+                      NULL, &version3, &cipher3, &hs3_us);
+    if (rc != 0) goto out;
+    printf("selftest: tls1.3 handshake ok proto=%s cipher=%s in %u us\n",
+           version3 ? version3 : "?", cipher3 ? cipher3 : "?", hs3_us);
+    if (!version3 || strcmp(version3, "TLSv1.3") != 0) {
+        printf("selftest: FAIL negotiated %s, expected TLSv1.3\n",
+               version3 ? version3 : "?");
+        goto out;
+    }
+
+    char body3[256];
+    int n3 = do_http_get(&ssl, body3, sizeof(body3));
+    if (n3 < 0) goto out;
+    char *cr3 = body3;
+    while (*cr3 && !(cr3[0] == '\r' && cr3[1] == '\n' && cr3[2] == '\r' && cr3[3] == '\n')) cr3++;
+    const char *payload3 = *cr3 ? cr3 + 4 : body3;
+    if (!strstr(payload3, HTTPS_BODY)) {
+        printf("selftest: FAIL tls1.3 https body mismatch\n");
+        goto out;
+    }
+    printf("selftest: tls1.3 https get ok\n");
     graceful_close(&ssl, &bio);
 
     printf("selftest: tls test ok\n");
