@@ -12,6 +12,9 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "hal/disk.h"
 #include "fs/iso9660.h"
@@ -124,6 +127,67 @@ static void fat32_subdir_test(struct canboot_fat32 *fs) {
            a1.count, a2.count);
 }
 
+/* Exercise the POSIX directory + path surface (fs/vfs.c) against the
+ * primary volume - the same writable FAT32 disk. Proves opendir/readdir,
+ * mkdir/rmdir, rename, unlink and chdir/getcwd route through the FS HAL
+ * instead of returning ENOSYS. */
+static void posix_fs_test(struct canboot_disk *d) {
+    /* Clean up any leftovers from a prior boot. */
+    unlink("/pdir/f.bin");
+    unlink("/pdir/g.bin");
+    rmdir("/pdir/kid");
+    rmdir("/pdir");
+
+    if (mkdir("/pdir", 0755) != 0) { printf("selftest: FAIL posix mkdir /pdir\n"); return; }
+    if (mkdir("/pdir/kid", 0755) != 0) { printf("selftest: FAIL posix mkdir /pdir/kid\n"); return; }
+
+    /* Create a file with the FAT engine so unlink/rename have something
+     * to act on (the POSIX open() path is read-only). */
+    struct canboot_fat32 fs;
+    if (canboot_fat32_open(d, &fs))
+        canboot_fat32_write_path(&fs, "/pdir/f.bin", "posix", 5);
+
+    char cwd[64] = {0};
+    if (!getcwd(cwd, sizeof(cwd)) || strcmp(cwd, "/") != 0) {
+        printf("selftest: FAIL posix getcwd start = '%s'\n", cwd); return;
+    }
+    if (chdir("/pdir") != 0) { printf("selftest: FAIL posix chdir\n"); return; }
+    if (!getcwd(cwd, sizeof(cwd)) || strcmp(cwd, "/pdir") != 0) {
+        printf("selftest: FAIL posix getcwd after chdir = '%s'\n", cwd); return;
+    }
+
+    /* opendir/readdir: relative path resolves against cwd (/pdir). */
+    DIR *dir = opendir(".");
+    int saw_kid = 0, saw_file = 0, entries = 0;
+    if (dir) {
+        struct dirent *e;
+        while ((e = readdir(dir)) != NULL) {
+            entries++;
+            if (e->d_type == DT_DIR && strcmp(e->d_name, "KID") == 0) saw_kid = 1;
+            if (e->d_type == DT_REG && strcmp(e->d_name, "F.BIN") == 0) saw_file = 1;
+        }
+        closedir(dir);
+    }
+    if (!saw_kid || !saw_file) {
+        printf("selftest: FAIL posix readdir (kid=%d file=%d entries=%d)\n",
+               saw_kid, saw_file, entries);
+        chdir("/"); return;
+    }
+
+    /* rename + unlink the file via POSIX (absolute paths). */
+    if (rename("/pdir/f.bin", "/pdir/g.bin") != 0) {
+        printf("selftest: FAIL posix rename\n"); chdir("/"); return;
+    }
+    if (unlink("/pdir/g.bin") != 0) {
+        printf("selftest: FAIL posix unlink\n"); chdir("/"); return;
+    }
+    if (chdir("/") != 0) { printf("selftest: FAIL posix chdir /\n"); return; }
+    if (rmdir("/pdir/kid") != 0 || rmdir("/pdir") != 0) {
+        printf("selftest: FAIL posix rmdir\n"); return;
+    }
+    printf("selftest: posix fs surface ok (%d entries)\n", entries);
+}
+
 static bool try_fat32(struct canboot_disk *d, char *out, uint32_t *out_size,
                       bool *out_writable, const char **out_disk) {
     struct canboot_fat32 fs;
@@ -163,6 +227,7 @@ static bool try_fat32(struct canboot_disk *d, char *out, uint32_t *out_size,
         }
 
         fat32_subdir_test(&fs);
+        posix_fs_test(d);
     }
     return true;
 }

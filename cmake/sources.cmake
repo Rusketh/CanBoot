@@ -88,6 +88,7 @@ set(CANBOOT_PORTABLE_SOURCES
     fs/ntfs.c
     fs/iso9660.c
     fs/fat32.c
+    fs/vfs.c
 
     # Device-class HAL: works on every bus + transport canboot
     # supports (PCI/PCIe via virtio-pci, virtio-* devices, framebuffer

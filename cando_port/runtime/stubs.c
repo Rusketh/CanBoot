@@ -75,23 +75,36 @@ char *realpath(const char *path, char *out) {
     if (out) { strncpy(out, path, 4095); out[4095] = '\0'; return out; }
     return (char *)path;
 }
+/* The path + directory POSIX surface is backed by the VFS in fs/vfs.c
+ * (strong definitions) wherever the FS drivers are linked. These weak
+ * fallbacks keep the minimal aarch64 direct-kernel target - which links
+ * neither the FS drivers nor cando - returning the historical ENOSYS. */
+__attribute__((weak))
 char *getcwd(char *buf, size_t size) {
     if (buf && size > 0) { buf[0] = '/'; if (size > 1) buf[1] = '\0'; return buf; }
     STUB_FAIL_ERRNO(NULL, EINVAL);
 }
 int access(const char *p, int m) { (void)p; (void)m; STUB_FAIL_ERRNO(-1, ENOENT); }
+__attribute__((weak))
 int rename(const char *a, const char *b) { (void)a; (void)b; STUB_FAIL_ERRNO(-1, ENOSYS); }
+__attribute__((weak))
 int mkdir(const char *p, mode_t m) { (void)p; (void)m; STUB_FAIL_ERRNO(-1, ENOSYS); }
+__attribute__((weak))
 int rmdir(const char *p) { (void)p; STUB_FAIL_ERRNO(-1, ENOSYS); }
 int chmod(const char *p, mode_t m) { (void)p; (void)m; STUB_FAIL_ERRNO(-1, ENOSYS); }
 int lstat(const char *p, struct stat *s) { (void)p; (void)s; STUB_FAIL_ERRNO(-1, ENOENT); }
+__attribute__((weak))
 int chdir(const char *p) { (void)p; STUB_FAIL_ERRNO(-1, ENOSYS); }
 
 /* ---- Directory enumeration ------------------------------------------ */
 
+__attribute__((weak))
 DIR *opendir(const char *name)  { (void)name; errno = ENOSYS; return NULL; }
+__attribute__((weak))
 int  closedir(DIR *dirp)        { (void)dirp; return 0; }
+__attribute__((weak))
 struct dirent *readdir(DIR *dirp) { (void)dirp; return NULL; }
+__attribute__((weak))
 void rewinddir(DIR *dirp)       { (void)dirp; }
 
 /* ---- Process / fork --------------------------------------------------- */

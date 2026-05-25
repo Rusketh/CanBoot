@@ -520,8 +520,13 @@ int open(const char *path, int flags, ...) {
     g_files[slot].pos  = 0;
     return CANBOOT_FILE_FD_BASE + slot;
 }
+/* stat + unlink are weak: the VFS in fs/vfs.c provides strong, FS-backed
+ * versions on the full images; this keeps the minimal aarch64 direct
+ * target (no FS drivers linked) returning ENOSYS. */
+__attribute__((weak))
 int stat(const char *path, struct stat *st)        { (void)path; (void)st; errno = ENOSYS; return -1; }
 int link(const char *a, const char *b)             { (void)a; (void)b; errno = ENOSYS; return -1; }
+__attribute__((weak))
 int unlink(const char *p)                          { (void)p; errno = ENOSYS; return -1; }
 int kill(pid_t pid, int sig)                       { (void)pid; (void)sig; errno = EINVAL; return -1; }
 pid_t getpid(void)                                 { return 1; }
