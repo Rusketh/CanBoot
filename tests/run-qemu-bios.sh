@@ -83,6 +83,7 @@ qemu-system-x86_64 \
     -display none \
     -no-reboot \
     -m 256M \
+    -smp 2 \
     -nographic \
     >/dev/null 2>&1 &
 QEMU_PID=$!
@@ -263,6 +264,9 @@ PY
         check 'selftest: self-test ok'
 
         check 'selftest: preemption ok'
+
+
+        check 'selftest: smp observed 2 cpu(s)'
 
         check 'selftest: big-heap'
         check 'selftest: dhcp lease'

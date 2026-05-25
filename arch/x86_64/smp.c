@@ -172,8 +172,36 @@ static void discover_cpus(uint64_t rsdp_addr) {
 
 /* ---- AP C entry ------------------------------------------------------ */
 
+extern void canboot_idt_load(void);     /* arch/x86_64/idt.c */
+extern void canboot_ap_cpu_setup(void); /* kernel/kmain.c: SSE + FS_BASE */
+
+/* Reload the kernel GDT (bootstrap.S gdt64) on this AP and far-return to
+ * CS=0x08, so the AP's code/stack selectors match the shared IDT gates
+ * (whose selector was captured from the BSP's CS=0x08). The AP arrived
+ * here on the trampoline's own GDT where 0x08 is a 32-bit segment, which
+ * an interrupt entry would reject. */
+static void ap_load_segments(void) {
+    __asm__ volatile (
+        "lgdt gdt64_ptr(%%rip)\n\t"
+        "pushq $0x08\n\t"
+        "leaq 1f(%%rip), %%rax\n\t"
+        "pushq %%rax\n\t"
+        "lretq\n\t"
+        "1:\n\t"
+        "movw $0x10, %%ax\n\t"
+        "movw %%ax, %%ds\n\t"
+        "movw %%ax, %%es\n\t"
+        "movw %%ax, %%ss\n\t"
+        "movw %%ax, %%gs\n\t"
+        ::: "rax", "memory");
+}
+
 /* Called (64-bit) from the trampoline tail with a private stack. */
 __attribute__((noreturn)) void canboot_ap_main(void) {
+    ap_load_segments();          /* CS=0x08 to match the shared IDT gates */
+    canboot_idt_load();          /* point this CPU's IDTR at the table    */
+    canboot_ap_cpu_setup();      /* SSE/SSE2 + FS_BASE for _Thread_local  */
+
     canboot_lapic_enable_this_cpu();
     canboot_lapic_timer_start_this_cpu();
 

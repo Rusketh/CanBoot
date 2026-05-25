@@ -112,11 +112,16 @@ GPT/MBR partition tables.
 thread scheduler (`rt/sched`) with a full register context switch behind
 the POSIX pthread surface, and a heap carved from the largest usable
 region in `boot_info->mmap[]` (hundreds of MiB under QEMU; serialised
-behind the preempt/SMP allocator guard). The x86_64 LAPIC timer
-(preemption timebase) and SMP bring-up (ACPI MADT discovery + an AP
-trampoline, global-run-queue scheduler) are wired but gated/dormant
-pending the reentrancy hardening of the I/O stack; see
-`rt/sched/include/sched/sched.h` and `arch/x86_64/smp.h`.
+behind the preempt/SMP allocator guard). Forced timer preemption is on:
+the x86_64 LAPIC timer and the aarch64 GICv2 + virtual generic timer both
+drive `canboot_sched_on_tick`. x86_64 SMP boots the Application Processors
+by default on the BIOS kernel (ACPI MADT discovery + AP trampoline; each
+AP reloads the GDT/IDT and repeats per-CPU SSE + FS_BASE setup, then joins
+the global run queue) — a selftest confirms work runs on >1 CPU. SMP is
+not enabled on the UEFI image: the trampoline's absolute (`movabs`)
+relocations are incompatible with the gnu-efi PIC link, so that build runs
+uniprocessor. See `rt/sched/include/sched/sched.h` and
+`arch/x86_64/smp.h`.
 
 **Network + TLS** — lwIP 2.2.1 in NO_SYS mode over virtio-net (DHCP /
 UDP / TCP / HTTP); Mbed TLS 3.6.x LTS with hardware entropy

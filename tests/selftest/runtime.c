@@ -17,6 +17,11 @@
 
 #include "pthread.h"
 #include "hal/console.h"
+#include "sync/cpu.h"
+
+/* Bitmask of logical CPUs the workers were observed running on. With SMP
+ * APs online and a shared run queue, work lands on more than one CPU. */
+static volatile unsigned g_cpus_seen;
 
 #define WORKERS         4
 #define INCS_PER_WORKER 1000
@@ -28,6 +33,8 @@ static volatile int    g_alloc_fail;   /* set if a heap readback is wrong */
 static void *worker(void *arg) {
     int id = (int)(intptr_t)arg;
     for (int i = 0; i < INCS_PER_WORKER; i++) {
+        __atomic_or_fetch(&g_cpus_seen, 1u << (canboot_cpu_id() & 31u),
+                          __ATOMIC_RELAXED);
         /* Hammer the allocator OUTSIDE the mutex so all workers contend on
          * the heap concurrently. With preemption on, a timer switch landing
          * mid-malloc would corrupt the (single-thread-built) picolibc free
@@ -274,6 +281,11 @@ void runtime_selftest(void) {
     }
     printf("selftest: pthread counter=%d (expected %d) heap-race ok\n",
            g_counter, expected);
+
+    unsigned mask = g_cpus_seen;
+    unsigned ncpu = 0;
+    for (unsigned m = mask; m; m &= m - 1) ncpu++;
+    printf("selftest: smp observed %u cpu(s) (mask=0x%x)\n", ncpu, mask);
 
     hal_console_write("selftest: self-test ok\n");
 }

@@ -233,7 +233,6 @@ PY
         check 'selftest: self-test ok'
 
         check 'selftest: preemption ok'
-
         check 'selftest: big-heap'
         check 'selftest: dhcp lease'
         check 'selftest: udp echo ok'
