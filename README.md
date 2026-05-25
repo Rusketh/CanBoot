@@ -200,14 +200,21 @@ Prebuilt nightly and stable images are on the
 ## Status
 
 CanBoot boots to a `/init.cdo` prompt on both firmware paths on x86_64
-and on aarch64. The HAL covers serial, input, disk (virtio-blk + AHCI),
-framebuffer (with pixel readback assertions in CI), virtio-gpu on
-aarch64, virtio-net, and audio (Intel HDA + virtio-snd). Filesystems
-cover ISO9660 / FAT32 / ext4 / NTFS read+write including mkfs. The
-network stack runs DHCP, TCP/UDP, HTTP, and TLS 1.2 with session
-resumption against pinned CAs. The CanDo VM runs unmodified with ~25
-bare-metal bindings registered. CI matrices BIOS, UEFI x86_64, and
-both aarch64 paths to green on every push.
+and on aarch64. The HAL covers serial, input, disk (virtio-blk, AHCI,
+NVMe), framebuffer (with pixel readback assertions in CI), virtio-gpu on
+aarch64, NICs (virtio-net, e1000, rtl8139, pcnet), and audio (Intel HDA +
+virtio-snd). The heap is carved from the usable `boot_info` memory map
+(hundreds of MiB). Filesystems cover ISO9660 / FAT32 / ext4 / NTFS
+read+write including mkfs and **nested directories** (mkdir/rmdir/rename/
+readdir), exposed through the cando `fs.*` surface and the POSIX directory
+API. The network stack runs DHCP, **DNS**, TCP/UDP, HTTP, and **TLS 1.2
+and 1.3** with session resumption against pinned CAs. Scheduling is
+**preemptive** on both arches (x86_64 LAPIC + aarch64 GICv2/generic
+timer); the BIOS kernel boots **SMP** Application Processors. The CanDo VM
+runs unmodified with a working **tracing JIT** on x86_64 and the
+**gui.cdo** widget toolkit; ~25 bare-metal bindings are registered. CI
+matrices BIOS, UEFI x86_64, both aarch64 paths, the NIC models, and NVMe
+to green on every push.
 
 Chronology lives in `git log` and on the
 [Releases page](https://github.com/Rusketh/CanBoot/releases).
