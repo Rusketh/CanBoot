@@ -294,6 +294,12 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
             check 'cando fs.read new.txt = freshly-created-by-canboot'
             check 'cando fs.delete new.txt = true'
             check 'cando fs.read new.txt after delete = null'
+            # NTFS subdirectory tree (mkdir + file in subdir + file rename
+            # via link+unlink + listing) through libntfs-3g.
+            check 'cando ntfs subdir read = ntfs-subdir-2026'
+            check 'cando ntfs subdir rename = true'
+            check 'cando ntfs subdir read2 = ntfs-subdir-2026'
+            check 'cando ntfs rmdir = true'
             # mkntfs (vendored libntfs-3g/ntfsprogs) ran end-to-end
             # on the test image. After the format the volume looks
             # freshly mkntfs'd from canboot - we re-detect as NTFS
@@ -343,6 +349,10 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
             check 'cando fs.detect ext4 after mkfs = ext4'
             check 'cando fs.write ext4 after mkfs = true'
             check 'cando fs.read ext4 after mkfs = canboot-ext4-postformat-2026'
+            # ext4 subdirectory tree (mkdir + file in subdir + rename +
+            # listing) through lwext4.
+            check 'cando ext4 subdir read = ext4-subdir-2026'
+            check 'cando ext4 rmdir = true'
 
             # Host-side validation: debugfs dumps postfmt.txt from
             # the canboot-formatted ext4 volume and the content must

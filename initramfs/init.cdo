@@ -213,6 +213,23 @@ print("cando partition.count(0) =", partition.count(0));
 // no valid partition entry to point at - we get "unknown".
 print("cando fs.detect(0,0) =", fs.detect(0, 0));
 
+// FAT32 subdirectory tree on the boot volume (whole-disk FAT32). Build
+// /cdir/sub, write a file into it, rename, list, then tear down. Cleans
+// up leftovers from a prior boot of the same image first.
+fs.delete(0, 0, "/cdir/sub/g.txt");
+fs.delete(0, 0, "/cdir/sub/f.txt");
+fs.rmdir(0, 0, "/cdir/sub");
+fs.rmdir(0, 0, "/cdir");
+print("cando fs.mkdir fat =", fs.mkdir(0, 0, "/cdir"));
+fs.mkdir(0, 0, "/cdir/sub");
+fs.write(0, 0, "/cdir/sub/f.txt", "cdo-subdir-2026");
+fs.rename(0, 0, "/cdir/sub/f.txt", "/cdir/sub/g.txt");
+print("cando fs.read fat subdir =", fs.read(0, 0, "/cdir/sub/g.txt"));
+print("cando fs.list fat subdir =", fs.list(0, 0, "/cdir/sub"));
+fs.delete(0, 0, "/cdir/sub/g.txt");
+fs.rmdir(0, 0, "/cdir/sub");
+print("cando fs.rmdir fat =", fs.rmdir(0, 0, "/cdir"));
+
 // Multi-disk: if QEMU attached a second disk (NTFS test image), the
 // virtio-blk driver enumerates it as disk 1. We exercise libntfs-3g
 // read against it. The image is whole-disk NTFS (no partition table)
@@ -241,6 +258,19 @@ IF (disk.count() >= 2) {
     print("cando fs.read new.txt =", fs.read(1, 0, "/new.txt"));
     print("cando fs.delete new.txt =", fs.delete(1, 0, "/new.txt"));
     print("cando fs.read new.txt after delete =", fs.read(1, 0, "/new.txt"));
+    // NTFS subdirectory tree via libntfs-3g: mkdir, write a file into it,
+    // list, rename (file rename = link + unlink), re-read, then remove.
+    fs.delete(1, 0, "/ndir/g.txt");
+    fs.delete(1, 0, "/ndir/f.txt");
+    fs.rmdir(1, 0, "/ndir");
+    fs.mkdir(1, 0, "/ndir");
+    fs.write(1, 0, "/ndir/f.txt", "ntfs-subdir-2026");
+    print("cando ntfs subdir read =", fs.read(1, 0, "/ndir/f.txt"));
+    print("cando ntfs subdir list =", fs.list(1, 0, "/ndir"));
+    print("cando ntfs subdir rename =", fs.rename(1, 0, "/ndir/f.txt", "/ndir/g.txt"));
+    print("cando ntfs subdir read2 =", fs.read(1, 0, "/ndir/g.txt"));
+    fs.delete(1, 0, "/ndir/g.txt");
+    print("cando ntfs rmdir =", fs.rmdir(1, 0, "/ndir"));
     // fs.mkfs ntfs drives the vendored mkntfs end-to-end. On success
     // the volume is freshly reformatted (prior probe.txt is gone) and
     // we re-detect it as NTFS, then write a fresh marker so the
@@ -275,6 +305,16 @@ IF (disk.count() >= 3) {
     print("cando fs.detect ext4 after mkfs =", fs.detect(2, 0));
     print("cando fs.write ext4 after mkfs =", fs.write(2, 0, "/postfmt.txt", "canboot-ext4-postformat-2026"));
     print("cando fs.read ext4 after mkfs =", fs.read(2, 0, "/postfmt.txt"));
+    // ext4 subdirectory tree via lwext4: mkdir, write, rename, list, remove.
+    fs.mkdir(2, 0, "/edir");
+    fs.mkdir(2, 0, "/edir/sub");
+    fs.write(2, 0, "/edir/sub/f.txt", "ext4-subdir-2026");
+    fs.rename(2, 0, "/edir/sub/f.txt", "/edir/sub/g.txt");
+    print("cando ext4 subdir read =", fs.read(2, 0, "/edir/sub/g.txt"));
+    print("cando ext4 subdir list =", fs.list(2, 0, "/edir/sub"));
+    fs.delete(2, 0, "/edir/sub/g.txt");
+    fs.rmdir(2, 0, "/edir/sub");
+    print("cando ext4 rmdir =", fs.rmdir(2, 0, "/edir"));
 } ELSE {
     print("cando disk2 absent");
 }

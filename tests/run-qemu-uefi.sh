@@ -290,6 +290,12 @@ PY
         check 'cando fmt.sprintf = hex=1234 dec=42 str=hi'
         check 'cando ext libs end'
         check 'selftest: partition+fs libs registered'
+        check 'cando fs.read fat subdir = cdo-subdir-2026'
+
+        check 'cando fs.list fat subdir = G.TXT'
+
+        check 'cando fs.rmdir fat = true'
+
         check 'cando part libs end'
 
         # Pointer probe (see run-qemu-bios.sh). Reaching the probe is the

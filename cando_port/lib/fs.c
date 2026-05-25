@@ -47,6 +47,9 @@ int canboot_ntfs3g_write (int handle, const char *path, const void *buf, int len
 int canboot_ntfs3g_create(int handle, const char *path, const void *buf, int len);
 int canboot_ntfs3g_delete(int handle, const char *path);
 int canboot_ntfs3g_label (int handle, char *out, int cap);
+int canboot_ntfs3g_mkdir (int handle, const char *path);
+int canboot_ntfs3g_list  (int handle, const char *path, char *out, int cap);
+int canboot_ntfs3g_rename(int handle, const char *oldp, const char *newp);
 int canboot_ntfs_format  (struct canboot_disk *d, uint64_t off, uint64_t sz, const char *label);
 
 /* lwext4 glue (cando_port/vendor_glue/lwext4/glue.c). Block offsets here
@@ -57,6 +60,10 @@ int canboot_ext4_read  (int handle, const char *path, void *buf, int len);
 int canboot_ext4_write (int handle, const char *path, const void *buf, int len);
 int canboot_ext4_delete(int handle, const char *path);
 int canboot_ext4_label (int handle, char *out, int cap);
+int canboot_ext4_mkdir (int handle, const char *path);
+int canboot_ext4_rmdir (int handle, const char *path);
+int canboot_ext4_rename(int handle, const char *oldp, const char *newp);
+int canboot_ext4_list  (int handle, const char *path, char *out, int cap);
 int canboot_ext4_format(struct canboot_disk *d, uint64_t lba_off, uint64_t lba_cnt,
                         const char *label, int fs_type);
 
@@ -259,12 +266,8 @@ static int f_read(CandoVM *vm, int argc, CandoValue *args) {
          * test image is whole-disk FAT32). Multi-partition FAT32
          * mounts would need a partition-relative read shim. */
         if (p.start_lba != 0) goto fail;
-        /* FAT32 root-dir lookup expects bare 8.3 names; strip the
-         * leading '/' that scripts pass in to match the libntfs-3g
-         * / lwext4 conventions. */
-        const char *fat_name = (name[0] == '/') ? name + 1 : name;
         uint32_t got = 0;
-        if (canboot_fat32_read_root_file(&fs, fat_name, buf, sizeof(buf) - 1, &got) > 0) {
+        if (canboot_fat32_read_path(&fs, name, buf, sizeof(buf) - 1, &got) > 0) {
             buf[got < sizeof(buf) - 1 ? got : sizeof(buf) - 1] = '\0';
             CandoString *s = cando_string_new(buf, got);
             cando_vm_push(vm, cando_string_value(s));
@@ -340,9 +343,8 @@ static int f_write(CandoVM *vm, int argc, CandoValue *args) {
     const char *t = detect_fs(d, p.start_lba);
     if (strcmp(t, "fat32") == 0 && p.start_lba == 0) {
         struct canboot_fat32 fs;
-        const char *fat_name = (name[0] == '/') ? name + 1 : name;
         if (canboot_fat32_open(d, &fs) &&
-            canboot_fat32_write_root_file(&fs, fat_name, data, (uint32_t)strlen(data)) == 0) {
+            canboot_fat32_write_path(&fs, name, data, (uint32_t)strlen(data)) == 0) {
             cando_vm_push(vm, cando_bool(true));
             return 1;
         }
@@ -379,22 +381,6 @@ struct list_acc {
     char *buf; size_t cap; size_t used;
 };
 
-static bool fat_list_cb(const char *name, uint32_t size, void *user) {
-    (void)size;
-    struct list_acc *a = user;
-    size_t n = strlen(name);
-    if (a->used + n + 1 >= a->cap) return false;
-    memcpy(a->buf + a->used, name, n);
-    a->used += n;
-    a->buf[a->used++] = '\n';
-    return true;
-}
-
-static bool ntfs_list_cb(const char *name, uint64_t size, void *user) {
-    (void)size;
-    return fat_list_cb(name, 0, user);
-}
-
 static int f_delete(CandoVM *vm, int argc, CandoValue *args) {
     int di = (int)libutil_arg_num_at(args, argc, 0, 0);
     int pi = (int)libutil_arg_num_at(args, argc, 1, 0);
@@ -407,9 +393,8 @@ static int f_delete(CandoVM *vm, int argc, CandoValue *args) {
     const char *t = detect_fs(d, p.start_lba);
     if (strcmp(t, "fat32") == 0 && p.start_lba == 0) {
         struct canboot_fat32 fs;
-        const char *fat_name = (name[0] == '/') ? name + 1 : name;
         if (canboot_fat32_open(d, &fs) &&
-            canboot_fat32_delete_root_file(&fs, fat_name) == 0) {
+            canboot_fat32_unlink_path(&fs, name) == 0) {
             cando_vm_push(vm, cando_bool(true));
             return 1;
         }
@@ -435,9 +420,26 @@ static int f_delete(CandoVM *vm, int argc, CandoValue *args) {
     return 1;
 }
 
+static bool fat_dir_list_cb(const char *name, uint32_t size, bool is_dir,
+                            void *user) {
+    (void)size;
+    struct list_acc *a = user;
+    size_t n = strlen(name);
+    if (a->used + n + 2 >= a->cap) return false;
+    memcpy(a->buf + a->used, name, n);
+    a->used += n;
+    if (is_dir) a->buf[a->used++] = '/';
+    a->buf[a->used++] = '\n';
+    return true;
+}
+
+/* fs.list(disk, part [, path]) - list a directory ("/" by default).
+ * Subdirectories are reported with a trailing '/'. */
 static int f_list(CandoVM *vm, int argc, CandoValue *args) {
     int di = (int)libutil_arg_num_at(args, argc, 0, 0);
     int pi = (int)libutil_arg_num_at(args, argc, 1, 0);
+    const char *path = libutil_arg_cstr_at(args, argc, 2);
+    if (!path) path = "/";
     struct canboot_disk *d; struct canboot_partition p;
     static char out[8192];
     struct list_acc acc = { .buf = out, .cap = sizeof(out), .used = 0 };
@@ -445,15 +447,107 @@ static int f_list(CandoVM *vm, int argc, CandoValue *args) {
     const char *t = detect_fs(d, p.start_lba);
     if (strcmp(t, "fat32") == 0 && p.start_lba == 0) {
         struct canboot_fat32 fs;
-        if (canboot_fat32_open(d, &fs)) canboot_fat32_list_root(&fs, fat_list_cb, &acc);
+        if (canboot_fat32_open(d, &fs))
+            canboot_fat32_list_path(&fs, path, fat_dir_list_cb, &acc);
     } else if (strcmp(t, "ntfs") == 0) {
-        struct canboot_ntfs fs;
-        if (canboot_ntfs_open(d, p.start_lba, &fs)) canboot_ntfs_list_root(&fs, ntfs_list_cb, &acc);
+        uint64_t bs = d->block_size;
+        int h = canboot_ntfs3g_open(d, p.start_lba * bs, p.size_lba * bs);
+        if (h >= 0) {
+            acc.used = (size_t)canboot_ntfs3g_list(h, path, out, sizeof(out));
+            canboot_ntfs3g_close(h);
+            if ((int)acc.used < 0) acc.used = 0;
+        }
+    } else if (strcmp(t, "ext4") == 0) {
+        int h = canboot_ext4_open(d, p.start_lba, p.size_lba);
+        if (h >= 0) {
+            int n = canboot_ext4_list(h, path, out, sizeof(out));
+            canboot_ext4_close(h);
+            acc.used = n > 0 ? (size_t)n : 0;
+        }
     }
 emit:
     if (acc.used > 0 && out[acc.used - 1] == '\n') acc.used--;
     CandoString *s = cando_string_new(out, (uint32_t)acc.used);
     cando_vm_push(vm, cando_string_value(s));
+    return 1;
+}
+
+/* fs.mkdir(disk, part, path) -> bool. */
+static int f_mkdir(CandoVM *vm, int argc, CandoValue *args) {
+    int di = (int)libutil_arg_num_at(args, argc, 0, 0);
+    int pi = (int)libutil_arg_num_at(args, argc, 1, 0);
+    const char *path = libutil_arg_cstr_at(args, argc, 2);
+    struct canboot_disk *d; struct canboot_partition p;
+    bool ok = false;
+    if (get_part(di, pi, &d, &p) && path) {
+        const char *t = detect_fs(d, p.start_lba);
+        if (strcmp(t, "fat32") == 0 && p.start_lba == 0) {
+            struct canboot_fat32 fs;
+            ok = canboot_fat32_open(d, &fs) &&
+                 canboot_fat32_mkdir(&fs, path) == 0;
+        } else if (strcmp(t, "ntfs") == 0) {
+            uint64_t bs = d->block_size;
+            int h = canboot_ntfs3g_open(d, p.start_lba * bs, p.size_lba * bs);
+            if (h >= 0) { ok = canboot_ntfs3g_mkdir(h, path) == 0; canboot_ntfs3g_close(h); }
+        } else if (strcmp(t, "ext4") == 0) {
+            int h = canboot_ext4_open(d, p.start_lba, p.size_lba);
+            if (h >= 0) { ok = canboot_ext4_mkdir(h, path) == 0; canboot_ext4_close(h); }
+        }
+    }
+    cando_vm_push(vm, cando_bool(ok));
+    return 1;
+}
+
+/* fs.rmdir(disk, part, path) -> bool. */
+static int f_rmdir(CandoVM *vm, int argc, CandoValue *args) {
+    int di = (int)libutil_arg_num_at(args, argc, 0, 0);
+    int pi = (int)libutil_arg_num_at(args, argc, 1, 0);
+    const char *path = libutil_arg_cstr_at(args, argc, 2);
+    struct canboot_disk *d; struct canboot_partition p;
+    bool ok = false;
+    if (get_part(di, pi, &d, &p) && path) {
+        const char *t = detect_fs(d, p.start_lba);
+        if (strcmp(t, "fat32") == 0 && p.start_lba == 0) {
+            struct canboot_fat32 fs;
+            ok = canboot_fat32_open(d, &fs) &&
+                 canboot_fat32_rmdir(&fs, path) == 0;
+        } else if (strcmp(t, "ntfs") == 0) {
+            uint64_t bs = d->block_size;
+            int h = canboot_ntfs3g_open(d, p.start_lba * bs, p.size_lba * bs);
+            if (h >= 0) { ok = canboot_ntfs3g_delete(h, path) == 0; canboot_ntfs3g_close(h); }
+        } else if (strcmp(t, "ext4") == 0) {
+            int h = canboot_ext4_open(d, p.start_lba, p.size_lba);
+            if (h >= 0) { ok = canboot_ext4_rmdir(h, path) == 0; canboot_ext4_close(h); }
+        }
+    }
+    cando_vm_push(vm, cando_bool(ok));
+    return 1;
+}
+
+/* fs.rename(disk, part, oldPath, newPath) -> bool. */
+static int f_rename(CandoVM *vm, int argc, CandoValue *args) {
+    int di = (int)libutil_arg_num_at(args, argc, 0, 0);
+    int pi = (int)libutil_arg_num_at(args, argc, 1, 0);
+    const char *oldp = libutil_arg_cstr_at(args, argc, 2);
+    const char *newp = libutil_arg_cstr_at(args, argc, 3);
+    struct canboot_disk *d; struct canboot_partition p;
+    bool ok = false;
+    if (get_part(di, pi, &d, &p) && oldp && newp) {
+        const char *t = detect_fs(d, p.start_lba);
+        if (strcmp(t, "fat32") == 0 && p.start_lba == 0) {
+            struct canboot_fat32 fs;
+            ok = canboot_fat32_open(d, &fs) &&
+                 canboot_fat32_rename(&fs, oldp, newp) == 0;
+        } else if (strcmp(t, "ntfs") == 0) {
+            uint64_t bs = d->block_size;
+            int h = canboot_ntfs3g_open(d, p.start_lba * bs, p.size_lba * bs);
+            if (h >= 0) { ok = canboot_ntfs3g_rename(h, oldp, newp) == 0; canboot_ntfs3g_close(h); }
+        } else if (strcmp(t, "ext4") == 0) {
+            int h = canboot_ext4_open(d, p.start_lba, p.size_lba);
+            if (h >= 0) { ok = canboot_ext4_rename(h, oldp, newp) == 0; canboot_ext4_close(h); }
+        }
+    }
+    cando_vm_push(vm, cando_bool(ok));
     return 1;
 }
 
@@ -467,6 +561,9 @@ static const LibutilMethodEntry fs_methods[] = {
     { "write",      f_write       },
     { "delete",     f_delete      },
     { "list",       f_list        },
+    { "mkdir",      f_mkdir       },
+    { "rmdir",      f_rmdir       },
+    { "rename",     f_rename      },
 };
 
 void canboot_cando_open_fslib(CandoVM *vm) {

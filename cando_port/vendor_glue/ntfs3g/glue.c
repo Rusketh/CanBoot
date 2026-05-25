@@ -24,6 +24,7 @@
 #include <sys/stat.h>
 
 #include "ntfs-3g/volume.h"
+#include "ntfs-3g/layout.h"
 #include "ntfs-3g/dir.h"
 #include "ntfs-3g/inode.h"
 #include "ntfs-3g/attrib.h"
@@ -220,6 +221,93 @@ int canboot_ntfs3g_create(int handle, const char *path,
     ntfs_attr_close(attr);
     ntfs_inode_close(ino);
     return wrote;
+}
+
+int canboot_ntfs3g_mkdir(int handle, const char *path) {
+    if (handle < 0 || handle >= HSLOTS || !g_vols[handle]) return -1;
+    if (!path) return -1;
+    ntfs_inode *parent = NULL;
+    const char *base = NULL;
+    if (resolve_parent(g_vols[handle], path, &parent, &base) != 0) return -1;
+    uint16_t name16[256];
+    int name_len = ascii_to_utf16(base, name16, 255);
+    if (name_len <= 0) { ntfs_inode_close(parent); return -1; }
+    ntfs_inode *ino = ntfs_create(parent, 0, name16, (u8)name_len, S_IFDIR);
+    ntfs_inode_close(parent);
+    if (!ino) return -1;
+    ntfs_inode_close(ino);
+    return 0;
+}
+
+/* List a directory into `out` as newline-separated names (subdirectories
+ * get a trailing '/'). Skips ".", "..", system files ($...) and DOS
+ * short-name duplicates. Returns bytes written, or -1. */
+struct ntfs_list_ctx { char *out; int cap; int used; };
+
+static int ntfs_list_filldir(void *dirent, const ntfschar *name,
+                             const int name_len, const int name_type,
+                             const s64 pos, const MFT_REF mref,
+                             const unsigned dt_type) {
+    (void)pos; (void)mref;
+    struct ntfs_list_ctx *c = dirent;
+    if (name_type == FILE_NAME_DOS) return 0;           /* skip DOS alias */
+    if (name_len == 1 && name[0] == (ntfschar)'.') return 0;
+    if (name_len == 2 && name[0] == (ntfschar)'.' && name[1] == (ntfschar)'.') return 0;
+    if (name_len > 0 && name[0] == (ntfschar)'$') return 0;  /* system file */
+    /* Downconvert UTF-16 -> ASCII (best effort). */
+    if (c->used + name_len + 2 >= c->cap) return 0;
+    for (int i = 0; i < name_len; i++)
+        c->out[c->used++] = (char)(name[i] & 0xFF);
+    if (dt_type == NTFS_DT_DIR) c->out[c->used++] = '/';
+    c->out[c->used++] = '\n';
+    return 0;
+}
+
+int canboot_ntfs3g_list(int handle, const char *path, char *out, int cap) {
+    if (handle < 0 || handle >= HSLOTS || !g_vols[handle]) return -1;
+    if (!path) return -1;
+    ntfs_inode *dir = ntfs_pathname_to_inode(g_vols[handle], NULL, path);
+    if (!dir) return -1;
+    struct ntfs_list_ctx ctx = { out, cap, 0 };
+    s64 pos = 0;
+    int rc = ntfs_readdir(dir, &pos, &ctx, ntfs_list_filldir);
+    ntfs_inode_close(dir);
+    return rc == 0 ? ctx.used : -1;
+}
+
+/* Rename within the volume. Implemented as add-a-name + remove-old-name.
+ * NTFS allows multiple hard links for files, so this is a true rename for
+ * regular files (including moves across directories). Directories cannot
+ * be hard-linked, so a directory rename is refused (-1) - the low-level
+ * libntfs-3g API has no directory-rename primitive; that lives in the
+ * FUSE layer we don't run. */
+int canboot_ntfs3g_rename(int handle, const char *oldp, const char *newp) {
+    if (handle < 0 || handle >= HSLOTS || !g_vols[handle]) return -1;
+    if (!oldp || !newp) return -1;
+    ntfs_volume *vol = g_vols[handle];
+
+    ntfs_inode *target = ntfs_pathname_to_inode(vol, NULL, oldp);
+    if (!target) return -1;
+    int is_dir = (target->mrec &&
+                  (target->mrec->flags & MFT_RECORD_IS_DIRECTORY)) ? 1 : 0;
+    if (is_dir) { ntfs_inode_close(target); return -1; }
+
+    ntfs_inode *new_parent = NULL;
+    const char *new_base = NULL;
+    if (resolve_parent(vol, newp, &new_parent, &new_base) != 0) {
+        ntfs_inode_close(target); return -1;
+    }
+    uint16_t nn[256];
+    int nnl = ascii_to_utf16(new_base, nn, 255);
+    if (nnl <= 0) { ntfs_inode_close(new_parent); ntfs_inode_close(target); return -1; }
+
+    int rc = ntfs_link(target, new_parent, nn, (u8)nnl);
+    ntfs_inode_close(new_parent);
+    ntfs_inode_close(target);
+    if (rc != 0) return -1;
+
+    /* Remove the old link. */
+    return canboot_ntfs3g_delete(handle, oldp);
 }
 
 int canboot_ntfs3g_delete(int handle, const char *path) {
