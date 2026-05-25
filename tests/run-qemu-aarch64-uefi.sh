@@ -76,6 +76,8 @@ python3 "$ROOT/tests/sidecars/http_hello.py"  127.0.0.1 "$HTTP_PORT"  >"$(dirnam
 HTTP_PID=$!
 python3 "$ROOT/tests/sidecars/https_secure.py" 127.0.0.1 "$HTTPS_PORT" >"$(dirname "$LOG")/https.log" 2>&1 &
 HTTPS_PID=$!
+python3 "$ROOT/tests/sidecars/dns_fixed.py" 127.0.0.1 53 canboot.test 10.0.2.2 >"$(dirname "$LOG")/dns.log" 2>&1 &
+DNS_PID=$!
 sleep 0.3
 
 QEMU_STDERR="${LOG%.log}.stderr.log"
@@ -171,7 +173,7 @@ PY
 INJECTOR_PID=$!
 
 cleanup() {
-    for pid in "$INJECTOR_PID" "$UDP_PID" "$HTTP_PID" "$HTTPS_PID"; do
+    for pid in "$INJECTOR_PID" "$UDP_PID" "$HTTP_PID" "$HTTPS_PID" "$DNS_PID"; do
         if [ -n "${pid:-}" ] && kill -0 "$pid" 2>/dev/null; then
             kill "$pid" 2>/dev/null || true
             wait "$pid" 2>/dev/null || true
@@ -219,6 +221,8 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'selftest: big-heap'
         check 'selftest: udp echo ok'
         check 'selftest: http get ok'
+
+        check 'selftest: dns lookup ok canboot.test=10.0.2.2'
         check 'selftest: handshake ok'
         check 'selftest: https get ok'
         check 'selftest: session resumption ok'

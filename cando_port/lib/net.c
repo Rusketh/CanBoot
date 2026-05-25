@@ -4,10 +4,10 @@
  *   net.udpEcho(host, port, msg)        -> response string or null
  *   net.httpGet(host, port, path)       -> body string or null
  *
- * `host` is a dotted-quad string ("10.0.2.2"); name resolution lands
- * once DNS is wired. Each call drives the lwIP pump until it
- * completes or times out (5s by default). Synchronous because cando
- * is single-threaded.
+ * `host` is a dotted-quad string ("10.0.2.2") or a hostname resolved
+ * via the lwIP DNS resolver (canboot_dns_resolve). Each call drives the
+ * lwIP pump until it completes or times out (5s by default). Synchronous
+ * because cando is single-threaded.
  */
 
 #include <stdbool.h>
@@ -16,12 +16,14 @@
 #include <string.h>
 
 #include "lwip/sys.h"
+#include "lwip/timeouts.h"
 #include "lwip/udp.h"
 #include "lwip/tcp.h"
 #include "lwip/pbuf.h"
 #include "lwip/ip4_addr.h"
 
 #include "hal/net.h"
+#include "canboot_resolver.h"
 
 #include "core/value.h"
 #include "vm/vm.h"
@@ -86,6 +88,13 @@ static bool parse_ipv4(const char *s, ip_addr_t *out) {
     return true;
 }
 
+/* Resolve a host string to an address: dotted-quad literal first, then
+ * DNS. Used by every net.* method so they accept hostnames. */
+static bool resolve_host(const char *s, ip_addr_t *out) {
+    if (parse_ipv4(s, out)) return true;
+    return s && canboot_dns_resolve(s, out, 5000) == 0;
+}
+
 /* ---- UDP echo --------------------------------------------------------- */
 
 static volatile bool g_udp_done;
@@ -110,7 +119,7 @@ static int n_udp_echo(CandoVM *vm, int argc, CandoValue *args) {
     const char *msg  = libutil_arg_cstr_at(args, argc, 2);
     if (!host || !msg) { cando_vm_push(vm, cando_null()); return 1; }
     ip_addr_t dst;
-    if (!parse_ipv4(host, &dst)) { cando_vm_push(vm, cando_null()); return 1; }
+    if (!resolve_host(host, &dst)) { cando_vm_push(vm, cando_null()); return 1; }
 
     struct udp_pcb *pcb = udp_new();
     if (!pcb) { cando_vm_push(vm, cando_null()); return 1; }
@@ -209,7 +218,7 @@ static int n_http_get(CandoVM *vm, int argc, CandoValue *args) {
     const char *path = libutil_arg_cstr_at(args, argc, 2);
 
     ip_addr_t dst;
-    if (!host || !parse_ipv4(host, &dst)) { cando_vm_push(vm, cando_null()); return 1; }
+    if (!host || !resolve_host(host, &dst)) { cando_vm_push(vm, cando_null()); return 1; }
 
     struct tcp_pcb *pcb = tcp_new();
     if (!pcb) { cando_vm_push(vm, cando_null()); return 1; }
@@ -244,18 +253,12 @@ static int n_http_get(CandoVM *vm, int argc, CandoValue *args) {
  * net.lookup(host) -> array of IP strings
  *
  * Drop-in for vendor/cando/source/lib/net.c's `net.lookup`. Host CanDo
- * delegates to POSIX getaddrinfo; on canboot we don't have a resolver
- * yet (lwipopts.h has LWIP_DNS=0 — enabling it pulls in the DNS module
- * + a sys-timer dependency that hasn't been wired). For now we accept
- * dotted-quad IPv4 literals only:
+ * delegates to POSIX getaddrinfo; here we resolve via resolve_host:
  *
- *   - input parses as IPv4 -> single-element array of the input
- *   - anything else        -> empty array (matches CanDo's failure shape;
- *                             does NOT throw)
- *
- * Scripts that call this with hostnames get the same observable result
- * they would under host CanDo when getaddrinfo fails: an empty array.
- * Real DNS lookup lands when LWIP_DNS is enabled in a subsequent PR.
+ *   - dotted-quad literal     -> single-element array of the canonical form
+ *   - hostname (lwIP DNS)     -> single-element array of the resolved IP
+ *   - failure                 -> empty array (matches CanDo's shape;
+ *                                does NOT throw)
  */
 static int n_lookup(CandoVM *vm, int argc, CandoValue *args) {
     const char *host = libutil_arg_cstr_at(args, argc, 0);
@@ -264,10 +267,14 @@ static int n_lookup(CandoVM *vm, int argc, CandoValue *args) {
     CdoObject *arr_obj = cando_bridge_resolve(vm, cando_as_handle(arr_val));
 
     ip_addr_t addr;
-    if (host && parse_ipv4(host, &addr)) {
-        CdoString *s = cdo_string_new(host, (uint32_t)strlen(host));
-        cdo_array_push(arr_obj, cdo_string_value(s));
-        cdo_string_release(s);
+    if (host && resolve_host(host, &addr)) {
+        char buf[16];
+        const char *dotted = ip4addr_ntoa_r(ip_2_ip4(&addr), buf, sizeof(buf));
+        if (dotted) {
+            CdoString *s = cdo_string_new(dotted, (uint32_t)strlen(dotted));
+            cdo_array_push(arr_obj, cdo_string_value(s));
+            cdo_string_release(s);
+        }
     }
 
     cando_vm_push(vm, arr_val);

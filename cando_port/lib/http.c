@@ -81,6 +81,7 @@ static int parse_url(const char *url, struct url_parts *p) {
  * same lwIP/mbedtls calls those libs use. */
 
 #include "lwip/sys.h"
+#include "lwip/timeouts.h"
 #include "lwip/tcp.h"
 #include "lwip/pbuf.h"
 #include "hal/net.h"

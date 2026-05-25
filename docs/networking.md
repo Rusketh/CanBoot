@@ -29,10 +29,19 @@ mode — no threads, no OS layer, raw API only. The port lives in
 `net/lwip_port/`:
 
 - `net/lwip_port/include/lwipopts.h` — feature toggles. ARP, IPv4,
-  UDP, TCP, DHCP, ICMP, etc. enabled; IPv6 disabled for now.
+  UDP, TCP, DHCP, DNS, ICMP, etc. enabled; IPv6 disabled for now.
 - `net/lwip_port/sys_arch.c` — provides `sys_now()` backed by the
-  TSC-calibrated clock.
+  TSC-calibrated clock, plus `LWIP_RAND()` (DNS query IDs / source ports).
+- `net/lwip_port/resolver.c` — `canboot_dns_resolve()`, a synchronous
+  wrapper over lwIP's async `dns_gethostbyname` that pumps the net loop
+  until the answer arrives. DHCP fills server 0 from the lease (SLIRP
+  hands out 10.0.2.3); `net.lookup` and the `net.*` host arguments resolve
+  hostnames through it.
 - `net/lwip_port/inet_pton.c` — inet_pton(AF_INET, ...) shim.
+
+DNS is exercised on every net-capable boot by a fixed-answer DNS sidecar
+(`tests/sidecars/dns_fixed.py`) the runners launch on the host; the guest
+reaches it through SLIRP at 10.0.2.2:53 and resolves `canboot.test`.
 
 The virtio-net driver feeds lwIP via `netif_add` + `etharp_output`;
 inbound packets land via `tcpip_input` from inside `hal_net_pump`.

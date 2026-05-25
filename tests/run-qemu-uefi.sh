@@ -55,6 +55,8 @@ python3 "$ROOT/tests/sidecars/http_hello.py"  127.0.0.1 "$HTTP_PORT"  >"$WORK/ht
 HTTP_PID=$!
 python3 "$ROOT/tests/sidecars/https_secure.py" 127.0.0.1 "$HTTPS_PORT" >"$WORK/https.log" 2>&1 &
 HTTPS_PID=$!
+python3 "$ROOT/tests/sidecars/dns_fixed.py" 127.0.0.1 53 canboot.test 10.0.2.2 >"$WORK/dns.log" 2>&1 &
+DNS_PID=$!
 sleep 0.5
 
 DISK_IMG="${DISK_IMG:-build/canboot-fat32.img}"
@@ -169,7 +171,7 @@ PY
 INJECTOR_PID=$!
 
 cleanup() {
-    for pid in "$INJECTOR_PID" "$QEMU_PID" "$UDP_PID" "$HTTP_PID" "$HTTPS_PID"; do
+    for pid in "$INJECTOR_PID" "$QEMU_PID" "$UDP_PID" "$HTTP_PID" "$HTTPS_PID" "$DNS_PID"; do
         if [ -n "${pid:-}" ] && kill -0 "$pid" 2>/dev/null; then
             kill "$pid" 2>/dev/null || true
             wait "$pid" 2>/dev/null || true
@@ -234,6 +236,8 @@ PY
         check 'selftest: dhcp lease'
         check 'selftest: udp echo ok'
         check 'selftest: http get ok'
+        check 'selftest: dns lookup ok canboot.test=10.0.2.2'
+
         check 'selftest: net test ok'
         check 'selftest: handshake ok'
         check 'selftest: https get ok'

@@ -108,6 +108,7 @@ set(CANBOOT_PORTABLE_SOURCES
 
     # Networking + TLS port shims.
     net/lwip_port/sys_arch.c
+    net/lwip_port/resolver.c
     net/mbedtls_port/entropy.c
     net/mbedtls_port/inet_pton.c
     net/mbedtls_port/lwip_bio.c
