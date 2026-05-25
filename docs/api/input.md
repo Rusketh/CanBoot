@@ -37,11 +37,32 @@ entering a "fresh input" section.
 Total events received since boot. Monotonically increasing counter,
 not affected by `input.flush`.
 
+## Key codes
+
+Printable keys arrive as their ASCII byte (`0x20`–`0x7E`). Editing keys
+collapse to a C0 control byte; navigation keys are forwarded as their
+raw `CANBOOT_KEY_*` value (`>= 0x100`) so GUI scripts can drive a cursor
+or focus model:
+
+| Key        | `poll()` value | Notes |
+|------------|----------------|-------|
+| Backspace  | `8` (`\b`)     | |
+| Tab        | `9` (`\t`)     | |
+| Enter      | `10` (`\n`)    | |
+| Escape     | `257`          | `0x101` |
+| Up         | `288`          | `0x120` |
+| Down       | `289`          | `0x121` |
+| Left       | `290`          | `0x122` |
+| Right      | `291`          | `0x123` |
+
+Other non-printable scancodes (function keys, modifiers on their own)
+are dropped. The mapping lives in `hal/input/input_queue.c`
+(`hal_input_getc`) and the per-device tables in `hal/input/`.
+
 ## Behaviour
 
-- ASCII codes only — non-printable scancodes (function keys, arrows)
-  map through a small translation table to a curated set of byte
-  values; check the HAL input source for the exact map.
+- Printable ASCII plus the editing/navigation keys above are the keys a
+  script can observe; everything else is filtered in the HAL.
 - `input.waitKey` cooperatively pumps both the HAL input drivers and
   the audio mixer between iterations, so audio keeps playing while
   scripts wait for keypresses.

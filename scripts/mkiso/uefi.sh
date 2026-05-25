@@ -50,6 +50,12 @@ PROBE_PNG="$ROOT_DIR/initramfs/probe.png"
 if [ -f "$PROBE_PNG" ]; then
     cp "$PROBE_PNG" "$ISO_ROOT/probe.png"
 fi
+# Derma GUI library + demo so booted scripts can include("/derma.cdo").
+for f in derma.cdo derma_demo.cdo; do
+    if [ -f "$ROOT_DIR/initramfs/$f" ]; then
+        cp "$ROOT_DIR/initramfs/$f" "$ISO_ROOT/$f"
+    fi
+done
 
 xorriso -as mkisofs \
     -V "CANBOOT" \

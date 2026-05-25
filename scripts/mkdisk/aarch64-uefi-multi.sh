@@ -57,10 +57,17 @@ mkfs.vfat -F 32 -n CANBOOTEFI "$ESP_IMG" >/dev/null
 mmd -i "$ESP_IMG" ::/EFI
 mmd -i "$ESP_IMG" ::/EFI/BOOT
 mcopy -i "$ESP_IMG" "$EFI_BIN" ::/EFI/BOOT/BOOTAA64.EFI
-INIT_CDO="$(cd "$(dirname "$0")/../.." && pwd)/initramfs/init.cdo"
+RAMFS_DIR="$(cd "$(dirname "$0")/../.." && pwd)/initramfs"
+INIT_CDO="$RAMFS_DIR/init.cdo"
 if [ -f "$INIT_CDO" ]; then
     mcopy -i "$ESP_IMG" "$INIT_CDO" ::/init.cdo
 fi
+# Derma GUI library + demo so booted scripts can include("/derma.cdo").
+for f in derma.cdo derma_demo.cdo; do
+    if [ -f "$RAMFS_DIR/$f" ]; then
+        mcopy -i "$ESP_IMG" "$RAMFS_DIR/$f" "::/$f"
+    fi
+done
 
 # --- Build the NTFS image ---
 NTFS_IMG="$WORK/ntfs.img"

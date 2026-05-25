@@ -19,6 +19,12 @@ underlying HAL / runtime they sit on top of is documented in
 | [display](display.md) | Framebuffer painter: clear, fillRect, line, text, image, pixel |
 | [fb](fb.md)           | Scanout flush / present for explicit-present devices |
 
+## GUI toolkit
+
+| Library | What it does |
+|---------|--------------|
+| [derma](derma.md) | Garry's Mod Derma-style retained-mode widget toolkit (`include("/derma.cdo")`) over `display` + `input` |
+
 ## Storage
 
 | Library | What it does |

@@ -1,0 +1,1434 @@
+// derma.cdo -- a Garry's Mod Derma-style retained-mode GUI for CanBoot.
+//
+//   VAR derma = include("/derma.cdo");
+//   VAR f = derma.Create("DFrame");
+//   f:SetSize(300, 200); f:Center(); f:SetTitle("Hello"); f:MakePopup();
+//   VAR b = derma.Create("DButton", f);
+//   b:Dock(derma.TOP); b:SetText("Click me");
+//   b.DoClick = FUNCTION(self) { print("clicked"); };
+//   derma.run();
+//
+// The whole library lives inside one IIFE so nothing leaks into the host
+// global namespace -- the returned `derma` table is the only export.
+//
+// It paints through the `display` framebuffer lib and is driven by the
+// `input` lib. CanBoot has no pointing device, so the cursor is driven by
+// the keyboard: arrow keys move it, Enter is a left click, Tab cycles
+// keyboard focus, Esc cancels/closes, and typing routes to the focused
+// text field. The widget layer underneath is a genuine mouse model
+// (hit-testing, hover, OnMousePressed/Released, drag capture) so a real
+// pointer source drops straight in via derma.feedCursor / derma.feedClick.
+
+RETURN (FUNCTION() {
+
+VAR derma = {};
+derma.version = "1.0.0";
+
+// ----------------------------------------------------------------------
+// Backend capture. display / input / fb are host globals in CanBoot but
+// absent in a plain desktop CanDo, so capture defensively and let tests
+// inject mocks via derma.setBackend.
+// ----------------------------------------------------------------------
+VAR B = { d: NULL, inp: NULL, fb: NULL };
+TRY { B.d   = display; } CATCH (e) { }
+TRY { B.inp = input;   } CATCH (e) { }
+TRY { B.fb  = fb;      } CATCH (e) { }
+
+derma.setBackend = FUNCTION(d, ind, ...rest) {
+    IF (d   != NULL) { B.d   = d;   }
+    IF (ind != NULL) { B.inp = ind; }
+    B.fb = (#rest > 0 ? rest[0] : NULL);
+};
+
+// ----------------------------------------------------------------------
+// Key codes (as surfaced by CanBoot's hal_input_getc after the navigation
+// keys were unblocked). Printable ASCII arrives as itself.
+// ----------------------------------------------------------------------
+VAR KEY_BACKSP = 8;
+VAR KEY_TAB    = 9;
+VAR KEY_ENTER  = 10;
+VAR KEY_ESC    = 257;
+VAR KEY_UP     = 288;
+VAR KEY_DOWN   = 289;
+VAR KEY_LEFT   = 290;
+VAR KEY_RIGHT  = 291;
+derma.keys = { BACKSP: 8, TAB: 9, ENTER: 10, ESC: 257,
+               UP: 288, DOWN: 289, LEFT: 290, RIGHT: 291 };
+
+VAR MOUSE_LEFT = 107;
+derma.MOUSE_LEFT = 107;
+
+// Dock modes (match GMod's enum values).
+derma.NODOCK = 0;
+derma.FILL   = 1;
+derma.LEFT   = 2;
+derma.TOP    = 4;
+derma.RIGHT  = 8;
+derma.BOTTOM = 16;
+
+// ----------------------------------------------------------------------
+// Colours. A colour is { r, g, b, a }; alpha is carried for API parity but
+// the framebuffer is opaque 0xRRGGBB, so fills ignore it. _pk packs a
+// colour (or a raw number) into the 0xRRGGBB the display lib expects.
+// ----------------------------------------------------------------------
+// Alpha is optional (CanDo enforces exact arity, so the tail is variadic).
+VAR Color = FUNCTION(r, g, b, ...rest) {
+    RETURN { r: r, g: g, b: b, a: (#rest > 0 ? rest[0] : 255) };
+};
+derma.Color = Color;
+
+// CanDo has no tonumber(); parse a decimal string ourselves. Returns NULL
+// on anything that isn't a clean [+-]?digits[.digits].
+VAR _toNum = FUNCTION(s) {
+    s = toString(s);
+    VAR n = #s;
+    IF (n == 0) { RETURN NULL; }
+    VAR i = 0; VAR sign = 1;
+    VAR c0 = string.codePointAt(s, 0);
+    IF (c0 == 45) { sign = -1; i = 1; }
+    ELSE IF (c0 == 43) { i = 1; }
+    VAR intp = 0; VAR frac = 0; VAR fdiv = 1; VAR dot = FALSE; VAR seen = FALSE;
+    WHILE (i < n) {
+        VAR c = string.codePointAt(s, i);
+        IF (c == 46) {
+            IF (dot) { RETURN NULL; }
+            dot = TRUE;
+        } ELSE IF (c >= 48 && c <= 57) {
+            seen = TRUE;
+            VAR d = c - 48;
+            IF (dot) { fdiv = fdiv * 10; frac = frac * 10 + d; }
+            ELSE { intp = intp * 10 + d; }
+        } ELSE {
+            RETURN NULL;
+        }
+        i = i + 1;
+    }
+    IF (!seen) { RETURN NULL; }
+    RETURN sign * (intp + frac / fdiv);
+};
+derma.toNumber = _toNum;
+
+VAR _pk = FUNCTION(c) {
+    IF (type(c) == "number") { RETURN c; }
+    IF (c == NULL || c.r == NULL) { RETURN 0; }
+    RETURN ((c.r & 255) << 16) | ((c.g & 255) << 8) | (c.b & 255);
+};
+
+// Blend src over dst by src alpha (0..255) -> opaque colour. Used by the
+// skin where the destination colour is known up front.
+derma.blend = FUNCTION(dst, src) {
+    VAR a = src.a == NULL ? 255 : src.a;
+    VAR ia = 255 - a;
+    RETURN Color((src.r * a + dst.r * ia) / 255,
+                 (src.g * a + dst.g * ia) / 255,
+                 (src.b * a + dst.b * ia) / 255, 255);
+};
+
+// ----------------------------------------------------------------------
+// Skin: every colour the default widgets use. Mutate derma.skin before
+// building UI to retheme everything at once.
+// ----------------------------------------------------------------------
+VAR skin = {
+    desktop:      Color(32, 32, 35),
+    panelBg:      Color(60, 60, 64),
+    frameBg:      Color(45, 45, 48),
+    titleBar:     Color(33, 33, 36),
+    titleText:    Color(235, 235, 235),
+    accent:       Color(59, 142, 234),
+    accentDim:    Color(40, 90, 150),
+    button:       Color(74, 74, 80),
+    buttonHover:  Color(92, 92, 100),
+    buttonDown:   Color(59, 142, 234),
+    buttonText:   Color(235, 235, 235),
+    border:       Color(28, 28, 30),
+    text:         Color(230, 230, 230),
+    textDim:      Color(150, 150, 155),
+    entryBg:      Color(24, 24, 26),
+    entryText:    Color(235, 235, 235),
+    check:        Color(59, 142, 234),
+    scrollTrack:  Color(36, 36, 40),
+    scrollThumb:  Color(90, 90, 96),
+    selected:     Color(45, 95, 155),
+    progress:     Color(59, 142, 234)
+};
+derma.skin = skin;
+
+// ----------------------------------------------------------------------
+// Render context. Widgets paint in LOCAL coordinates; the framework sets
+// R's origin (R.ox, R.oy = the panel's absolute top-left) and clip rect
+// (R.cx/cy/cw/ch, absolute) before invoking each Paint hook. The R.*
+// helpers translate to absolute coords and clip.
+// ----------------------------------------------------------------------
+VAR R = { ox: 0, oy: 0, cx: 0, cy: 0, cw: 0, ch: 0 };
+
+R.rect = FUNCTION(x, y, w, h, col) {
+    VAR ax = R.ox + x; VAR ay = R.oy + y;
+    VAR x0 = math.max(ax, R.cx);        VAR y0 = math.max(ay, R.cy);
+    VAR x1 = math.min(ax + w, R.cx + R.cw); VAR y1 = math.min(ay + h, R.cy + R.ch);
+    IF (x1 > x0 && y1 > y0) {
+        B.d.fillRect(math.floor(x0), math.floor(y0),
+                     math.floor(x1 - x0), math.floor(y1 - y0), _pk(col));
+    }
+};
+
+R.outline = FUNCTION(x, y, w, h, col, t) {
+    VAR th = t == NULL ? 1 : t;
+    R.rect(x, y, w, th, col);
+    R.rect(x, y + h - th, w, th, col);
+    R.rect(x, y, th, h, col);
+    R.rect(x + w - th, y, th, h, col);
+};
+
+// 8x8 fixed font. Width is exact; clip whole glyphs.
+VAR FONT_W = 8;
+VAR FONT_H = 8;
+R.textW = FUNCTION(s) { RETURN (s == NULL ? 0 : #toString(s)) * FONT_W; };
+R.textH = FUNCTION() { RETURN FONT_H; };
+
+R.text = FUNCTION(x, y, s, col) {
+    IF (s == NULL) { RETURN; }
+    s = toString(s);
+    IF (#s == 0) { RETURN; }
+    VAR ax = R.ox + x; VAR ay = R.oy + y;
+    IF (ay < R.cy || ay + FONT_H > R.cy + R.ch) { RETURN; } // coarse vertical clip
+    VAR clipL = R.cx; VAR clipR = R.cx + R.cw;
+    VAR n = #s;
+    IF (ax < clipL) {
+        VAR drop = math.floor((clipL - ax) / FONT_W);
+        IF (drop >= n) { RETURN; }
+        s = string.sub(s, drop, n);
+        ax = ax + drop * FONT_W;
+        n = #s;
+    }
+    VAR maxc = math.floor((clipR - ax) / FONT_W);
+    IF (maxc <= 0) { RETURN; }
+    IF (maxc < n) { s = string.sub(s, 0, maxc); }
+    B.d.text(math.floor(ax), math.floor(ay), s, _pk(col), 0);
+};
+
+// Aligned text in a box (numpad-style alignment 1..9, 5 = centre).
+R.textAligned = FUNCTION(x, y, w, h, s, col, align) {
+    IF (s == NULL) { RETURN; }
+    s = toString(s);
+    VAR tw = #s * FONT_W; VAR th = FONT_H;
+    VAR a = align == NULL ? 5 : align;
+    VAR tx = x; VAR ty = y;
+    // horizontal
+    IF (a == 8 || a == 5 || a == 2) { tx = x + math.floor((w - tw) / 2); }
+    ELSE IF (a == 9 || a == 6 || a == 3) { tx = x + w - tw; }
+    // vertical
+    IF (a == 4 || a == 5 || a == 6) { ty = y + math.floor((h - th) / 2); }
+    ELSE IF (a == 1 || a == 2 || a == 3) { ty = y + h - th; }
+    R.text(tx, ty, s, col);
+};
+
+// ----------------------------------------------------------------------
+// Engine state.
+// ----------------------------------------------------------------------
+derma._root    = NULL;
+derma._focus   = NULL;   // keyboard focus
+derma._hover   = NULL;   // panel under cursor
+derma._capture = NULL;   // panel currently dragged/grabbed
+derma._capMode = NULL;
+derma._menu    = NULL;   // open popup menu, if any
+derma._cx      = 320;
+derma._cy      = 240;
+derma._running = FALSE;
+derma._nextId  = 1;
+derma.cursorStep = 12;   // pixels per arrow tap
+derma.dragStep   = 6;
+derma.tickMs     = 30;
+derma.showCursor = TRUE;
+
+// ----------------------------------------------------------------------
+// Panel -- the base of every widget.
+// ----------------------------------------------------------------------
+VAR Panel = CLASS Panel (self) {
+    self.x = 0; self.y = 0; self.w = 64; self.h = 24;
+    self.parent = NULL; self.children = [];
+    self.visible = TRUE; self.enabled = TRUE;
+    self.paintBackground = TRUE;
+    self.bgColor = skin.panelBg;
+    self.dock = 0;
+    self.dockML = 0; self.dockMT = 0; self.dockMR = 0; self.dockMB = 0;
+    self.padL = 0; self.padT = 0; self.padR = 0; self.padB = 0;
+    self.zpos = 0;
+    self.mouseInput = TRUE; self.keyInput = FALSE;
+    self.hovered = FALSE; self.focused = FALSE;
+    self.text = ""; self.textColor = skin.text; self.font = 1; self.align = 5;
+    self._id = derma._nextId; derma._nextId = derma._nextId + 1;
+    self._removed = FALSE;
+};
+
+Panel.SetPos    = FUNCTION(self, x, y) { self.x = x; self.y = y; RETURN self; };
+Panel.GetPos    = FUNCTION(self) { RETURN self.x, self.y; };
+Panel.SetSize   = FUNCTION(self, w, h) { self.w = w; self.h = h; RETURN self; };
+Panel.SetWide   = FUNCTION(self, w) { self.w = w; RETURN self; };
+Panel.SetTall   = FUNCTION(self, h) { self.h = h; RETURN self; };
+Panel.GetWide   = FUNCTION(self) { RETURN self.w; };
+Panel.GetTall   = FUNCTION(self) { RETURN self.h; };
+Panel.GetSize   = FUNCTION(self) { RETURN self.w, self.h; };
+
+Panel.SetVisible = FUNCTION(self, v) { self.visible = v; RETURN self; };
+Panel.IsVisible  = FUNCTION(self) { RETURN self.visible; };
+Panel.SetEnabled = FUNCTION(self, v) { self.enabled = v; RETURN self; };
+Panel.IsEnabled  = FUNCTION(self) { RETURN self.enabled; };
+
+Panel.SetMouseInputEnabled    = FUNCTION(self, v) { self.mouseInput = v; RETURN self; };
+Panel.SetKeyboardInputEnabled = FUNCTION(self, v) { self.keyInput = v; RETURN self; };
+
+Panel.SetText      = FUNCTION(self, t) { self.text = (t == NULL ? "" : toString(t)); RETURN self; };
+Panel.GetText      = FUNCTION(self) { RETURN self.text; };
+Panel.SetTextColor = FUNCTION(self, c) { self.textColor = c; RETURN self; };
+Panel.SetFont      = FUNCTION(self, f) { self.font = f; RETURN self; }; // 8x8 only; no-op spacing
+Panel.SetContentAlignment = FUNCTION(self, a) { self.align = a; RETURN self; };
+Panel.SetBGColor   = FUNCTION(self, c) { self.bgColor = c; self.paintBackground = TRUE; RETURN self; };
+Panel.SetPaintBackground = FUNCTION(self, v) { self.paintBackground = v; RETURN self; };
+Panel.SetZPos      = FUNCTION(self, z) { self.zpos = z; RETURN self; };
+Panel.SetCursor    = FUNCTION(self, c) { RETURN self; }; // accepted for parity
+
+Panel.GetParent = FUNCTION(self) { RETURN self.parent; };
+Panel.GetChildren = FUNCTION(self) { RETURN self.children; };
+
+Panel.SetParent = FUNCTION(self, p) {
+    IF (self.parent != NULL) {
+        VAR i = array.indexOf(self.parent.children, self);
+        IF (i >= 0) { array.remove(self.parent.children, i); }
+    }
+    self.parent = p;
+    IF (p != NULL) { array.push(p.children, self); }
+    RETURN self;
+};
+Panel.Add = FUNCTION(self, child) { child:SetParent(self); RETURN child; };
+
+Panel.Remove = FUNCTION(self) {
+    self._removed = TRUE;
+    FOR c OF array.copy(self.children) { c:Remove(); }
+    IF (derma._focus == self)   { derma._focus = NULL; }
+    IF (derma._hover == self)   { derma._hover = NULL; }
+    IF (derma._capture == self) { derma._capture = NULL; }
+    IF (self.OnRemove != NULL) { self:OnRemove(); }
+    IF (self.parent != NULL) {
+        VAR i = array.indexOf(self.parent.children, self);
+        IF (i >= 0) { array.remove(self.parent.children, i); }
+        self.parent = NULL;
+    }
+};
+
+Panel.Dock = FUNCTION(self, m) { self.dock = m; RETURN self; };
+Panel.DockMargin = FUNCTION(self, l, t, r, b) {
+    self.dockML = l; self.dockMT = t; self.dockMR = r; self.dockMB = b; RETURN self;
+};
+Panel.DockPadding = FUNCTION(self, l, t, r, b) {
+    self.padL = l; self.padT = t; self.padR = r; self.padB = b; RETURN self;
+};
+
+Panel.InvalidateLayout = FUNCTION(self) { RETURN self; }; // full-tree relayout each frame
+
+Panel._sortedKids = FUNCTION(self) {
+    VAR a = array.copy(self.children);
+    RETURN array.sort(a, FUNCTION(p, q) {
+        IF (p.zpos != q.zpos) { RETURN p.zpos - q.zpos; }
+        RETURN p._id - q._id;
+    });
+};
+
+// Absolute top-left of this panel's local (0,0).
+Panel.LocalToScreen = FUNCTION(self, x, y) {
+    VAR ax = x; VAR ay = y; VAR p = self;
+    WHILE (p != NULL) { ax = ax + p.x; ay = ay + p.y; p = p.parent; }
+    RETURN ax, ay;
+};
+Panel.ScreenToLocal = FUNCTION(self, x, y) {
+    VAR ax = 0; VAR ay = 0; VAR p = self;
+    WHILE (p != NULL) { ax = ax + p.x; ay = ay + p.y; p = p.parent; }
+    RETURN x - ax, y - ay;
+};
+
+Panel.IsHovered = FUNCTION(self) { RETURN self.hovered; };
+Panel.HasFocus  = FUNCTION(self) { RETURN derma._focus == self; };
+Panel.RequestFocus = FUNCTION(self) { derma._setFocus(self); RETURN self; };
+Panel.KillFocus    = FUNCTION(self) { IF (derma._focus == self) { derma._setFocus(NULL); } RETURN self; };
+
+Panel.Center = FUNCTION(self) {
+    VAR par = self.parent != NULL ? self.parent : derma._ensureRoot();
+    self.x = math.floor((par.w - self.w) / 2);
+    self.y = math.floor((par.h - self.h) / 2);
+    RETURN self;
+};
+
+Panel.MoveToFront = FUNCTION(self) {
+    VAR top = 0;
+    IF (self.parent != NULL) {
+        FOR c OF self.parent.children { IF (c.zpos > top) { top = c.zpos; } }
+    }
+    self.zpos = top + 1;
+    RETURN self;
+};
+
+Panel.MakePopup = FUNCTION(self) {
+    IF (self.parent == NULL) { derma._adopt(self, NULL); }
+    self:MoveToFront();
+    self.keyInput = TRUE;
+    derma._setFocus(self);
+    RETURN self;
+};
+
+// Default look: a filled rounded-ish rect (no radius on an 8x8 grid).
+Panel.Paint = FUNCTION(self, w, h) { };
+
+derma.register = NULL; // forward; assigned below once registry exists.
+
+// ----------------------------------------------------------------------
+// DLabel
+// ----------------------------------------------------------------------
+VAR DLabel = CLASS DLabel (self) {
+    Panel.__constructor(self);
+    self.paintBackground = FALSE;
+    self.mouseInput = FALSE;
+    self.align = 4;            // mid-left like GMod
+    self.textColor = skin.text;
+    self.w = 80; self.h = 18;
+    self.autoStretch = FALSE;
+};
+DLabel.__index = Panel;
+
+DLabel.SizeToContents = FUNCTION(self) {
+    self.w = #self.text * FONT_W + 2;
+    self.h = FONT_H + 4;
+    RETURN self;
+};
+DLabel.SizeToContentsX = FUNCTION(self) { self.w = #self.text * FONT_W + 2; RETURN self; };
+DLabel.SizeToContentsY = FUNCTION(self) { self.h = FONT_H + 4; RETURN self; };
+
+DLabel.Paint = FUNCTION(self, w, h) {
+    IF (self.paintBackground) { R.rect(0, 0, w, h, self.bgColor); }
+    VAR col = self.enabled ? self.textColor : skin.textDim;
+    R.textAligned(2, 0, w - 4, h, self.text, col, self.align);
+};
+
+// ----------------------------------------------------------------------
+// DButton
+// ----------------------------------------------------------------------
+VAR DButton = CLASS DButton (self) {
+    DLabel.__constructor(self);
+    self.paintBackground = TRUE;
+    self.mouseInput = TRUE;
+    self.keyInput = TRUE;
+    self.align = 5;
+    self.w = 100; self.h = 24;
+    self.bgColor = skin.button;
+    self.textColor = skin.buttonText;
+    self._down = FALSE;
+};
+DButton.__index = DLabel;
+
+DButton.Paint = FUNCTION(self, w, h) {
+    VAR bg = skin.button;
+    IF (!self.enabled) { bg = skin.panelBg; }
+    ELSE IF (self._down) { bg = skin.buttonDown; }
+    ELSE IF (self.hovered) { bg = skin.buttonHover; }
+    R.rect(0, 0, w, h, bg);
+    R.outline(0, 0, w, h, skin.border, 1);
+    VAR tc = self.enabled ? self.textColor : skin.textDim;
+    R.textAligned(0, 0, w, h, self.text, tc, self.align);
+};
+DButton._press = FUNCTION(self, lx, ly) { self._down = TRUE; };
+DButton._release = FUNCTION(self, lx, ly) { self._down = FALSE; };
+
+// ----------------------------------------------------------------------
+// DCheckBox + DCheckBoxLabel
+// ----------------------------------------------------------------------
+VAR DCheckBox = CLASS DCheckBox (self) {
+    Panel.__constructor(self);
+    self.w = 16; self.h = 16;
+    self.paintBackground = FALSE;
+    self.keyInput = TRUE;
+    self.checked = FALSE;
+};
+DCheckBox.__index = Panel;
+
+DCheckBox.SetChecked = FUNCTION(self, v) { self.checked = v ? TRUE : FALSE; RETURN self; };
+DCheckBox.GetChecked = FUNCTION(self) { RETURN self.checked; };
+DCheckBox.Toggle = FUNCTION(self) {
+    self.checked = !self.checked;
+    IF (self.OnChange != NULL) { self:OnChange(self.checked); }
+};
+DCheckBox._press = FUNCTION(self, lx, ly) { self:Toggle(); };
+
+DCheckBox.Paint = FUNCTION(self, w, h) {
+    VAR s = math.min(w, h);
+    R.rect(0, 0, s, s, skin.entryBg);
+    R.outline(0, 0, s, s, self.hovered ? skin.accent : skin.border, 1);
+    IF (self.checked) { R.rect(3, 3, s - 6, s - 6, skin.check); }
+};
+
+VAR DCheckBoxLabel = CLASS DCheckBoxLabel (self) {
+    Panel.__constructor(self);
+    self.w = 140; self.h = 18;
+    self.paintBackground = FALSE;
+    self.keyInput = TRUE;
+    self.checked = FALSE;
+    self.align = 4;
+    self.textColor = skin.text;
+};
+DCheckBoxLabel.__index = Panel;
+
+DCheckBoxLabel.SetChecked = FUNCTION(self, v) { self.checked = v ? TRUE : FALSE; RETURN self; };
+DCheckBoxLabel.GetChecked = FUNCTION(self) { RETURN self.checked; };
+DCheckBoxLabel.Toggle = FUNCTION(self) {
+    self.checked = !self.checked;
+    IF (self.OnChange != NULL) { self:OnChange(self.checked); }
+};
+DCheckBoxLabel._press = FUNCTION(self, lx, ly) { self:Toggle(); };
+
+DCheckBoxLabel.Paint = FUNCTION(self, w, h) {
+    VAR bs = 14;
+    VAR by = math.floor((h - bs) / 2);
+    R.rect(0, by, bs, bs, skin.entryBg);
+    R.outline(0, by, bs, bs, self.hovered ? skin.accent : skin.border, 1);
+    IF (self.checked) { R.rect(3, by + 3, bs - 6, bs - 6, skin.check); }
+    R.textAligned(bs + 6, 0, w - bs - 6, h, self.text, self.textColor, 4);
+};
+
+// ----------------------------------------------------------------------
+// DTextEntry
+// ----------------------------------------------------------------------
+VAR DTextEntry = CLASS DTextEntry (self) {
+    Panel.__constructor(self);
+    self.w = 120; self.h = 22;
+    self.paintBackground = TRUE;
+    self.keyInput = TRUE;
+    self.bgColor = skin.entryBg;
+    self.textColor = skin.entryText;
+    self.value = "";
+    self.caret = 0;
+    self.numeric = FALSE;
+    self._blink = 0;
+    self.align = 4;
+};
+DTextEntry.__index = Panel;
+
+DTextEntry.SetValue = FUNCTION(self, v) {
+    self.value = (v == NULL ? "" : toString(v));
+    self.caret = #self.value;
+    RETURN self;
+};
+DTextEntry.SetText = FUNCTION(self, v) { RETURN self:SetValue(v); };
+DTextEntry.GetValue = FUNCTION(self) { RETURN self.value; };
+DTextEntry.GetText = FUNCTION(self) { RETURN self.value; };
+DTextEntry.SetNumeric = FUNCTION(self, v) { self.numeric = v ? TRUE : FALSE; RETURN self; };
+
+DTextEntry._isNumChar = FUNCTION(self, code) {
+    IF (code >= 48 && code <= 57) { RETURN TRUE; }   // 0-9
+    IF (code == 45 || code == 46) { RETURN TRUE; }   // - .
+    RETURN FALSE;
+};
+
+DTextEntry.OnKeyCode = FUNCTION(self, code) {
+    IF (code >= 32 && code < 127) {
+        IF (self.numeric && !self:_isNumChar(code)) { RETURN TRUE; }
+        VAR ch = string.fromCodePoint(code);
+        self.value = string.sub(self.value, 0, self.caret) + ch
+                   + string.sub(self.value, self.caret, #self.value);
+        self.caret = self.caret + 1;
+        IF (self.OnChange != NULL) { self:OnChange(self.value); }
+        RETURN TRUE;
+    }
+    IF (code == KEY_BACKSP) {
+        IF (self.caret > 0) {
+            self.value = string.sub(self.value, 0, self.caret - 1)
+                       + string.sub(self.value, self.caret, #self.value);
+            self.caret = self.caret - 1;
+            IF (self.OnChange != NULL) { self:OnChange(self.value); }
+        }
+        RETURN TRUE;
+    }
+    IF (code == KEY_LEFT)  { self.caret = math.max(0, self.caret - 1); RETURN TRUE; }
+    IF (code == KEY_RIGHT) { self.caret = math.min(#self.value, self.caret + 1); RETURN TRUE; }
+    IF (code == KEY_ENTER) {
+        IF (self.OnEnter != NULL) { self:OnEnter(self.value); }
+        RETURN TRUE;
+    }
+    RETURN FALSE; // Up/Down/Esc/Tab fall through to the framework
+};
+
+DTextEntry._press = FUNCTION(self, lx, ly) {
+    VAR rel = math.floor((lx - 4) / FONT_W);
+    self.caret = math.max(0, math.min(#self.value, rel));
+};
+DTextEntry._tick = FUNCTION(self) { self._blink = self._blink + 1; };
+
+DTextEntry.Paint = FUNCTION(self, w, h) {
+    R.rect(0, 0, w, h, self.bgColor);
+    R.outline(0, 0, w, h, self.focused ? skin.accent : skin.border, 1);
+    VAR ty = math.floor((h - FONT_H) / 2);
+    R.text(4, ty, self.value, self.textColor);
+    IF (self.focused && (math.floor(self._blink / 15) % 2 == 0)) {
+        VAR cx = 4 + self.caret * FONT_W;
+        R.rect(cx, ty - 1, 1, FONT_H + 2, self.textColor);
+    }
+};
+
+// ----------------------------------------------------------------------
+// DNumberWang -- numeric text entry returning a number.
+// ----------------------------------------------------------------------
+VAR DNumberWang = CLASS DNumberWang (self) {
+    DTextEntry.__constructor(self);
+    self.numeric = TRUE;
+    self.min = 0; self.max = 100;
+    self.value = "0"; self.caret = 1;
+};
+DNumberWang.__index = DTextEntry;
+
+DNumberWang.SetMin = FUNCTION(self, v) { self.min = v; RETURN self; };
+DNumberWang.SetMax = FUNCTION(self, v) { self.max = v; RETURN self; };
+DNumberWang.SetMinMax = FUNCTION(self, a, b) { self.min = a; self.max = b; RETURN self; };
+DNumberWang.GetValue = FUNCTION(self) {
+    VAR n = _toNum(self.value);
+    IF (n == NULL) { n = 0; }
+    RETURN math.clamp(n, self.min, self.max);
+};
+DNumberWang.SetValue = FUNCTION(self, v) {
+    VAR n = math.clamp(v, self.min, self.max);
+    self.value = toString(n);
+    self.caret = #self.value;
+    RETURN self;
+};
+
+// ----------------------------------------------------------------------
+// DProgress
+// ----------------------------------------------------------------------
+VAR DProgress = CLASS DProgress (self) {
+    Panel.__constructor(self);
+    self.w = 160; self.h = 16;
+    self.mouseInput = FALSE;
+    self.bgColor = skin.entryBg;
+    self.frac = 0;
+};
+DProgress.__index = Panel;
+DProgress.SetFraction = FUNCTION(self, f) { self.frac = math.clamp(f, 0, 1); RETURN self; };
+DProgress.GetFraction = FUNCTION(self) { RETURN self.frac; };
+DProgress.Paint = FUNCTION(self, w, h) {
+    R.rect(0, 0, w, h, self.bgColor);
+    R.rect(0, 0, math.floor(w * self.frac), h, skin.progress);
+    R.outline(0, 0, w, h, skin.border, 1);
+};
+
+// ----------------------------------------------------------------------
+// DSlider (horizontal)
+// ----------------------------------------------------------------------
+VAR DSlider = CLASS DSlider (self) {
+    Panel.__constructor(self);
+    self.w = 180; self.h = 18;
+    self.paintBackground = FALSE;
+    self.keyInput = TRUE;
+    self.min = 0; self.max = 1; self.value = 0;
+    self.decimals = 2;
+};
+DSlider.__index = Panel;
+
+DSlider.SetMin = FUNCTION(self, v) { self.min = v; RETURN self; };
+DSlider.SetMax = FUNCTION(self, v) { self.max = v; RETURN self; };
+DSlider.SetMinMax = FUNCTION(self, a, b) { self.min = a; self.max = b; RETURN self; };
+DSlider.SetDecimals = FUNCTION(self, d) { self.decimals = d; RETURN self; };
+DSlider.GetValue = FUNCTION(self) { RETURN self.value; };
+DSlider.SetValue = FUNCTION(self, v) {
+    VAR nv = math.clamp(v, self.min, self.max);
+    IF (nv != self.value) {
+        self.value = nv;
+        IF (self.OnValueChanged != NULL) { self:OnValueChanged(nv); }
+    }
+    RETURN self;
+};
+DSlider._frac = FUNCTION(self) {
+    IF (self.max <= self.min) { RETURN 0; }
+    RETURN (self.value - self.min) / (self.max - self.min);
+};
+DSlider._press = FUNCTION(self, lx, ly) {
+    VAR f = math.clamp((lx - 6) / (self.w - 12), 0, 1);
+    self:SetValue(self.min + f * (self.max - self.min));
+    derma._setCapture(self, "slider");
+};
+DSlider._drag = FUNCTION(self, dir, step) {
+    VAR span = self.max - self.min;
+    VAR d = span * (step / (self.w - 12));
+    IF (dir == "l") { self:SetValue(self.value - d); }
+    ELSE IF (dir == "r") { self:SetValue(self.value + d); }
+};
+DSlider.Paint = FUNCTION(self, w, h) {
+    VAR cy = math.floor(h / 2);
+    R.rect(6, cy - 2, w - 12, 4, skin.scrollTrack);
+    R.rect(6, cy - 2, math.floor((w - 12) * self:_frac()), 4, skin.accent);
+    VAR kx = 6 + math.floor((w - 12) * self:_frac());
+    VAR kc = (self.hovered || derma._capture == self) ? skin.accent : skin.scrollThumb;
+    R.rect(kx - 4, cy - 7, 8, 14, kc);
+    R.outline(kx - 4, cy - 7, 8, 14, skin.border, 1);
+};
+
+// ----------------------------------------------------------------------
+// DNumSlider -- label + slider + numeric readout in one widget.
+// ----------------------------------------------------------------------
+VAR DNumSlider = CLASS DNumSlider (self) {
+    Panel.__constructor(self);
+    self.w = 260; self.h = 22;
+    self.paintBackground = FALSE;
+    self.keyInput = TRUE;
+    self.min = 0; self.max = 100; self.value = 0; self.decimals = 0;
+    self.label = "";
+    self._labelW = 70;
+    self._readW = 44;
+};
+DNumSlider.__index = Panel;
+
+DNumSlider.SetText = FUNCTION(self, t) { self.label = toString(t); RETURN self; };
+DNumSlider.SetMin = FUNCTION(self, v) { self.min = v; RETURN self; };
+DNumSlider.SetMax = FUNCTION(self, v) { self.max = v; RETURN self; };
+DNumSlider.SetMinMax = FUNCTION(self, a, b) { self.min = a; self.max = b; RETURN self; };
+DNumSlider.SetDecimals = FUNCTION(self, d) { self.decimals = d; RETURN self; };
+DNumSlider.GetValue = FUNCTION(self) { RETURN self.value; };
+DNumSlider.SetValue = FUNCTION(self, v) {
+    VAR nv = math.clamp(v, self.min, self.max);
+    IF (nv != self.value) {
+        self.value = nv;
+        IF (self.OnValueChanged != NULL) { self:OnValueChanged(nv); }
+    }
+    RETURN self;
+};
+DNumSlider._trackX = FUNCTION(self) { RETURN self._labelW; };
+DNumSlider._trackW = FUNCTION(self) { RETURN self.w - self._labelW - self._readW; };
+DNumSlider._frac = FUNCTION(self) {
+    IF (self.max <= self.min) { RETURN 0; }
+    RETURN (self.value - self.min) / (self.max - self.min);
+};
+DNumSlider._press = FUNCTION(self, lx, ly) {
+    VAR f = math.clamp((lx - self:_trackX() - 6) / (self:_trackW() - 12), 0, 1);
+    self:SetValue(self.min + f * (self.max - self.min));
+    derma._setCapture(self, "slider");
+};
+DNumSlider._drag = FUNCTION(self, dir, step) {
+    VAR span = self.max - self.min;
+    VAR d = span * (step / (self:_trackW() - 12));
+    IF (self.decimals <= 0 && d < 1) { d = 1; }
+    IF (dir == "l") { self:SetValue(self.value - d); }
+    ELSE IF (dir == "r") { self:SetValue(self.value + d); }
+};
+DNumSlider._fmt = FUNCTION(self) {
+    IF (self.decimals <= 0) { RETURN toString(math.round(self.value)); }
+    VAR m = math.pow(10, self.decimals);
+    RETURN toString(math.round(self.value * m) / m);
+};
+DNumSlider.Paint = FUNCTION(self, w, h) {
+    R.textAligned(0, 0, self._labelW - 4, h, self.label, skin.text, 4);
+    VAR tx = self:_trackX(); VAR tw = self:_trackW();
+    VAR cy = math.floor(h / 2);
+    R.rect(tx + 6, cy - 2, tw - 12, 4, skin.scrollTrack);
+    R.rect(tx + 6, cy - 2, math.floor((tw - 12) * self:_frac()), 4, skin.accent);
+    VAR kx = tx + 6 + math.floor((tw - 12) * self:_frac());
+    VAR kc = (self.hovered || derma._capture == self) ? skin.accent : skin.scrollThumb;
+    R.rect(kx - 4, cy - 7, 8, 14, kc);
+    R.outline(kx - 4, cy - 7, 8, 14, skin.border, 1);
+    R.rect(self.w - self._readW, 0, self._readW, h, skin.entryBg);
+    R.textAligned(self.w - self._readW, 0, self._readW, h, self:_fmt(), skin.text, 5);
+};
+
+// ----------------------------------------------------------------------
+// DFrame -- titled, draggable, closable window.
+// ----------------------------------------------------------------------
+VAR TITLE_H = 24;
+VAR DFrame = CLASS DFrame (self) {
+    Panel.__constructor(self);
+    self.w = 320; self.h = 200;
+    self.bgColor = skin.frameBg;
+    self.keyInput = TRUE;
+    self.title = "Frame";
+    self.draggable = TRUE;
+    self.showClose = TRUE;
+    self.closeOnEscape = TRUE;
+    self.padL = 5; self.padT = TITLE_H + 5; self.padR = 5; self.padB = 5;
+};
+DFrame.__index = Panel;
+
+DFrame.SetTitle = FUNCTION(self, t) { self.title = toString(t); RETURN self; };
+DFrame.SetDraggable = FUNCTION(self, v) { self.draggable = v ? TRUE : FALSE; RETURN self; };
+DFrame.ShowCloseButton = FUNCTION(self, v) { self.showClose = v ? TRUE : FALSE; RETURN self; };
+
+DFrame.Close = FUNCTION(self) {
+    IF (self.OnClose != NULL) { self:OnClose(); }
+    self:Remove();
+};
+
+DFrame._press = FUNCTION(self, lx, ly) {
+    IF (ly < TITLE_H) {
+        IF (self.showClose && lx >= self.w - TITLE_H) { self:Close(); RETURN; }
+        IF (self.draggable) { derma._setCapture(self, "move"); }
+    }
+};
+DFrame._drag = FUNCTION(self, dir, step) {
+    IF (dir == "l") { self.x = self.x - step; }
+    ELSE IF (dir == "r") { self.x = self.x + step; }
+    ELSE IF (dir == "u") { self.y = self.y - step; }
+    ELSE IF (dir == "d") { self.y = self.y + step; }
+};
+
+DFrame.Paint = FUNCTION(self, w, h) {
+    R.rect(0, 0, w, h, self.bgColor);
+    R.outline(0, 0, w, h, skin.border, 1);
+    R.rect(0, 0, w, TITLE_H, skin.titleBar);
+    R.textAligned(8, 0, w - TITLE_H - 8, TITLE_H, self.title, skin.titleText, 4);
+    IF (self.showClose) {
+        VAR bx = w - TITLE_H;
+        VAR hot = self.hovered;
+        R.rect(bx, 0, TITLE_H, TITLE_H, hot ? Color(180, 60, 60) : skin.titleBar);
+        R.textAligned(bx, 0, TITLE_H, TITLE_H, "x", skin.titleText, 5);
+    }
+};
+
+// ----------------------------------------------------------------------
+// DScrollPanel -- viewport + scrollable canvas + vertical bar.
+// ----------------------------------------------------------------------
+VAR BAR_W = 12;
+VAR DScrollPanel = CLASS DScrollPanel (self) {
+    Panel.__constructor(self);
+    self.w = 200; self.h = 200;
+    self.bgColor = skin.panelBg;
+    self.scroll = 0;
+    self._canvasH = 0;
+};
+DScrollPanel.__index = Panel;
+
+DScrollPanel.GetCanvas = FUNCTION(self) { RETURN self; };
+DScrollPanel.AddItem = FUNCTION(self, child) { child:SetParent(self); RETURN child; };
+
+DScrollPanel._contentH = FUNCTION(self) {
+    VAR maxb = 0;
+    FOR c OF self.children {
+        IF (c.visible) {
+            VAR b = c.y + c.h;
+            IF (b > maxb) { maxb = b; }
+        }
+    }
+    RETURN maxb;
+};
+DScrollPanel._maxScroll = FUNCTION(self) {
+    RETURN math.max(0, self:_contentH() - self.h);
+};
+DScrollPanel.ScrollBy = FUNCTION(self, dy) {
+    self.scroll = math.clamp(self.scroll + dy, 0, self:_maxScroll());
+};
+
+// Children render shifted up by scroll: implemented by offsetting child y at
+// layout time would fight docking, so we apply the scroll as a paint/​hit
+// offset via a wrapper. Simplest: keep children laid out from 0 and shift
+// the whole subtree by adjusting this panel's reported child origin. We do
+// that by giving the scroll panel a virtual inner offset.
+DScrollPanel._press = FUNCTION(self, lx, ly) {
+    // click in the scrollbar track pages; otherwise ignore (children get clicks)
+    IF (lx >= self.w - BAR_W) {
+        VAR ms = self:_maxScroll();
+        IF (ms > 0) {
+            VAR f = math.clamp(ly / self.h, 0, 1);
+            self.scroll = f * ms;
+            derma._setCapture(self, "scroll");
+        }
+    }
+};
+DScrollPanel._drag = FUNCTION(self, dir, step) {
+    IF (dir == "u") { self:ScrollBy(-step * 3); }
+    ELSE IF (dir == "d") { self:ScrollBy(step * 3); }
+};
+DScrollPanel.Paint = FUNCTION(self, w, h) {
+    R.rect(0, 0, w, h, self.bgColor);
+    VAR ms = self:_maxScroll();
+    IF (ms > 0) {
+        R.rect(w - BAR_W, 0, BAR_W, h, skin.scrollTrack);
+        VAR th = math.max(20, math.floor(h * h / self:_contentH()));
+        VAR ty = math.floor((h - th) * (self.scroll / ms));
+        R.rect(w - BAR_W + 2, ty, BAR_W - 4, th, skin.scrollThumb);
+    }
+};
+
+// ----------------------------------------------------------------------
+// DMenu / DMenuOption -- popup option list.
+// ----------------------------------------------------------------------
+VAR DMenuOption = CLASS DMenuOption (self) {
+    DButton.__constructor(self);
+    self.h = 20;
+    self.align = 4;
+    self.bgColor = skin.frameBg;
+};
+DMenuOption.__index = DButton;
+DMenuOption.Paint = FUNCTION(self, w, h) {
+    R.rect(0, 0, w, h, self.hovered ? skin.selected : skin.frameBg);
+    R.textAligned(8, 0, w - 10, h, self.text, skin.text, 4);
+};
+
+VAR DMenu = CLASS DMenu (self) {
+    Panel.__constructor(self);
+    self.w = 140; self.h = 4;
+    self.bgColor = skin.frameBg;
+    self.padL = 2; self.padT = 2; self.padR = 2; self.padB = 2;
+    self.zpos = 100000;
+    self._optH = 20;
+};
+DMenu.__index = Panel;
+
+// The DoClick closure may only capture AddOption's own locals (fn, self),
+// never the IIFE-level `derma` -- so it dismisses through a method.
+DMenu.AddOption = FUNCTION(self, text, ...rest) {
+    VAR fn = (#rest > 0 ? rest[0] : NULL);
+    VAR o = derma.Create("DMenuOption", self);
+    o:SetText(text);
+    o:Dock(derma.TOP);
+    o.DoClick = FUNCTION(opt) {
+        IF (fn != NULL) { fn(opt); }
+        self:_dismiss();
+    };
+    self.h = self.padT + self.padB + (#self.children) * self._optH;
+    RETURN o;
+};
+DMenu._dismiss = FUNCTION(self) {
+    IF (derma._menu == self) { derma._menu = NULL; }
+    self:Remove();
+};
+DMenu.Open = FUNCTION(self, x, y) {
+    self.x = x; self.y = y;
+    self:MoveToFront();
+    derma._menu = self;
+    RETURN self;
+};
+DMenu.Paint = FUNCTION(self, w, h) {
+    R.rect(0, 0, w, h, self.bgColor);
+    R.outline(0, 0, w, h, skin.border, 1);
+};
+
+// ----------------------------------------------------------------------
+// DComboBox
+// ----------------------------------------------------------------------
+VAR DComboBox = CLASS DComboBox (self) {
+    DButton.__constructor(self);
+    self.align = 4;
+    self.choices = [];
+    self.selected = -1;
+    self.text = "";
+    self.placeholder = "Select...";
+};
+DComboBox.__index = DButton;
+
+DComboBox.AddChoice = FUNCTION(self, text, ...rest) {
+    array.push(self.choices, { text: toString(text), data: (#rest > 0 ? rest[0] : NULL) });
+    RETURN self;
+};
+DComboBox.Clear = FUNCTION(self) { self.choices = []; self.selected = -1; self.text = ""; RETURN self; };
+DComboBox.GetSelected = FUNCTION(self) {
+    IF (self.selected < 0) { RETURN NULL, NULL; }
+    VAR c = self.choices[self.selected];
+    RETURN c.text, c.data;
+};
+DComboBox.ChooseOption = FUNCTION(self, idx) {
+    IF (idx < 0 || idx >= #self.choices) { RETURN; }
+    self.selected = idx;
+    VAR c = self.choices[idx];
+    self.text = c.text;
+    IF (self.OnSelect != NULL) { self:OnSelect(idx, c.text, c.data); }
+};
+DComboBox._press = FUNCTION(self, lx, ly) {
+    self._down = TRUE;
+    VAR menu = derma.Create("DMenu");
+    menu:SetWide(math.max(self.w, 120));
+    VAR i = 0;
+    FOR c OF self.choices {
+        // Loop bindings are shared, so stash the index on the option and
+        // read it back at click time rather than capturing the loop var.
+        VAR o = menu:AddOption(c.text, FUNCTION(opt) { self:ChooseOption(opt._idx); });
+        o._idx = i;
+        i = i + 1;
+    }
+    VAR sx, sy = self:LocalToScreen(0, self.h);
+    menu:Open(sx, sy);
+};
+DComboBox.Paint = FUNCTION(self, w, h) {
+    VAR bg = self.hovered ? skin.buttonHover : skin.button;
+    R.rect(0, 0, w, h, bg);
+    R.outline(0, 0, w, h, skin.border, 1);
+    VAR shown = self.selected >= 0 ? self.text : self.placeholder;
+    VAR tc = self.selected >= 0 ? self.textColor : skin.textDim;
+    R.textAligned(6, 0, w - 22, h, shown, tc, 4);
+    R.textAligned(w - 16, 0, 14, h, "v", skin.textDim, 5);
+};
+
+// ----------------------------------------------------------------------
+// DListView -- columns + selectable rows.
+// ----------------------------------------------------------------------
+VAR ROW_H = 18;
+VAR DListView = CLASS DListView (self) {
+    Panel.__constructor(self);
+    self.w = 240; self.h = 160;
+    self.bgColor = skin.entryBg;
+    self.columns = [];
+    self.lines = [];
+    self.selected = -1;
+    self.headerH = 20;
+};
+DListView.__index = Panel;
+
+DListView.AddColumn = FUNCTION(self, name, ...rest) {
+    array.push(self.columns, { name: toString(name), w: (#rest > 0 ? rest[0] : 80) });
+    RETURN self;
+};
+DListView.AddLine = FUNCTION(self, ...vals) {
+    array.push(self.lines, { cols: vals });
+    RETURN #self.lines - 1;
+};
+DListView.Clear = FUNCTION(self) { self.lines = []; self.selected = -1; RETURN self; };
+DListView.GetSelectedLine = FUNCTION(self) { RETURN self.selected; };
+
+DListView._press = FUNCTION(self, lx, ly) {
+    IF (ly < self.headerH) { RETURN; }
+    VAR row = math.floor((ly - self.headerH) / ROW_H);
+    IF (row >= 0 && row < #self.lines) {
+        self.selected = row;
+        IF (self.OnRowSelected != NULL) { self:OnRowSelected(row, self.lines[row]); }
+    }
+};
+DListView.Paint = FUNCTION(self, w, h) {
+    R.rect(0, 0, w, h, self.bgColor);
+    R.rect(0, 0, w, self.headerH, skin.titleBar);
+    VAR cx = 0;
+    FOR col OF self.columns {
+        R.textAligned(cx + 4, 0, col.w - 6, self.headerH, col.name, skin.titleText, 4);
+        cx = cx + col.w;
+    }
+    VAR ri = 0;
+    FOR ln OF self.lines {
+        VAR ry = self.headerH + ri * ROW_H;
+        IF (ry + ROW_H > h) { BREAK; }
+        IF (ri == self.selected) { R.rect(0, ry, w, ROW_H, skin.selected); }
+        VAR cxx = 0; VAR ci = 0;
+        FOR col OF self.columns {
+            VAR v = ln.cols[ci];
+            R.textAligned(cxx + 4, ry, col.w - 6, ROW_H, (v == NULL ? "" : toString(v)), skin.text, 4);
+            cxx = cxx + col.w; ci = ci + 1;
+        }
+        ri = ri + 1;
+    }
+    R.outline(0, 0, w, h, skin.border, 1);
+};
+
+// ----------------------------------------------------------------------
+// DPropertySheet -- tabbed container.
+// ----------------------------------------------------------------------
+VAR TAB_H = 24;
+VAR DPropertySheet = CLASS DPropertySheet (self) {
+    Panel.__constructor(self);
+    self.w = 320; self.h = 220;
+    self.paintBackground = FALSE;
+    self.sheets = [];
+    self.active = 0;
+};
+DPropertySheet.__index = Panel;
+
+DPropertySheet.AddSheet = FUNCTION(self, label, panel) {
+    panel:SetParent(self);
+    array.push(self.sheets, { label: toString(label), panel: panel });
+    self:_refresh();
+    RETURN panel;
+};
+DPropertySheet.SetActiveTab = FUNCTION(self, idx) {
+    IF (idx >= 0 && idx < #self.sheets) { self.active = idx; self:_refresh(); }
+};
+DPropertySheet._refresh = FUNCTION(self) {
+    VAR i = 0;
+    FOR s OF self.sheets {
+        s.panel:SetVisible(i == self.active);
+        s.panel:SetPos(2, TAB_H + 2);
+        s.panel:SetSize(self.w - 4, self.h - TAB_H - 4);
+        i = i + 1;
+    }
+};
+DPropertySheet._press = FUNCTION(self, lx, ly) {
+    IF (ly < TAB_H) {
+        VAR tx = 0; VAR i = 0;
+        FOR s OF self.sheets {
+            VAR tw = #s.label * FONT_W + 16;
+            IF (lx >= tx && lx < tx + tw) { self:SetActiveTab(i); RETURN; }
+            tx = tx + tw; i = i + 1;
+        }
+    }
+};
+DPropertySheet.Paint = FUNCTION(self, w, h) {
+    R.rect(0, TAB_H, w, h - TAB_H, skin.panelBg);
+    R.outline(0, TAB_H, w, h - TAB_H, skin.border, 1);
+    VAR tx = 0; VAR i = 0;
+    FOR s OF self.sheets {
+        VAR tw = #s.label * FONT_W + 16;
+        VAR on = i == self.active;
+        R.rect(tx, 0, tw, TAB_H, on ? skin.panelBg : skin.titleBar);
+        R.textAligned(tx, 0, tw, TAB_H, s.label, on ? skin.text : skin.textDim, 5);
+        tx = tx + tw; i = i + 1;
+    }
+};
+
+// ----------------------------------------------------------------------
+// DColorMixer -- three RGB sliders + a preview swatch.
+// ----------------------------------------------------------------------
+// Sliders are built inline (the constructor sits at IIFE scope, so it can
+// reach derma/skin directly). The change callback only touches its slider
+// argument -- sl.parent is the mixer -- so it captures nothing.
+VAR _mixerOnChange = FUNCTION(sl, v) { sl.parent:_recompute(); };
+VAR DColorMixer = CLASS DColorMixer (self) {
+    Panel.__constructor(self);
+    self.w = 240; self.h = 110;
+    self.bgColor = skin.panelBg;
+    self.color = Color(255, 255, 255);
+    self.padL = 6; self.padT = 6; self.padR = 70; self.padB = 6;
+    self._r = derma.Create("DNumSlider", self);
+    self._r:Dock(derma.TOP); self._r:DockMargin(0, 0, 0, 4);
+    self._r:SetText("R"); self._r:SetMinMax(0, 255); self._r:SetDecimals(0); self._r:SetValue(255);
+    self._r.OnValueChanged = _mixerOnChange;
+    self._g = derma.Create("DNumSlider", self);
+    self._g:Dock(derma.TOP); self._g:DockMargin(0, 0, 0, 4);
+    self._g:SetText("G"); self._g:SetMinMax(0, 255); self._g:SetDecimals(0); self._g:SetValue(255);
+    self._g.OnValueChanged = _mixerOnChange;
+    self._b = derma.Create("DNumSlider", self);
+    self._b:Dock(derma.TOP); self._b:DockMargin(0, 0, 0, 4);
+    self._b:SetText("B"); self._b:SetMinMax(0, 255); self._b:SetDecimals(0); self._b:SetValue(255);
+    self._b.OnValueChanged = _mixerOnChange;
+};
+DColorMixer.__index = Panel;
+
+DColorMixer._recompute = FUNCTION(self) {
+    self.color = Color(math.round(self._r:GetValue()),
+                       math.round(self._g:GetValue()),
+                       math.round(self._b:GetValue()));
+    IF (self.OnChange != NULL) { self:OnChange(self.color); }
+};
+DColorMixer.SetColor = FUNCTION(self, c) {
+    self.color = Color(c.r, c.g, c.b, c.a);
+    self._r:SetValue(c.r); self._g:SetValue(c.g); self._b:SetValue(c.b);
+    RETURN self;
+};
+DColorMixer.GetColor = FUNCTION(self) { RETURN self.color; };
+DColorMixer.Paint = FUNCTION(self, w, h) {
+    R.rect(0, 0, w, h, self.bgColor);
+    R.outline(0, 0, w, h, skin.border, 1);
+    R.rect(w - 62, 6, 56, h - 12, self.color);
+    R.outline(w - 62, 6, 56, h - 12, skin.border, 1);
+};
+
+// ----------------------------------------------------------------------
+// Registry + factory.
+// ----------------------------------------------------------------------
+VAR registry = {};
+derma.register = FUNCTION(name, cls) { registry[name] = cls; RETURN cls; };
+derma.isRegistered = FUNCTION(name) { RETURN registry[name] != NULL; };
+
+derma.register("Panel", Panel);
+derma.register("DPanel", Panel);
+derma.register("DLabel", DLabel);
+derma.register("DButton", DButton);
+derma.register("DCheckBox", DCheckBox);
+derma.register("DCheckBoxLabel", DCheckBoxLabel);
+derma.register("DTextEntry", DTextEntry);
+derma.register("DNumberWang", DNumberWang);
+derma.register("DProgress", DProgress);
+derma.register("DSlider", DSlider);
+derma.register("DNumSlider", DNumSlider);
+derma.register("DFrame", DFrame);
+derma.register("DScrollPanel", DScrollPanel);
+derma.register("DMenu", DMenu);
+derma.register("DMenuOption", DMenuOption);
+derma.register("DComboBox", DComboBox);
+derma.register("DListView", DListView);
+derma.register("DPropertySheet", DPropertySheet);
+derma.register("DColorMixer", DColorMixer);
+
+derma._ensureRoot = FUNCTION() {
+    IF (derma._root == NULL) {
+        VAR r = Panel();
+        r.paintBackground = FALSE;
+        r.mouseInput = TRUE;
+        r.w = 640; r.h = 480;
+        r._isRoot = TRUE;
+        derma._root = r;
+    }
+    RETURN derma._root;
+};
+derma.getRoot = FUNCTION() { RETURN derma._ensureRoot(); };
+
+derma._adopt = FUNCTION(p, parent) {
+    VAR par = parent != NULL ? parent : derma._ensureRoot();
+    p:SetParent(par);
+};
+
+derma.Create = FUNCTION(name, ...rest) {
+    VAR cls = registry[name];
+    IF (cls == NULL) { THROW "derma: unknown panel class '" + toString(name) + "'"; }
+    VAR p = cls();
+    derma._adopt(p, (#rest > 0 ? rest[0] : NULL));
+    RETURN p;
+};
+// GMod alias.
+derma.vguiCreate = derma.Create;
+
+// ----------------------------------------------------------------------
+// Layout (docking), think, hit-test, paint.
+// ----------------------------------------------------------------------
+derma._layoutPanel = FUNCTION(p) {
+    IF (!p.visible) { RETURN; }
+    VAR cl = p.padL; VAR ct = p.padT;
+    VAR cr = p.w - p.padR; VAR cb = p.h - p.padB;
+    FOR c OF p.children {
+        IF (!c.visible || c.dock == 0) { CONTINUE; }
+        VAR ml = c.dockML; VAR mt = c.dockMT; VAR mr = c.dockMR; VAR mb = c.dockMB;
+        IF (c.dock == derma.TOP) {
+            c:SetPos(cl + ml, ct + mt); c:SetSize(cr - cl - ml - mr, c.h);
+            ct = ct + c.h + mt + mb;
+        } ELSE IF (c.dock == derma.BOTTOM) {
+            c:SetSize(cr - cl - ml - mr, c.h); c:SetPos(cl + ml, cb - c.h - mb);
+            cb = cb - c.h - mt - mb;
+        } ELSE IF (c.dock == derma.LEFT) {
+            c:SetPos(cl + ml, ct + mt); c:SetSize(c.w, cb - ct - mt - mb);
+            cl = cl + c.w + ml + mr;
+        } ELSE IF (c.dock == derma.RIGHT) {
+            c:SetSize(c.w, cb - ct - mt - mb); c:SetPos(cr - c.w - mr, ct + mt);
+            cr = cr - c.w - ml - mr;
+        } ELSE IF (c.dock == derma.FILL) {
+            c:SetPos(cl + ml, ct + mt); c:SetSize(cr - cl - ml - mr, cb - ct - mt - mb);
+        }
+    }
+    IF (p.PerformLayout != NULL) { p:PerformLayout(p.w, p.h); }
+    FOR c OF array.copy(p.children) { derma._layoutPanel(c); }
+};
+
+derma._thinkTree = FUNCTION(p) {
+    IF (p._tick != NULL) { p:_tick(); }
+    IF (p.Think != NULL) { p:Think(); }
+    FOR c OF array.copy(p.children) { derma._thinkTree(c); }
+};
+
+// Per-panel child origin: scroll panels shift their children up by scroll.
+derma._childOriginY = FUNCTION(p) {
+    IF (p.scroll != NULL) { RETURN -p.scroll; }
+    RETURN 0;
+};
+
+derma._hitTest = FUNCTION(p, px, py, x, y) {
+    IF (!p.visible) { RETURN NULL; }
+    VAR ax = px + p.x; VAR ay = py + p.y;
+    IF (x < ax || y < ay || x >= ax + p.w || y >= ay + p.h) { RETURN NULL; }
+    VAR oy = derma._childOriginY(p);
+    VAR kids = p:_sortedKids();
+    IF (#kids > 0) {
+        FOR i IN (#kids - 1) <- 0 {
+            VAR hit = derma._hitTest(kids[i], ax, ay + oy, x, y);
+            IF (hit != NULL) { RETURN hit; }
+        }
+    }
+    IF (p.mouseInput && p.enabled) { RETURN p; }
+    RETURN NULL;
+};
+
+derma._paintTree = FUNCTION(p, px, py, clx, cly, clw, clh) {
+    IF (!p.visible) { RETURN; }
+    VAR ax = px + p.x; VAR ay = py + p.y;
+    VAR nlx = math.max(clx, ax);          VAR nly = math.max(cly, ay);
+    VAR nrx = math.min(clx + clw, ax + p.w); VAR nry = math.min(cly + clh, ay + p.h);
+    VAR ncw = nrx - nlx; VAR nch = nry - nly;
+    IF (ncw <= 0 || nch <= 0) { RETURN; }
+    R.ox = ax; R.oy = ay; R.cx = nlx; R.cy = nly; R.cw = ncw; R.ch = nch;
+    IF (p.paintBackground) { R.rect(0, 0, p.w, p.h, p.bgColor); }
+    IF (p.Paint != NULL) { p:Paint(p.w, p.h); }
+    VAR oy = derma._childOriginY(p);
+    VAR kids = p:_sortedKids();
+    FOR c OF kids { derma._paintTree(c, ax, ay + oy, nlx, nly, ncw, nch); }
+    R.ox = ax; R.oy = ay; R.cx = nlx; R.cy = nly; R.cw = ncw; R.ch = nch;
+    IF (p.PaintOver != NULL) { p:PaintOver(p.w, p.h); }
+};
+
+// ----------------------------------------------------------------------
+// Focus, capture, cursor, event routing.
+// ----------------------------------------------------------------------
+derma._setFocus = FUNCTION(w) {
+    IF (derma._focus == w) { RETURN; }
+    VAR old = derma._focus;
+    IF (old != NULL) {
+        old.focused = FALSE;
+        IF (old.OnFocusChanged != NULL) { old:OnFocusChanged(FALSE); }
+    }
+    derma._focus = w;
+    IF (w != NULL) {
+        w.focused = TRUE;
+        IF (w.OnFocusChanged != NULL) { w:OnFocusChanged(TRUE); }
+    }
+};
+
+derma._setCapture = FUNCTION(p, mode) { derma._capture = p; derma._capMode = mode; };
+derma._releaseCapture = FUNCTION() { derma._capture = NULL; derma._capMode = NULL; };
+
+derma._collectFocusable = FUNCTION(p, out) {
+    FOR c OF p:_sortedKids() {
+        IF (c.visible && c.enabled && c.keyInput) { array.push(out, c); }
+        IF (c.visible) { derma._collectFocusable(c, out); }
+    }
+};
+derma._focusNext = FUNCTION() {
+    VAR list = [];
+    derma._collectFocusable(derma._ensureRoot(), list);
+    IF (#list == 0) { RETURN; }
+    VAR idx = array.indexOf(list, derma._focus);
+    VAR nxt = list[(idx + 1) % #list];
+    derma._setFocus(nxt);
+    VAR sx, sy = nxt:LocalToScreen(math.floor(nxt.w / 2), math.floor(nxt.h / 2));
+    derma._cx = sx; derma._cy = sy;
+};
+
+derma._clampCursor = FUNCTION() {
+    VAR r = derma._ensureRoot();
+    derma._cx = math.clamp(derma._cx, 0, r.w - 1);
+    derma._cy = math.clamp(derma._cy, 0, r.h - 1);
+};
+
+// Public: drive the cursor / clicks from any source (incl. a real mouse).
+derma.feedCursor = FUNCTION(x, y) { derma._cx = x; derma._cy = y; derma._clampCursor(); };
+derma.moveCursor = FUNCTION(dx, dy) { derma._cx = derma._cx + dx; derma._cy = derma._cy + dy; derma._clampCursor(); };
+
+derma.feedClick = FUNCTION(x, y) {
+    derma._cx = x; derma._cy = y; derma._clampCursor();
+    VAR target = derma._hitTest(derma._ensureRoot(), 0, 0, derma._cx, derma._cy);
+    // Clicking outside an open menu closes it.
+    IF (derma._menu != NULL) {
+        VAR inMenu = target != NULL && derma._isDescendant(target, derma._menu);
+        IF (!inMenu) { derma._menu:Remove(); derma._menu = NULL; }
+    }
+    IF (target == NULL) { derma._setFocus(NULL); RETURN; }
+    derma._setFocus(target.keyInput ? target : NULL);
+    VAR lx, ly = target:ScreenToLocal(derma._cx, derma._cy);
+    IF (target._press != NULL) { target:_press(lx, ly); }
+    IF (target.OnMousePressed != NULL) { target:OnMousePressed(MOUSE_LEFT, lx, ly); }
+    IF (target._release != NULL) { target:_release(lx, ly); }
+    IF (target.OnMouseReleased != NULL) { target:OnMouseReleased(MOUSE_LEFT, lx, ly); }
+    IF (target.enabled && target.DoClick != NULL) { target:DoClick(); }
+};
+
+derma._isDescendant = FUNCTION(node, ancestor) {
+    VAR p = node;
+    WHILE (p != NULL) { IF (p == ancestor) { RETURN TRUE; } p = p.parent; }
+    RETURN FALSE;
+};
+
+derma._updateHover = FUNCTION() {
+    VAR t = derma._hitTest(derma._ensureRoot(), 0, 0, derma._cx, derma._cy);
+    IF (t != derma._hover) {
+        IF (derma._hover != NULL) {
+            derma._hover.hovered = FALSE;
+            IF (derma._hover.OnCursorExited != NULL) { derma._hover:OnCursorExited(); }
+        }
+        derma._hover = t;
+        IF (t != NULL) {
+            t.hovered = TRUE;
+            IF (t.OnCursorEntered != NULL) { t:OnCursorEntered(); }
+        }
+    }
+};
+
+derma._escape = FUNCTION() {
+    IF (derma._menu != NULL) { derma._menu:Remove(); derma._menu = NULL; RETURN; }
+    IF (derma._focus != NULL && derma._focus.value != NULL) { derma._setFocus(NULL); RETURN; }
+    // close the top-most closeable frame
+    VAR r = derma._ensureRoot();
+    VAR best = NULL;
+    FOR c OF r.children {
+        IF (c.visible && c.closeOnEscape == TRUE) {
+            IF (best == NULL || c.zpos >= best.zpos) { best = c; }
+        }
+    }
+    IF (best != NULL) { best:Close(); }
+};
+
+// Translate one key code into an action.
+derma._key = FUNCTION(code) {
+    IF (derma._capture != NULL) {
+        IF (code == KEY_ENTER || code == KEY_ESC) { derma._releaseCapture(); RETURN; }
+        IF (code == KEY_LEFT)  { derma._capture:_drag("l", derma.dragStep); RETURN; }
+        IF (code == KEY_RIGHT) { derma._capture:_drag("r", derma.dragStep); RETURN; }
+        IF (code == KEY_UP)    { derma._capture:_drag("u", derma.dragStep); RETURN; }
+        IF (code == KEY_DOWN)  { derma._capture:_drag("d", derma.dragStep); RETURN; }
+        RETURN;
+    }
+    VAR fw = derma._focus;
+    IF (fw != NULL && fw.OnKeyCode != NULL && !fw._removed) {
+        IF (fw:OnKeyCode(code)) { RETURN; }
+    }
+    IF (code == KEY_LEFT)  { derma.moveCursor(0 - derma.cursorStep, 0); }
+    ELSE IF (code == KEY_RIGHT) { derma.moveCursor(derma.cursorStep, 0); }
+    ELSE IF (code == KEY_UP)    { derma.moveCursor(0, 0 - derma.cursorStep); }
+    ELSE IF (code == KEY_DOWN)  { derma.moveCursor(0, derma.cursorStep); }
+    ELSE IF (code == KEY_ENTER) { derma.feedClick(derma._cx, derma._cy); }
+    ELSE IF (code == KEY_TAB)   { derma._focusNext(); }
+    ELSE IF (code == KEY_ESC)   { derma._escape(); }
+};
+derma.handleKey = FUNCTION(code) { derma._key(code); };
+
+// ----------------------------------------------------------------------
+// Cursor glyph.
+// ----------------------------------------------------------------------
+derma._drawCursor = FUNCTION() {
+    IF (!derma.showCursor) { RETURN; }
+    VAR x = math.floor(derma._cx); VAR y = math.floor(derma._cy);
+    VAR blk = _pk(Color(0, 0, 0)); VAR wht = _pk(Color(255, 255, 255));
+    // black outline then white fill, arrow pointing up-left
+    B.d.line(x, y, x, y + 14, blk);
+    B.d.line(x, y, x + 10, y + 10, blk);
+    B.d.line(x, y + 14, x + 10, y + 10, blk);
+    B.d.line(x + 1, y + 1, x + 1, y + 11, wht);
+    B.d.line(x + 1, y + 1, x + 7, y + 7, wht);
+    B.d.line(x + 2, y + 3, x + 2, y + 9, wht);
+};
+
+// ----------------------------------------------------------------------
+// Frame: one full think + paint cycle.
+// ----------------------------------------------------------------------
+derma.frame = FUNCTION() {
+    VAR r = derma._ensureRoot();
+    IF (B.d != NULL) { r.w = B.d.width(); r.h = B.d.height(); }
+    derma._clampCursor();
+    derma._layoutPanel(r);
+    derma._thinkTree(r);
+    derma._updateHover();
+    IF (B.d != NULL) {
+        B.d.clear(_pk(skin.desktop));
+        derma._paintTree(r, 0, 0, 0, 0, r.w, r.h);
+        derma._drawCursor();
+        IF (B.fb != NULL) { B.fb.flush(); }
+    }
+};
+
+derma.quit = FUNCTION() { derma._running = FALSE; };
+
+derma.run = FUNCTION() {
+    derma._ensureRoot();
+    derma._running = TRUE;
+    derma.frame();
+    WHILE (derma._running) {
+        VAR k = NULL;
+        IF (B.inp != NULL && B.inp.waitKey != NULL) { k = B.inp.waitKey(derma.tickMs); }
+        IF (k != NULL) {
+            derma._key(k);
+            VAR k2 = B.inp.poll();
+            WHILE (k2 != NULL) { derma._key(k2); k2 = B.inp.poll(); }
+        }
+        derma.frame();
+    }
+};
+
+// Pump any queued input without blocking (for callers driving their own loop).
+derma.pump = FUNCTION() {
+    IF (B.inp == NULL) { RETURN; }
+    VAR k = B.inp.poll();
+    WHILE (k != NULL) { derma._key(k); k = B.inp.poll(); }
+};
+
+RETURN derma;
+
+})();

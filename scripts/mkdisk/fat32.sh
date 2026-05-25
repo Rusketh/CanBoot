@@ -25,4 +25,11 @@ if [ -f "$PROBE_PNG" ]; then
     mcopy -i "$OUT" "$PROBE_PNG" ::/probe.png
 fi
 
+# Derma GUI library + demo so booted scripts can include("/derma.cdo").
+for f in derma.cdo derma_demo.cdo; do
+    if [ -f "$ROOT/initramfs/$f" ]; then
+        mcopy -i "$OUT" "$ROOT/initramfs/$f" "::/$f"
+    fi
+done
+
 echo "wrote $OUT"
