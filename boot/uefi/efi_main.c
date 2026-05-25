@@ -122,11 +122,13 @@ static void populate_mmap(EFI_MEMORY_DESCRIPTOR *map, UINTN map_size,
         bi->mmap[out_n].base   = (uint64_t)d->PhysicalStart;
         bi->mmap[out_n].length = (uint64_t)d->NumberOfPages * 4096ull;
         switch (d->Type) {
+            /* Genuinely free RAM the kernel heap may claim. EfiLoaderCode/
+             * Data are deliberately NOT usable: they hold the running image,
+             * the boot_info struct, and the boot files (init.cdo, ...), which
+             * the kernel keeps reading and the heap must never overwrite. */
             case EfiConventionalMemory:
             case EfiBootServicesCode:
             case EfiBootServicesData:
-            case EfiLoaderCode:
-            case EfiLoaderData:
                 bi->mmap[out_n].type = CANBOOT_MMAP_USABLE; break;
             case EfiACPIReclaimMemory:
                 bi->mmap[out_n].type = CANBOOT_MMAP_ACPI_RECL; break;

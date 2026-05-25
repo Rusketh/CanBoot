@@ -31,34 +31,183 @@
 #include "hal/disk.h"
 #include "fs/fat32.h"
 #include "fs/iso9660.h"
+#include "canboot/boot_info.h"
 
-/* ---- Static heap for malloc -------------------------------------------- */
+/* ---- Heap backing for malloc ------------------------------------------- *
+ *
+ * picolibc's malloc reaches RAM through sbrk(). Rather than a fixed static
+ * arena, we carve the heap out of the largest usable region the loader
+ * reported in boot_info->mmap[], so the heap can grow to the size of the
+ * machine (hundreds of MiB under QEMU) instead of a few MiB of .bss.
+ *
+ * canboot_heap_init() runs once during early kmain bring-up, before any
+ * allocation. Until it has chosen a region (or if no usable region is
+ * found) sbrk falls back to a small static bootstrap arena, so an
+ * unexpected very-early malloc still succeeds; the bootstrap span is never
+ * touched once the real region is live.
+ */
+#define CANBOOT_BOOTSTRAP_HEAP (256u * 1024u)
+static __attribute__((aligned(16)))
+unsigned char canboot_bootstrap_heap[CANBOOT_BOOTSTRAP_HEAP];
+static size_t bootstrap_used;
 
-#define CANBOOT_HEAP_SIZE (16u * 1024u * 1024u)
-static __attribute__((aligned(16))) unsigned char canboot_heap[CANBOOT_HEAP_SIZE];
-static size_t canboot_heap_used;
+static uintptr_t heap_base;     /* base of the mmap-backed region          */
+static size_t    heap_size;     /* its length                              */
+static size_t    heap_used;     /* high-water sbrk cursor within it        */
+static int       heap_ready;    /* set once a region has been selected     */
+
+/* Defined by the BIOS / aarch64-direct linker scripts; absent (weak ->
+ * NULL) in the gnu-efi link, where the loader instead keeps EfiLoader*
+ * regions out of the usable set so the running image is never reclaimed. */
+extern char __kernel_start[] __attribute__((weak));
+extern char __kernel_end[]   __attribute__((weak));
+
+struct heap_iv { uint64_t s, e; };
+
+static void heap_iv_add(struct heap_iv *iv, int *n, int cap,
+                        uint64_t s, uint64_t e) {
+    if (e <= s || *n >= cap) return;
+    iv[*n].s = s; iv[*n].e = e; (*n)++;
+}
+
+static void put_hex_early(uint64_t v) {
+    static const char d[] = "0123456789abcdef";
+    char b[19]; b[0]='0'; b[1]='x';
+    for (int i=0;i<16;i++) b[2+i]=d[(v>>((15-i)*4))&0xF];
+    b[18]='\0';
+    hal_console_write(b);
+}
+
+void canboot_heap_init(const struct boot_info *bi) {
+    if (heap_ready || !bi) return;
+
+#if defined(__x86_64__)
+    const uint64_t ceiling = 0x100000000ull;  /* first 4 GiB is identity-mapped */
+#else
+    const uint64_t ceiling = ~0ull;            /* aarch64: flat / firmware-mapped */
+#endif
+
+    struct heap_iv excl[8 + CANBOOT_BOOT_FILE_MAX];
+    int nx = 0;
+
+    /* Running kernel image (precise on BIOS / aarch64-direct). */
+    if ((uintptr_t)__kernel_start && (uintptr_t)__kernel_end)
+        heap_iv_add(excl, &nx, (int)(sizeof excl / sizeof excl[0]),
+                    (uintptr_t)__kernel_start, (uintptr_t)__kernel_end);
+
+    /* The boot_info struct itself (read throughout kmain). */
+    heap_iv_add(excl, &nx, (int)(sizeof excl / sizeof excl[0]),
+                (uintptr_t)bi, (uintptr_t)bi + sizeof(*bi));
+
+    /* Framebuffer. */
+    if (bi->fb.format == CANBOOT_FB_RGB && bi->fb.addr)
+        heap_iv_add(excl, &nx, (int)(sizeof excl / sizeof excl[0]),
+                    bi->fb.addr,
+                    bi->fb.addr + (uint64_t)bi->fb.pitch * bi->fb.height);
+
+    /* Loader-provided boot files (init.cdo, gui.cdo, ...). */
+    for (uint32_t i = 0; i < bi->file_count && i < CANBOOT_BOOT_FILE_MAX; i++)
+        if (bi->files[i].size)
+            heap_iv_add(excl, &nx, (int)(sizeof excl / sizeof excl[0]),
+                        bi->files[i].addr,
+                        bi->files[i].addr + bi->files[i].size);
+
+    /* The live stack: protect a window around the current SP. On BIOS /
+     * direct the stack lives inside the kernel image (already excluded);
+     * on the EFI paths it may sit in a region we mark usable, so guard a
+     * generous span below SP (future deep frames, e.g. the TLS handshake)
+     * and a small span above (our own shallow call chain). */
+    uintptr_t sp;
+#if defined(__x86_64__)
+    __asm__ volatile ("mov %%rsp, %0" : "=r"(sp));
+#else
+    __asm__ volatile ("mov %0, sp" : "=r"(sp));
+#endif
+    heap_iv_add(excl, &nx, (int)(sizeof excl / sizeof excl[0]),
+                (uint64_t)sp - 512u * 1024u, (uint64_t)sp + 64u * 1024u);
+
+    /* Scan usable regions, subtract the protected intervals, keep the
+     * largest surviving contiguous fragment. */
+    uint64_t best_base = 0, best_len = 0;
+    for (uint32_t i = 0; i < bi->mmap_count && i < CANBOOT_MMAP_MAX; i++) {
+        if (bi->mmap[i].type != CANBOOT_MMAP_USABLE) continue;
+        uint64_t es = bi->mmap[i].base;
+        uint64_t ee = es + bi->mmap[i].length;
+        if (es >= ceiling) continue;
+        if (ee > ceiling) ee = ceiling;
+
+        uint64_t cursor = es;
+        while (cursor < ee) {
+            uint64_t cut_s = ee, cut_e = ee;
+            int hit = 0;
+            for (int k = 0; k < nx; k++) {
+                if (excl[k].e <= cursor || excl[k].s >= ee) continue;
+                uint64_t s = excl[k].s < cursor ? cursor : excl[k].s;
+                if (!hit || s < cut_s) { cut_s = s; cut_e = excl[k].e; hit = 1; }
+            }
+            uint64_t gap_end = hit ? cut_s : ee;
+            if (gap_end - cursor > best_len) {
+                best_len = gap_end - cursor;
+                best_base = cursor;
+            }
+            if (!hit) break;
+            cursor = cut_e > cursor ? cut_e : cursor + 1;
+        }
+    }
+
+    /* Page-align the chosen span. */
+    uint64_t aligned = (best_base + 0xFFFull) & ~0xFFFull;
+    uint64_t avail = best_len > (aligned - best_base)
+                     ? (best_len - (aligned - best_base)) & ~0xFFFull : 0;
+
+    hal_console_write("canboot: heap region base=");
+    put_hex_early(aligned);
+    hal_console_write(" size=");
+    put_hex_early(avail);
+    hal_console_write("\n");
+
+    if (avail >= 1u * 1024u * 1024u) {
+        heap_base = (uintptr_t)aligned;
+        heap_size = (size_t)avail;
+        heap_used = 0;
+        heap_ready = 1;
+    } else {
+        hal_console_write("canboot: WARN no usable heap region; "
+                          "falling back to bootstrap arena\n");
+    }
+}
 
 void *sbrk(intptr_t incr) {
-    size_t prev = canboot_heap_used;
+    if (heap_ready) {
+        size_t prev = heap_used;
+        if (incr < 0) {
+            size_t dec = (size_t)(-incr);
+            if (dec > heap_used) { errno = ENOMEM; return (void *)-1; }
+            heap_used -= dec;
+            return (void *)(heap_base + heap_used);
+        }
+        if ((size_t)incr > heap_size - heap_used) { errno = ENOMEM; return (void *)-1; }
+        heap_used += (size_t)incr;
+        return (void *)(heap_base + prev);
+    }
+
+    size_t prev = bootstrap_used;
     if (incr < 0) {
         size_t dec = (size_t)(-incr);
-        if (dec > canboot_heap_used) {
-            errno = ENOMEM;
-            return (void *)-1;
-        }
-        canboot_heap_used -= dec;
-        return &canboot_heap[prev];
+        if (dec > bootstrap_used) { errno = ENOMEM; return (void *)-1; }
+        bootstrap_used -= dec;
+        return &canboot_bootstrap_heap[bootstrap_used];
     }
-    if ((size_t)incr > CANBOOT_HEAP_SIZE - canboot_heap_used) {
+    if ((size_t)incr > CANBOOT_BOOTSTRAP_HEAP - bootstrap_used) {
         errno = ENOMEM;
         return (void *)-1;
     }
-    canboot_heap_used += (size_t)incr;
-    return &canboot_heap[prev];
+    bootstrap_used += (size_t)incr;
+    return &canboot_bootstrap_heap[prev];
 }
 
-size_t canboot_heap_bytes_used(void)  { return canboot_heap_used; }
-size_t canboot_heap_bytes_total(void) { return CANBOOT_HEAP_SIZE; }
+size_t canboot_heap_bytes_used(void)  { return heap_ready ? heap_used : bootstrap_used; }
+size_t canboot_heap_bytes_total(void) { return heap_ready ? heap_size : CANBOOT_BOOTSTRAP_HEAP; }
 
 /* ---- Allocator serialisation (M5) -------------------------------------- *
  *

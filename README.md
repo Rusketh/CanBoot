@@ -110,7 +110,9 @@ GPT/MBR partition tables.
 
 **Runtime** — picolibc 1.8.11 as the C library, a preemptive-capable
 thread scheduler (`rt/sched`) with a full register context switch behind
-the POSIX pthread surface, a 4 MiB static heap. The x86_64 LAPIC timer
+the POSIX pthread surface, and a heap carved from the largest usable
+region in `boot_info->mmap[]` (hundreds of MiB under QEMU; serialised
+behind the preempt/SMP allocator guard). The x86_64 LAPIC timer
 (preemption timebase) and SMP bring-up (ACPI MADT discovery + an AP
 trampoline, global-run-queue scheduler) are wired but gated/dormant
 pending the reentrancy hardening of the I/O stack; see

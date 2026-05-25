@@ -229,6 +229,8 @@ PY
         check 'canboot: virtio-input ready'
         check 'canboot: rx '
         check 'selftest: self-test ok'
+
+        check 'selftest: big-heap'
         check 'selftest: dhcp lease'
         check 'selftest: udp echo ok'
         check 'selftest: http get ok'

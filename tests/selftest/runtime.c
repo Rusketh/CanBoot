@@ -61,6 +61,90 @@ static void *worker(void *arg) {
 size_t canboot_heap_bytes_used(void);
 size_t canboot_heap_bytes_total(void);
 
+/* Stress the mmap-backed heap: allocate and free well past the old 16 MiB
+ * static arena, across many block sizes, verifying each block's contents
+ * survive intact. Proves the allocator hands out a large region without
+ * corruption. Returns 1 on success. */
+#define BIGHEAP_BLOCKS 512
+static unsigned char *bh_p[BIGHEAP_BLOCKS];
+static size_t         bh_sz[BIGHEAP_BLOCKS];
+
+static int big_heap_test(void) {
+    const size_t target = 34u * 1024u * 1024u;   /* comfortably > 32 MiB */
+    size_t total = 0;
+    int n = 0;
+
+    for (; n < BIGHEAP_BLOCKS && total < target; n++) {
+        /* Spread sizes across 8 KiB .. ~136 KiB so many free-list bins and
+         * sbrk growth paths get exercised. */
+        size_t sz = (size_t)(8u * 1024u + ((n * 2659u) & 0x1FFFFu));
+        unsigned char *p = (unsigned char *)malloc(sz);
+        if (!p) {
+            printf("selftest: FAIL big-heap malloc n=%d sz=%zu total=%zu\n",
+                   n, sz, total);
+            for (int k = 0; k < n; k++) free(bh_p[k]);
+            return 0;
+        }
+        memset(p, (unsigned char)(n * 131 + 7), sz);
+        bh_p[n] = p;
+        bh_sz[n] = sz;
+        total += sz;
+    }
+
+    if (total < 32u * 1024u * 1024u) {
+        printf("selftest: FAIL big-heap only reached %zu bytes (< 32 MiB)\n",
+               total);
+        for (int k = 0; k < n; k++) free(bh_p[k]);
+        return 0;
+    }
+
+    /* Verify every block still holds its tag. */
+    for (int i = 0; i < n; i++) {
+        unsigned char tag = (unsigned char)(i * 131 + 7);
+        for (size_t k = 0; k < bh_sz[i]; k += 509) {
+            if (bh_p[i][k] != tag) {
+                printf("selftest: FAIL big-heap corruption block=%d off=%zu\n",
+                       i, k);
+                for (int z = 0; z < n; z++) free(bh_p[z]);
+                return 0;
+            }
+        }
+    }
+
+    /* Free the even blocks, reallocate into the freed space at new sizes,
+     * verify, then release everything. */
+    for (int i = 0; i < n; i += 2) { free(bh_p[i]); bh_p[i] = NULL; }
+    for (int i = 0; i < n; i += 2) {
+        size_t sz = (size_t)(4u * 1024u + ((i * 1471u) & 0xFFFFu));
+        unsigned char *p = (unsigned char *)malloc(sz);
+        if (!p) {
+            printf("selftest: FAIL big-heap realloc-wave n=%d sz=%zu\n", i, sz);
+            for (int z = 1; z < n; z += 2) free(bh_p[z]);
+            return 0;
+        }
+        memset(p, (unsigned char)(i * 17 + 3), sz);
+        bh_p[i] = p;
+        bh_sz[i] = sz;
+    }
+    for (int i = 0; i < n; i++) {
+        unsigned char tag = (i & 1) ? (unsigned char)(i * 131 + 7)
+                                    : (unsigned char)(i * 17 + 3);
+        size_t step = (i & 1) ? 509 : 251;
+        for (size_t k = 0; k < bh_sz[i]; k += step) {
+            if (bh_p[i][k] != tag) {
+                printf("selftest: FAIL big-heap wave2 corruption block=%d\n", i);
+                for (int z = 0; z < n; z++) free(bh_p[z]);
+                return 0;
+            }
+        }
+    }
+    for (int i = 0; i < n; i++) free(bh_p[i]);
+
+    printf("selftest: big-heap alloc/free %zu bytes across %d blocks (>32 MiB) ok\n",
+           total, n);
+    return 1;
+}
+
 void runtime_selftest(void) {
     hal_console_write("selftest: starting self-test\n");
 
@@ -92,6 +176,11 @@ void runtime_selftest(void) {
     free(big);
     printf("selftest: heap bytes_used=%zu bytes_total=%zu\n",
            canboot_heap_bytes_used(), canboot_heap_bytes_total());
+
+    /* mmap-backed heap stress: > 32 MiB across many sizes. */
+    if (!big_heap_test()) {
+        return;
+    }
 
     /* pthread: spawn workers that race a mutex-protected counter and
      * concurrently hammer the allocator under live preemption. */

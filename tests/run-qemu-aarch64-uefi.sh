@@ -215,6 +215,8 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         fi
         check 'selftest: starting self-test'
         check 'selftest: self-test ok'
+
+        check 'selftest: big-heap'
         check 'selftest: udp echo ok'
         check 'selftest: http get ok'
         check 'selftest: handshake ok'

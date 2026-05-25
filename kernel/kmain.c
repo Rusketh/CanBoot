@@ -182,6 +182,10 @@ static void kmain_body(struct boot_info *bi) {
     hal_console_write(boot_source_name(bi->boot_source));
     hal_console_write("\n");
 
+    /* Select the malloc heap from the usable mmap regions before anything
+     * allocates. Replaces the old fixed static arena. */
+    canboot_heap_init(bi);
+
     if (bi->fb.format == CANBOOT_FB_RGB) {
         hal_console_write("canboot: fb rgb addr=");
         put_hex64(bi->fb.addr);
