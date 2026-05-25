@@ -21,7 +21,7 @@ qemu-system-x86_64 -cdrom canboot-x86_64-uefi.iso \
     -serial stdio -display none
 
 # aarch64 -kernel direct
-qemu-system-aarch64 -M virt -cpu cortex-a72 -m 512M \
+qemu-system-aarch64 -M virt -cpu cortex-a72 -m 256M \
     -kernel canboot-aarch64.bin -serial stdio -display none
 
 # aarch64 UEFI

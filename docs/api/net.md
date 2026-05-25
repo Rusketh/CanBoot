@@ -26,18 +26,19 @@ timeout.
 VAR reply = net.udpEcho("10.0.2.2", 7777, "ping");
 ```
 
-## `net.httpGet(url) -> string|null`
+## `net.httpGet(host, port, path) -> string|null`
 
-Issue an HTTP GET to the given URL. Returns the response body. `null`
-on connection failure, non-2xx response, or timeout.
+Issue an HTTP GET to `host:port` for `path`. This is the raw
+socket-style form — `host` / `port` / `path` are passed separately,
+**not** as a single URL. `port` defaults to `80`. Returns the response
+body, or `null` on connection failure, non-2xx response, or timeout.
 
 ```cdo
-VAR body = net.httpGet("http://10.0.2.2:8080/hello");
+VAR body = net.httpGet("10.0.2.2", 8080, "/hello");
 print(body);   // -> "canboot-hello"
 ```
 
-URL parsing is naive — `host:port/path` form is the safe shape. For
-the URL-aware variant, use [`http.get`](http.md).
+For the URL form (`http.get("http://...")`), use [`http.get`](http.md).
 
 ## Behaviour
 
@@ -51,7 +52,8 @@ the URL-aware variant, use [`http.get`](http.md).
 
 ## See also
 
-- [`http`](http.md) — URL-aware cleartext HTTP GET
-- [`https`](https.md) / [`tls`](tls.md) — TLS-protected fetch
+- [`http`](http.md) — URL-form cleartext HTTP GET
+- [`tls`](tls.md) — raw socket-style HTTPS GET (same host/port/path shape as `net.httpGet`)
+- [`https`](https.md) — URL-form HTTPS GET
 - [`url`](url.md) — URL parser
 - [`../networking.md`](../networking.md) — lwIP + virtio-net + Mbed TLS pipeline

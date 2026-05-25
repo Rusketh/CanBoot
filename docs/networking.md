@@ -52,7 +52,10 @@ Port:
   lwIP's raw TCP API. Mbed TLS expects blocking I/O; lwIP's raw API
   is callback-driven, so this layer parks on a flag set by the lwIP
   callbacks while cooperatively pumping.
-- `net/mbedtls_port/timing.c` — TSC-backed `mbedtls_timing_*`.
+
+`MBEDTLS_TIMING_C` is disabled in the user config — there's no
+platform timing callback; the BIO layer handles its own connect /
+handshake timeouts against the TSC clock.
 
 ## DHCP at boot
 
@@ -67,10 +70,10 @@ has a lease and the cando `net.*` calls Just Work.
 ## TLS handshake flow
 
 ```
-cando: tls.httpsGet("https://10.0.2.2:8443/health")
+cando: tls.httpsGet("10.0.2.2", 8443, "/health")
               │
               ▼
-cando_tls_lib.c::t_https_get
+cando_port/lib/tls.c::tls_https_get
               │
               ▼
 mbedtls_ssl_setup + mbedtls_ssl_set_hostname + mbedtls_ssl_set_bio
