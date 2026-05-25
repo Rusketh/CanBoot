@@ -13,6 +13,8 @@
  *   M3  SMP: per-CPU run queues, work stealing, reschedule IPIs; the
  *       single g_sched lock below is sharded.
  *   M4  aarch64 GIC + generic-timer parity.
+ *   M5  runtime hardening: serialise the picolibc allocator so forced
+ *       timer preemption can be turned on (done for x86_64).
  *
  * The POSIX pthread surface (rt/pthread_stub/include/pthread.h) is a
  * thin shim over this API.
@@ -105,12 +107,14 @@ void canboot_sched_yield(void);
  * resumes (and the ISR iret's back to the interrupted instruction) once
  * it is rescheduled.
  *
- * Preemption is GATED OFF by default: the non-reentrant runtime (the
- * picolibc allocator, lwIP, the HAL drivers, the mbedTLS BIO) is not yet
- * safe to interrupt at an arbitrary point — that hardening is M5. Until
- * then the timer still ticks (a live timebase) but does not switch.
- * canboot_sched_set_preemption(1) flips it on once M5 lands (or for a
- * controlled, allocation-free test).
+ * Preemption is gated by canboot_sched_set_preemption(). As of M5 the
+ * x86_64 kmain turns it ON: the one piece of non-reentrant runtime that
+ * is actually shared across threads — the picolibc allocator — is now
+ * serialised (rt/picolibc_port/syscalls.c, __wrap_malloc/free/calloc/
+ * realloc behind a recursive preempt + SMP guard). lwIP, the HAL and the
+ * Mbed TLS BIO are driven cooperatively from a single flow, so the heap
+ * is their only concurrently-touched resource. aarch64 leaves preemption
+ * off until M4 wires the generic timer.
  *
  * canboot_sched_arm_irqs() tells the thread trampoline that the arch IRQ
  * path is configured, so newly created threads should start with

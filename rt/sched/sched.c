@@ -16,8 +16,10 @@
  *   - The idle thread spins (cpu_relax) instead of halting, because with
  *     interrupts effectively masked there is nothing to wake a hlt/wfi.
  *     M2 switches it to halt-until-interrupt.
- *   - The thread pool is static (no heap dependency); making the
- *     picolibc allocator SMP-safe is M5.
+ *   - The thread pool is static (no heap dependency). The picolibc
+ *     allocator used by threads is serialised in M5
+ *     (rt/picolibc_port/syscalls.c) so forced preemption is safe to
+ *     enable.
  *
  * UNVERIFIED: this has not been compiled or booted (the build
  * environment has no cross-toolchain, QEMU, or the cando submodule).
@@ -468,9 +470,15 @@ void canboot_sched_preempt(void) {
     struct canboot_cpu *c = this_cpu();
     struct canboot_thread *self = c->current;
     c->need_resched = 0;
-    if (self->state == CANBOOT_TH_RUNNING && g_runq.head != NULL) {
-        self->state = CANBOOT_TH_RUNNABLE;
-        rq_push(self);
+    if (g_runq.head != NULL) {
+        /* The idle thread is never placed on a run queue (reschedule()
+         * falls back to it). So when the timer preempts idle, switch to
+         * the runnable thread but do NOT enqueue idle. A real thread is
+         * round-robined back onto the queue as usual. */
+        if (self->state == CANBOOT_TH_RUNNING && self != c->idle) {
+            self->state = CANBOOT_TH_RUNNABLE;
+            rq_push(self);
+        }
         reschedule();
     }
     canboot_sched_unlock(f);

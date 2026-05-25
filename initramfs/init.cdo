@@ -324,3 +324,117 @@ print("cando audio.isPlaying after stop =", audio.isPlaying(src));
 print("cando audio.activeCount after stop =", audio.activeCount());
 audio.release(src);
 print("cando audio libs end");
+
+// ---- Test suite: deterministic assertions with a pass/fail tally -----
+// Re-checks values the libraries above already produced, but as real
+// asserts so the boot doubles as a self-test you can read off the serial
+// log. Wrapped in TRY so a single bad call can never abort init.cdo.
+// Network/disk results are intentionally excluded — they depend on the
+// host's sidecars/attached disks; only deterministic, host-independent
+// results are asserted here.
+print("cando test suite begin");
+VAR TS_pass = 0;
+VAR TS_fail = 0;
+VAR ts_eq = FUNCTION(name, got, want) {
+    IF (got == want) {
+        TS_pass = TS_pass + 1;
+    } ELSE {
+        TS_fail = TS_fail + 1;
+        print("cando test FAIL:", name, "got", got, "want", want);
+    }
+};
+VAR ts_true = FUNCTION(name, cond) {
+    IF (cond) {
+        TS_pass = TS_pass + 1;
+    } ELSE {
+        TS_fail = TS_fail + 1;
+        print("cando test FAIL:", name, "(false)");
+    }
+};
+TRY {
+    // crypto: known vectors
+    ts_eq("sha256(empty)", crypto.sha256Hex(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    ts_eq("hmacSha256", crypto.hmacSha256Hex("key", "The quick brown fox jumps over the lazy dog"), "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8");
+    // codecs: round-trips
+    ts_eq("hex roundtrip", hex.decode(hex.encode("canboot")), "canboot");
+    ts_eq("base64 roundtrip", base64.decode(base64.encode("canboot")), "canboot");
+    ts_eq("hex.encode", hex.encode("canboot"), "63616e626f6f74");
+    // fmt + arithmetic + strings
+    ts_eq("fmt.sprintf", fmt.sprintf("hex=%x dec=%d str=%s", 4660, 42, "hi"), "hex=1234 dec=42 str=hi");
+    ts_eq("arithmetic", 6 * 7, 42);
+    ts_eq("string concat", "ab" + "cd", "abcd");
+    // url parsing
+    ts_eq("url.scheme", url.scheme("https://10.0.2.2:8443/health"), "https");
+    ts_eq("url.host", url.host("https://10.0.2.2:8443/health"), "10.0.2.2");
+    // environment sanity
+    ts_true("fb width > 0", env.fbWidth() > 0);
+    ts_true("fb height > 0", env.fbHeight() > 0);
+    ts_true("disk present", disk.count() >= 1);
+    // random in range
+    VAR ts_r = random.int(1, 100);
+    ts_true("random.int range", ts_r >= 1 && ts_r <= 100);
+    // clock is monotonic
+    VAR ts_t1 = time.ms();
+    VAR ts_t2 = time.ms();
+    ts_true("time monotonic", ts_t2 >= ts_t1);
+} CATCH (e) {
+    TS_fail = TS_fail + 1;
+    print("cando test suite threw:", e);
+}
+print("cando test suite:", TS_pass, "passed", TS_fail, "failed");
+IF (TS_fail == 0) {
+    print("cando test suite ok");
+} ELSE {
+    print("cando test suite FAILED");
+}
+print("cando test suite end");
+
+// ---- Display showcase: a results dashboard painted via display.* -----
+// NOTE: the modules/gui/gui.cdo widget toolkit currently faults the
+// cando VM when include()d on this build (a #GP from the VM executing the
+// module — a hardware fault TRY/CATCH cannot trap). Until that VM issue is
+// resolved we paint the showcase directly through the display lib, which
+// is the same proven path the milestone-11 block above uses. The HAL-
+// backed include()/fopen support added in this branch stays in place so
+// the toolkit drops straight in once the VM bug is fixed.
+// IMPORTANT: do NOT display.clear() here. The kernel samples the
+// milestone-11 rects (painted near the top of the screen, y < 210) AFTER
+// init.cdo returns to assert "display test ok". We paint the dashboard in
+// the lower region only (y >= DY) so those probe pixels survive.
+print("cando display showcase begin");
+VAR SW = env.fbWidth();
+VAR SH = env.fbHeight();
+VAR DY = 240;
+display.fillRect(0, DY, SW, SH - DY, 1052688);                // 0x101020 panel bg
+display.fillRect(0, DY, SW, 30, 3158064);                     // 0x303030 header
+display.text(16, DY + 8, "CanBoot - booted straight into CanDo", 16777215, 3158064);
+display.text(16, DY + 48, fmt.sprintf("self-test suite: %d passed, %d failed", TS_pass, TS_fail), 65280, 1052688);
+display.text(16, DY + 68, fmt.sprintf("disks: %d    framebuffer: %dx%d", disk.count(), SW, SH), 16777215, 1052688);
+display.text(16, DY + 94, "libraries exercised:", 16777215, 1052688);
+display.text(16, DY + 110, "display input time file net tls crypto", 11184810, 1052688);
+display.text(16, DY + 126, "hex base64 random url http https disk pci", 11184810, 1052688);
+display.text(16, DY + 142, "fb fmt partition fs image audio log env", 11184810, 1052688);
+
+// A row of colour swatches.
+display.fillRect(16,  DY + 170, 44, 44, 16711680);            // red
+display.fillRect(68,  DY + 170, 44, 44, 16753920);            // orange
+display.fillRect(120, DY + 170, 44, 44, 16776960);            // yellow
+display.fillRect(172, DY + 170, 44, 44, 65280);               // green
+display.fillRect(224, DY + 170, 44, 44, 65535);               // cyan
+display.fillRect(276, DY + 170, 44, 44, 255);                 // blue
+display.fillRect(328, DY + 170, 44, 44, 8388863);             // violet
+display.fillRect(380, DY + 170, 44, 44, 16711935);            // magenta
+
+// A short animated progress sweep, then a final frame.
+VAR f0 = 0;
+VAR dl = time.ms() + 1500;
+WHILE (time.ms() < dl) {
+    f0 = f0 + 1;
+    VAR pw = (f0 % 100) * 5;
+    display.fillRect(16, DY + 230, 500, 24, 3158064);         // track
+    display.fillRect(16, DY + 230, pw, 24, 5635925);          // fill
+    fb.flush();
+}
+display.text(16, DY + 264, "self-test complete - full detail on the serial log", 16777215, 1052688);
+fb.flush();
+print("cando display showcase end");

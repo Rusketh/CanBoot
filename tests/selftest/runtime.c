@@ -23,10 +23,31 @@
 
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static volatile int    g_counter;
+static volatile int    g_alloc_fail;   /* set if a heap readback is wrong */
 
 static void *worker(void *arg) {
     int id = (int)(intptr_t)arg;
     for (int i = 0; i < INCS_PER_WORKER; i++) {
+        /* Hammer the allocator OUTSIDE the mutex so all workers contend on
+         * the heap concurrently. With preemption on, a timer switch landing
+         * mid-malloc would corrupt the (single-thread-built) picolibc free
+         * list — surfacing here as a NULL return or a bad readback unless
+         * the M5 allocator guard serialises it. Sizes/patterns are derived
+         * deterministically; rand() is itself non-reentrant. */
+        size_t n = (size_t)(16 + ((id * 37 + i * 13) & 0xFF));
+        unsigned char *p = (unsigned char *)malloc(n);
+        if (!p) {
+            g_alloc_fail = 1;
+        } else {
+            unsigned char tag = (unsigned char)(id * 31 + i);
+            memset(p, tag, n);
+            pthread_yield();           /* widen the preemption window */
+            for (size_t k = 0; k < n; k++) {
+                if (p[k] != tag) { g_alloc_fail = 1; break; }
+            }
+            free(p);
+        }
+
         pthread_mutex_lock(&g_lock);
         int snap = g_counter;
         pthread_yield();           /* exercise the scheduler mid-section */
@@ -72,8 +93,10 @@ void runtime_selftest(void) {
     printf("selftest: heap bytes_used=%zu bytes_total=%zu\n",
            canboot_heap_bytes_used(), canboot_heap_bytes_total());
 
-    /* pthread: spawn workers that race a mutex-protected counter. */
+    /* pthread: spawn workers that race a mutex-protected counter and
+     * concurrently hammer the allocator under live preemption. */
     g_counter = 0;
+    g_alloc_fail = 0;
     pthread_t t[WORKERS];
     for (int i = 0; i < WORKERS; i++) {
         int rc = pthread_create(&t[i], 0, worker, (void *)(intptr_t)i);
@@ -101,7 +124,11 @@ void runtime_selftest(void) {
                g_counter, expected);
         return;
     }
-    printf("selftest: pthread counter=%d (expected %d)\n",
+    if (g_alloc_fail) {
+        hal_console_write("selftest: FAIL concurrent malloc/free readback\n");
+        return;
+    }
+    printf("selftest: pthread counter=%d (expected %d) heap-race ok\n",
            g_counter, expected);
 
     hal_console_write("selftest: self-test ok\n");

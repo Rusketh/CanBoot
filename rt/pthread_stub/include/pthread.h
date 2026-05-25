@@ -11,10 +11,11 @@
  * (rt/sched/). CanDo's thread runtime (vendor/cando source/core/
  * thread_platform.c, source/lib/thread.c) calls these unchanged.
  *
- * As of M1 these are real preemptive-capable threads with a full
- * register context switch — not the old setjmp/longjmp fibers — but
- * preemption itself (a timer IRQ) lands in M2, so threads currently
- * switch only at yield / blocking points.
+ * These are real threads with a full register context switch — not the
+ * old setjmp/longjmp fibers. As of M5 they are also genuinely preemptive
+ * on x86_64: the LAPIC timer (M2) forces round-robin switches and the
+ * allocator is serialised so that is safe. They still switch at yield /
+ * blocking points too.
  */
 
 #ifdef __cplusplus
@@ -40,13 +41,17 @@ typedef struct {
 
 typedef struct { int unused; } pthread_condattr_t;
 
+/* 3-state so a racing caller blocks until the winner's init() returns,
+ * rather than observing "done" while init() is still mid-flight (which a
+ * 2-state flag allows the moment preemption is enabled). */
 typedef struct {
-    int      done;
+    int                        state;   /* 0=fresh, 1=running, 2=done */
+    struct canboot_wait_queue  waiters;
 } pthread_once_t;
 
 #define PTHREAD_MUTEX_INITIALIZER  { 0, -1, CANBOOT_WAIT_QUEUE_INITIALIZER }
 #define PTHREAD_COND_INITIALIZER   { CANBOOT_WAIT_QUEUE_INITIALIZER, 0 }
-#define PTHREAD_ONCE_INIT          { 0 }
+#define PTHREAD_ONCE_INIT          { 0, CANBOOT_WAIT_QUEUE_INITIALIZER }
 
 /* Lifecycle ------------------------------------------------------------- */
 

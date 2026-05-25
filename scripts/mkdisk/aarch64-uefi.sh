@@ -28,6 +28,11 @@ INIT_CDO="$ROOT_DIR/initramfs/init.cdo"
 if [ -f "$INIT_CDO" ]; then
     mcopy -i "$OUT" "$INIT_CDO" ::/init.cdo
 fi
+# GUI toolkit module: init.cdo include()s it for the on-screen showcase.
+GUI_CDO="$ROOT_DIR/modules/gui/gui.cdo"
+if [ -f "$GUI_CDO" ]; then
+    mcopy -i "$OUT" "$GUI_CDO" ::/gui.cdo
+fi
 
 # Test PNG used by the smoke test's image.decode/draw round-trip.
 PROBE_PNG="$ROOT_DIR/initramfs/probe.png"

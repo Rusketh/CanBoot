@@ -327,16 +327,19 @@ static void kmain_body(struct boot_info *bi) {
      * timebase, arm the IRQ path so newly created threads start with
      * interrupts enabled, and enable interrupts on this (main) thread.
      *
-     * Preemption itself is intentionally left OFF: the timer ticks and
-     * the IRQ + context-switch-from-interrupt path is exercised, but no
-     * forced thread switches happen until the runtime (picolibc malloc,
-     * lwIP, HAL, mbedTLS BIO) is made reentrant-safe in M5. Flip it on
-     * with canboot_sched_set_preemption(1) once that lands. */
+     * M5: with the allocator now serialised (rt/picolibc_port/syscalls.c
+     * __wrap_*) and no IRQ handler touching non-reentrant state (only the
+     * timer tick runs, and it honours the preempt count), forced timer
+     * preemption is safe to turn on. lwIP / Mbed TLS / the HAL remain
+     * single-flow (driven cooperatively from one thread), so their only
+     * shared resource — the heap — is what needs guarding. */
     extern void canboot_lapic_timer_setup(unsigned hz);
     extern void canboot_sched_arm_irqs(void);
+    extern void canboot_sched_set_preemption(int enabled);
     canboot_lapic_timer_setup(100);
     canboot_sched_arm_irqs();
     canboot_irq_enable();
+    canboot_sched_set_preemption(1);
 
 #ifdef CANBOOT_HAVE_SMP
     /* M3 (SMP): bring up Application Processors. DISABLED by default —

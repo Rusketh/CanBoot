@@ -166,6 +166,8 @@ if(GNUEFI_INCLUDE_DIR AND GNUEFI_ARCH_INCLUDE_DIR
             -T ${GNUEFI_LDS}
             -shared -Bsymbolic
             --allow-multiple-definition
+            # M5: serialise the picolibc allocator (see syscalls.c __wrap_*).
+            --wrap=malloc --wrap=free --wrap=calloc --wrap=realloc
             ${GNUEFI_CRT0} ${EFI_OBJS}
             -o ${EFI_SO}
             --start-group
