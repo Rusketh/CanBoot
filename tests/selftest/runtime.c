@@ -60,6 +60,56 @@ static void *worker(void *arg) {
 
 size_t canboot_heap_bytes_used(void);
 size_t canboot_heap_bytes_total(void);
+unsigned long canboot_sched_ticks(void);
+
+/* Preemption proof: a worker that NEVER yields. With cooperative
+ * scheduling it would starve every other thread; if it still makes
+ * progress while the main thread also runs (and the tick counter
+ * advances), the timer must be preempting. */
+static volatile int           g_spin_stop;
+static volatile unsigned long g_spin_count;
+
+static void *spinner(void *arg) {
+    (void)arg;
+    while (!g_spin_stop) {
+        g_spin_count++;
+        __asm__ volatile ("" ::: "memory");
+    }
+    return NULL;
+}
+
+static int preemption_test(void) {
+    g_spin_stop = 0;
+    g_spin_count = 0;
+    pthread_t st;
+    if (pthread_create(&st, 0, spinner, 0) != 0) {
+        printf("selftest: FAIL preemption spinner create\n");
+        return 0;
+    }
+    /* Busy-wait ~5 timer ticks WITHOUT yielding. If preemption is on, the
+     * spinner gets scheduled in the gaps; if the timer never ticks, the
+     * guard bound trips and we report it rather than hanging forever. */
+    unsigned long t0 = canboot_sched_ticks();
+    unsigned long guard = 0;
+    while (canboot_sched_ticks() - t0 < 5 && guard < 3000000000UL) {
+        guard++;
+        __asm__ volatile ("" ::: "memory");
+    }
+    int ticked = (canboot_sched_ticks() - t0 >= 5);
+    g_spin_stop = 1;
+    pthread_join(st, 0);
+
+    if (!ticked) {
+        printf("selftest: FAIL preemption timer not ticking (guard=%lu)\n", guard);
+        return 0;
+    }
+    if (g_spin_count == 0) {
+        printf("selftest: FAIL preemption: non-yielding worker never ran\n");
+        return 0;
+    }
+    printf("selftest: preemption ok spinner=%lu over >=5 ticks\n", g_spin_count);
+    return 1;
+}
 
 /* Stress the mmap-backed heap: allocate and free well past the old 16 MiB
  * static arena, across many block sizes, verifying each block's contents
@@ -179,6 +229,11 @@ void runtime_selftest(void) {
 
     /* mmap-backed heap stress: > 32 MiB across many sizes. */
     if (!big_heap_test()) {
+        return;
+    }
+
+    /* Forced-preemption proof (timer-driven scheduling). */
+    if (!preemption_test()) {
         return;
     }
 

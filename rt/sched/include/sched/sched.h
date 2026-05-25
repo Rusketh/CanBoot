@@ -12,7 +12,9 @@
  *       canboot_sched_preempt() from interrupt context.
  *   M3  SMP: per-CPU run queues, work stealing, reschedule IPIs; the
  *       single g_sched lock below is sharded.
- *   M4  aarch64 GIC + generic-timer parity.
+ *   M4  aarch64 GIC + generic-timer parity (done: arch/aarch64/vectors.S
+ *       + irq.c install VBAR_EL1, bring up GICv2 and the CNTV virtual
+ *       timer, and route ticks to canboot_sched_on_tick like the LAPIC).
  *   M5  runtime hardening: serialise the picolibc allocator so forced
  *       timer preemption can be turned on (done for x86_64).
  *

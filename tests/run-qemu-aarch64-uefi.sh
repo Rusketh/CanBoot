@@ -98,7 +98,7 @@ AUDIO_WAV="${AUDIO_WAV:-build-aarch64/canboot-aarch64-uefi-audio.wav}"
 rm -f "$AUDIO_WAV"
 
 qemu-system-aarch64 \
-    -machine virt \
+    -machine virt,gic-version=2 \
     -cpu cortex-a72 \
     -m 512M \
     -nodefaults \
@@ -217,6 +217,8 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         fi
         check 'selftest: starting self-test'
         check 'selftest: self-test ok'
+
+        check 'selftest: preemption ok'
 
         check 'selftest: big-heap'
         check 'selftest: udp echo ok'
