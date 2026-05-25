@@ -148,14 +148,15 @@ static void populate_mmap(EFI_MEMORY_DESCRIPTOR *map, UINTN map_size,
  * skips the file (the kernel then falls back to scanning real disks), so
  * a problem here can never break the boot.
  */
-static void load_one_boot_file(EFI_FILE_HANDLE root, CHAR16 *wname,
-                               const char *aname, struct boot_info *bi) {
-    if (bi->file_count >= CANBOOT_BOOT_FILE_MAX) return;
+/* Returns 1 if the file was opened, read, and recorded; 0 otherwise. */
+static int load_one_boot_file(EFI_FILE_HANDLE root, CHAR16 *wname,
+                              const char *aname, struct boot_info *bi) {
+    if (bi->file_count >= CANBOOT_BOOT_FILE_MAX) return 0;
 
     EFI_FILE_HANDLE fh = NULL;
     EFI_STATUS s = uefi_call_wrapper(root->Open, 5, root, &fh, wname,
                                      EFI_FILE_MODE_READ, 0);
-    if (EFI_ERROR(s) || fh == NULL) return;
+    if (EFI_ERROR(s) || fh == NULL) return 0;
 
     UINT64 size = 0;
     s = uefi_call_wrapper(fh->SetPosition, 2, fh, 0xFFFFFFFFFFFFFFFFULL);
@@ -163,7 +164,7 @@ static void load_one_boot_file(EFI_FILE_HANDLE root, CHAR16 *wname,
         s = uefi_call_wrapper(fh->GetPosition, 2, fh, &size);
     if (EFI_ERROR(s) || size == 0 || size > (16ull * 1024 * 1024)) {
         uefi_call_wrapper(fh->Close, 1, fh);
-        return;
+        return 0;
     }
     (void)uefi_call_wrapper(fh->SetPosition, 2, fh, 0);
 
@@ -173,7 +174,7 @@ static void load_one_boot_file(EFI_FILE_HANDLE root, CHAR16 *wname,
                           AllocateAnyPages, EfiLoaderData, pages, &addr);
     if (EFI_ERROR(s) || addr == 0) {
         uefi_call_wrapper(fh->Close, 1, fh);
-        return;
+        return 0;
     }
 
     UINTN rd = (UINTN)size;
@@ -181,7 +182,7 @@ static void load_one_boot_file(EFI_FILE_HANDLE root, CHAR16 *wname,
     uefi_call_wrapper(fh->Close, 1, fh);
     if (EFI_ERROR(s) || rd == 0) {
         uefi_call_wrapper(BS->FreePages, 2, addr, pages);
-        return;
+        return 0;
     }
 
     struct canboot_boot_file *f = &bi->files[bi->file_count];
@@ -196,24 +197,46 @@ static void load_one_boot_file(EFI_FILE_HANDLE root, CHAR16 *wname,
     serial_write_early("canboot: boot file loaded: ");
     serial_write_early(aname);
     serial_write_early("\n");
+    return 1;
+}
+
+/* Try the lowercase name first, then the UPPERCASE 8.3 form. ISO9660
+ * stores names uppercased (INIT.CDO) and some firmware filesystem drivers
+ * do a case-sensitive Open, so the lowercase attempt alone misses. The
+ * canonical lowercase basename (aname) is what gets recorded either way. */
+static void load_named_boot_file(EFI_FILE_HANDLE root, const char *aname,
+                                 CHAR16 *lower, CHAR16 *upper,
+                                 struct boot_info *bi) {
+    if (load_one_boot_file(root, lower, aname, bi)) return;
+    if (load_one_boot_file(root, upper, aname, bi)) return;
+    serial_write_early("canboot: boot file absent: ");
+    serial_write_early(aname);
+    serial_write_early("\n");
 }
 
 static void load_boot_files(EFI_HANDLE image, EFI_SYSTEM_TABLE *st,
                             struct boot_info *bi) {
     bi->file_count = 0;
+    serial_write_early("canboot: reading boot files from boot volume\n");
 
     EFI_GUID li_guid = LOADED_IMAGE_PROTOCOL;
     EFI_LOADED_IMAGE *li = NULL;
     EFI_STATUS s = uefi_call_wrapper(st->BootServices->HandleProtocol, 3,
                                      image, &li_guid, (void **)&li);
-    if (EFI_ERROR(s) || li == NULL || li->DeviceHandle == NULL) return;
+    if (EFI_ERROR(s) || li == NULL || li->DeviceHandle == NULL) {
+        serial_write_early("canboot: boot files: no loaded-image device\n");
+        return;
+    }
 
     EFI_FILE_HANDLE root = LibOpenRoot(li->DeviceHandle);
-    if (root == NULL) return;
+    if (root == NULL) {
+        serial_write_early("canboot: boot files: cannot open boot volume\n");
+        return;
+    }
 
-    load_one_boot_file(root, L"init.cdo",  "init.cdo",  bi);
-    load_one_boot_file(root, L"probe.png", "probe.png", bi);
-    load_one_boot_file(root, L"gui.cdo",   "gui.cdo",   bi);
+    load_named_boot_file(root, "init.cdo",  L"init.cdo",  L"INIT.CDO",  bi);
+    load_named_boot_file(root, "probe.png", L"probe.png", L"PROBE.PNG", bi);
+    load_named_boot_file(root, "gui.cdo",   L"gui.cdo",   L"GUI.CDO",   bi);
 
     uefi_call_wrapper(root->Close, 1, root);
 }

@@ -39,21 +39,28 @@ mcopy -i "$ESP_IMG" "$EFI_BIN" ::/EFI/BOOT/BOOTX64.EFI
 mkdir -p "$ISO_ROOT/EFI/BOOT"
 cp "$EFI_BIN" "$ISO_ROOT/EFI/BOOT/BOOTX64.EFI"
 
-# Embed /init.cdo at the ISO root so the disk selftest can find
-# it via ISO9660 when no attached FAT32 disk is present.
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 INIT_CDO="$ROOT_DIR/initramfs/init.cdo"
+GUI_CDO="$ROOT_DIR/modules/gui/gui.cdo"
+PROBE_PNG="$ROOT_DIR/initramfs/probe.png"
+
+# Embed the runtime files BOTH on the ISO9660 root AND inside the El
+# Torito ESP image. On a UEFI El Torito boot the firmware exposes the
+# boot image (efi.img) as the loaded-image volume, so the UEFI loader
+# (boot/uefi/efi_main.c) reads them from here; the ISO9660 copies serve
+# the HAL disk path / inspection. FAT keeps the lowercase long names.
 if [ -f "$INIT_CDO" ]; then
     cp "$INIT_CDO" "$ISO_ROOT/init.cdo"
+    mcopy -i "$ESP_IMG" "$INIT_CDO" ::/init.cdo
 fi
 # GUI toolkit module: init.cdo include()s it for the on-screen showcase.
-GUI_CDO="$ROOT_DIR/modules/gui/gui.cdo"
 if [ -f "$GUI_CDO" ]; then
     cp "$GUI_CDO" "$ISO_ROOT/gui.cdo"
+    mcopy -i "$ESP_IMG" "$GUI_CDO" ::/gui.cdo
 fi
-PROBE_PNG="$ROOT_DIR/initramfs/probe.png"
 if [ -f "$PROBE_PNG" ]; then
     cp "$PROBE_PNG" "$ISO_ROOT/probe.png"
+    mcopy -i "$ESP_IMG" "$PROBE_PNG" ::/probe.png
 fi
 
 xorriso -as mkisofs \
