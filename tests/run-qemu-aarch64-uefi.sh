@@ -76,6 +76,10 @@ python3 "$ROOT/tests/sidecars/http_hello.py"  127.0.0.1 "$HTTP_PORT"  >"$(dirnam
 HTTP_PID=$!
 python3 "$ROOT/tests/sidecars/https_secure.py" 127.0.0.1 "$HTTPS_PORT" >"$(dirname "$LOG")/https.log" 2>&1 &
 HTTPS_PID=$!
+# Port 53 is privileged; CI runs the sidecar as a non-root user, so
+# lower the unprivileged-port floor (no-op as root, sudo in CI).
+sysctl -w net.ipv4.ip_unprivileged_port_start=53 >/dev/null 2>&1 \
+    || sudo sysctl -w net.ipv4.ip_unprivileged_port_start=53 >/dev/null 2>&1 || true
 python3 "$ROOT/tests/sidecars/dns_fixed.py" 127.0.0.1 53 canboot.test 10.0.2.2 >"$(dirname "$LOG")/dns.log" 2>&1 &
 DNS_PID=$!
 sleep 0.3
