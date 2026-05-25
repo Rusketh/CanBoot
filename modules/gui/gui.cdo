@@ -256,10 +256,15 @@ GUI._cx      = 320;
 GUI._cy      = 240;
 GUI._running = FALSE;
 GUI._nextId  = 1;
+GUI._mdown   = FALSE;   // left mouse button currently held
+GUI._pressTarget = NULL;
+GUI._lastmx  = -1;
+GUI._lastmy  = -1;
 GUI.cursorStep = 12;   // pixels per arrow tap
 GUI.dragStep   = 6;
 GUI.tickMs     = 30;
 GUI.showCursor = TRUE;
+GUI.mouseEnabled = TRUE; // poll a pointing device in run() when present
 
 // ----------------------------------------------------------------------
 // Panel -- the base of every widget.
@@ -833,6 +838,10 @@ Slider._drag = FUNCTION(self, dir, step) {
     IF (dir == "l") { self:SetValue(self.value - d); }
     ELSE IF (dir == "r") { self:SetValue(self.value + d); }
 };
+Slider._mdrag = FUNCTION(self, lx, ly, dx, dy) {
+    VAR f = math.clamp((lx - 6) / (self.w - 12), 0, 1);
+    self:SetValue(self.min + f * (self.max - self.min));
+};
 Slider.Paint = FUNCTION(self, w, h) {
     VAR cy = math.floor(h / 2);
     R.rect(6, cy - 2, w - 12, 4, skin.scrollTrack);
@@ -890,6 +899,10 @@ NumSlider._drag = FUNCTION(self, dir, step) {
     IF (dir == "l") { self:SetValue(self.value - d); }
     ELSE IF (dir == "r") { self:SetValue(self.value + d); }
 };
+NumSlider._mdrag = FUNCTION(self, lx, ly, dx, dy) {
+    VAR f = math.clamp((lx - self:_trackX() - 6) / (self:_trackW() - 12), 0, 1);
+    self:SetValue(self.min + f * (self.max - self.min));
+};
 NumSlider._fmt = FUNCTION(self) {
     IF (self.decimals <= 0) { RETURN toString(math.round(self.value)); }
     VAR m = math.pow(10, self.decimals);
@@ -946,6 +959,9 @@ Frame._drag = FUNCTION(self, dir, step) {
     ELSE IF (dir == "r") { self.x = self.x + step; }
     ELSE IF (dir == "u") { self.y = self.y - step; }
     ELSE IF (dir == "d") { self.y = self.y + step; }
+};
+Frame._mdrag = FUNCTION(self, lx, ly, dx, dy) {
+    self.x = self.x + dx; self.y = self.y + dy;
 };
 
 Frame.Paint = FUNCTION(self, w, h) {
@@ -1013,6 +1029,10 @@ ScrollPanel._press = FUNCTION(self, lx, ly) {
 ScrollPanel._drag = FUNCTION(self, dir, step) {
     IF (dir == "u") { self:ScrollBy(-step * 3); }
     ELSE IF (dir == "d") { self:ScrollBy(step * 3); }
+};
+ScrollPanel._mdrag = FUNCTION(self, lx, ly, dx, dy) {
+    VAR ms = self:_maxScroll();
+    IF (ms > 0) { self.scroll = math.clamp((ly / self.h) * ms, 0, ms); }
 };
 ScrollPanel.Paint = FUNCTION(self, w, h) {
     R.rect(0, 0, w, h, self.bgColor);
@@ -1494,6 +1514,61 @@ GUI._isDescendant = FUNCTION(node, ancestor) {
     RETURN FALSE;
 };
 
+// --- Real pointer events. feedClick above is the atomic keyboard "click";
+// these three model a true press / move / release so the mouse can drag.
+GUI.mouseMove = FUNCTION(x, y) {
+    VAR dx = GUI._lastmx < 0 ? 0 : x - GUI._lastmx;
+    VAR dy = GUI._lastmy < 0 ? 0 : y - GUI._lastmy;
+    GUI._lastmx = x; GUI._lastmy = y;
+    GUI._cx = x; GUI._cy = y; GUI._clampCursor();
+    GUI._updateHover();
+    IF (GUI._mdown && GUI._capture != NULL && GUI._capture._mdrag != NULL) {
+        VAR lx, ly = GUI._capture:ScreenToLocal(GUI._cx, GUI._cy);
+        GUI._capture:_mdrag(lx, ly, dx, dy);
+    }
+};
+
+GUI.mouseDown = FUNCTION(x, y) {
+    GUI._cx = x; GUI._cy = y; GUI._clampCursor();
+    GUI._lastmx = x; GUI._lastmy = y;
+    GUI._mdown = TRUE;
+    VAR target = GUI._hitTest(GUI._ensureRoot(), 0, 0, GUI._cx, GUI._cy);
+    IF (GUI._menu != NULL) {
+        VAR inMenu = target != NULL && GUI._isDescendant(target, GUI._menu);
+        IF (!inMenu) { GUI._menu:_dismiss(); }
+    }
+    GUI._pressTarget = target;
+    IF (target == NULL) { GUI._setFocus(NULL); RETURN; }
+    GUI._setFocus(target.keyInput ? target : NULL);
+    VAR lx, ly = target:ScreenToLocal(GUI._cx, GUI._cy);
+    IF (target._press != NULL) { target:_press(lx, ly); }
+    IF (target.OnMousePressed != NULL) { target:OnMousePressed(MOUSE_LEFT, lx, ly); }
+};
+
+GUI.mouseUp = FUNCTION(x, y) {
+    GUI._cx = x; GUI._cy = y; GUI._clampCursor();
+    GUI._lastmx = x; GUI._lastmy = y;
+    GUI._mdown = FALSE;
+    VAR target = GUI._hitTest(GUI._ensureRoot(), 0, 0, GUI._cx, GUI._cy);
+    VAR pt = GUI._pressTarget;
+    IF (pt != NULL && !pt._removed) {
+        VAR lx, ly = pt:ScreenToLocal(GUI._cx, GUI._cy);
+        IF (pt._release != NULL) { pt:_release(lx, ly); }
+        IF (pt.OnMouseReleased != NULL) { pt:OnMouseReleased(MOUSE_LEFT, lx, ly); }
+        IF (target == pt && pt.enabled && pt.DoClick != NULL) { pt:DoClick(); }
+    }
+    GUI._pressTarget = NULL;
+    GUI._releaseCapture();
+};
+
+GUI.mouseWheel = FUNCTION(x, y, delta) {
+    VAR t = GUI._hitTest(GUI._ensureRoot(), 0, 0, x, y);
+    WHILE (t != NULL) {
+        IF (t.scroll != NULL && t.ScrollBy != NULL) { t:ScrollBy(0 - delta * 16); RETURN; }
+        t = t.parent;
+    }
+};
+
 GUI._updateHover = FUNCTION() {
     VAR t = GUI._hitTest(GUI._ensureRoot(), 0, 0, GUI._cx, GUI._cy);
     IF (t != GUI._hover) {
@@ -1583,6 +1658,20 @@ GUI.frame = FUNCTION() {
 
 GUI.quit = FUNCTION() { GUI._running = FALSE; };
 
+// Read the pointing device (if the input backend exposes one) and turn its
+// state into move / press / release / wheel events. Edge-detects the left
+// button so a held button becomes a drag rather than repeated clicks.
+GUI.pollMouse = FUNCTION() {
+    IF (!GUI.mouseEnabled || B.inp == NULL || B.inp.mouse == NULL) { RETURN; }
+    VAR m = B.inp.mouse();
+    IF (m == NULL || m.present == 0) { RETURN; }
+    IF (m.x != GUI._lastmx || m.y != GUI._lastmy) { GUI.mouseMove(m.x, m.y); }
+    VAR ld = m.left != 0;
+    IF (ld && !GUI._mdown) { GUI.mouseDown(m.x, m.y); }
+    ELSE IF (!ld && GUI._mdown) { GUI.mouseUp(m.x, m.y); }
+    IF (m.wheel != 0) { GUI.mouseWheel(m.x, m.y, m.wheel); }
+};
+
 GUI.run = FUNCTION() {
     GUI._ensureRoot();
     GUI._running = TRUE;
@@ -1595,6 +1684,7 @@ GUI.run = FUNCTION() {
             VAR k2 = B.inp.poll();
             WHILE (k2 != NULL) { GUI._key(k2); k2 = B.inp.poll(); }
         }
+        GUI.pollMouse();
         GUI.frame();
     }
 };
@@ -1604,6 +1694,7 @@ GUI.pump = FUNCTION() {
     IF (B.inp == NULL) { RETURN; }
     VAR k = B.inp.poll();
     WHILE (k != NULL) { GUI._key(k); k = B.inp.poll(); }
+    GUI.pollMouse();
 };
 
 RETURN GUI;

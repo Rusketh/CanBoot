@@ -2,8 +2,11 @@
 
 A widget toolkit written entirely in CanDo on top of
 [`display`](display.md) and [`input`](input.md). Unlike the other
-entries here it is **not** a built-in namespace — it ships as `/gui.cdo`
-on the boot image and is loaded with `include`:
+entries here it is **not** a built-in namespace, and it is **not** baked
+into the boot image — it is an optional module that lives at
+`modules/gui/gui.cdo` in the source tree. Copy it onto your boot media
+(see [`modules/gui/README.md`](../../modules/gui/README.md)) and load it
+with `include`:
 
 ```cdo
 VAR GUI = include("/gui.cdo");
@@ -29,23 +32,30 @@ classes themselves are private — you reach them by name through
 
 ## Input model
 
-CanBoot has no pointing device, so the on-screen cursor is driven by the
-keyboard. The widget layer underneath is a real mouse model (hit-testing,
-hover, `OnMousePressed`/`Released`, drag capture), so a future pointer
-source drops in via `GUI.feedCursor` / `GUI.feedClick`.
+The toolkit drives an on-screen cursor from a pointing device when one is
+present (PS/2 or virtio, surfaced by [`input.mouse()`](input.md)), and
+falls back to the keyboard otherwise. `GUI.run()` reads the mouse each
+frame via `GUI.pollMouse`; the underlying model is a real mouse pipeline
+(hit-testing, hover, press/move/release, drag capture).
 
-| Action            | Key |
-|-------------------|-----|
-| Move cursor       | Arrow keys |
-| Left click        | Enter |
-| Cycle focus       | Tab (warps the cursor to the focused widget) |
-| Cancel / close    | Esc (closes menus, blurs a field, closes the top frame) |
-| Type / edit       | Printable keys + Backspace go to the focused text field |
-| Drag a window     | Click its title bar to grab, move with arrows, Enter/Esc to drop |
+| Action            | Mouse        | Keyboard |
+|-------------------|--------------|----------|
+| Move cursor       | move         | arrow keys |
+| Click / press     | left button  | Enter |
+| Drag              | hold + move  | click to grab, arrows, Enter/Esc to drop |
+| Scroll            | wheel        | drag the scrollbar |
+| Cycle focus       | —            | Tab (warps the cursor to the focused widget) |
+| Cancel / close    | click off / Esc | Esc (closes menus, blurs a field, closes the top frame) |
+| Type / edit       | —            | printable keys + Backspace go to the focused text field |
 
 In a focused `TextBox` (multi-line) the arrow keys move the caret; in a
 single-line `TextEntry` only Left/Right are caret moves and Up/Down move
 the cursor.
+
+External event entry points (used by `pollMouse`, and available if you
+drive your own loop): `GUI.mouseMove(x, y)`, `GUI.mouseDown(x, y)`,
+`GUI.mouseUp(x, y)`, `GUI.mouseWheel(x, y, delta)`, and the atomic
+`GUI.feedClick(x, y)` / `GUI.feedCursor(x, y)`.
 
 ## Module functions
 
@@ -62,6 +72,8 @@ the cursor.
 | `GUI.register(name, class)` | Register a custom widget class for `Create`. |
 | `GUI.setBackend(display, input [, fb])` | Override the draw/input backends (used for testing). |
 | `GUI.feedCursor(x, y)` / `GUI.feedClick(x, y)` | Drive the cursor / a click from an external source. |
+| `GUI.mouseMove/mouseDown/mouseUp/mouseWheel` | Real press/move/release pointer events (enable dragging). |
+| `GUI.pollMouse()` | Read `input.mouse()` once and dispatch move/press/release/wheel. |
 
 Tunables: `GUI.cursorStep`, `GUI.dragStep`, `GUI.tickMs`,
 `GUI.showCursor`. Theme colours live in `GUI.skin` (mutate before
@@ -158,7 +170,7 @@ supplied by the `:` call):
   the library sticks to what the port supports. Use `GUI.newline()` for
   literal newlines.
 - The library is exercised headlessly against a mock framebuffer in the
-  CanDo test harness; see the source header of `initramfs/gui.cdo`.
+  CanDo test harness; see the source header of `modules/gui/gui.cdo`.
 
 ## See also
 

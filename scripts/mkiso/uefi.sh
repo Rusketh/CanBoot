@@ -50,12 +50,6 @@ PROBE_PNG="$ROOT_DIR/initramfs/probe.png"
 if [ -f "$PROBE_PNG" ]; then
     cp "$PROBE_PNG" "$ISO_ROOT/probe.png"
 fi
-# GUI toolkit + demo so booted scripts can include("/gui.cdo").
-for f in gui.cdo gui_demo.cdo; do
-    if [ -f "$ROOT_DIR/initramfs/$f" ]; then
-        cp "$ROOT_DIR/initramfs/$f" "$ISO_ROOT/$f"
-    fi
-done
 
 xorriso -as mkisofs \
     -V "CANBOOT" \

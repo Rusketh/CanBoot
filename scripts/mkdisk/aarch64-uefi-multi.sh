@@ -62,12 +62,6 @@ INIT_CDO="$RAMFS_DIR/init.cdo"
 if [ -f "$INIT_CDO" ]; then
     mcopy -i "$ESP_IMG" "$INIT_CDO" ::/init.cdo
 fi
-# GUI toolkit + demo so booted scripts can include("/gui.cdo").
-for f in gui.cdo gui_demo.cdo; do
-    if [ -f "$RAMFS_DIR/$f" ]; then
-        mcopy -i "$ESP_IMG" "$RAMFS_DIR/$f" "::/$f"
-    fi
-done
 
 # --- Build the NTFS image ---
 NTFS_IMG="$WORK/ntfs.img"

@@ -12,6 +12,7 @@
 #include <stdint.h>
 
 #include "hal/input.h"
+#include "hal/display.h"
 #include "hal/virtio.h"
 
 #define EVENTQ_IDX  0u
@@ -28,6 +29,16 @@ struct __attribute__((packed)) virtio_input_event {
 #define EV_KEY 0x01
 #define EV_REL 0x02
 #define EV_ABS 0x03
+
+/* Linux REL_/ABS_ axis codes and BTN_ pointer button codes. */
+#define REL_X     0x00
+#define REL_Y     0x01
+#define REL_WHEEL 0x08
+#define ABS_X     0x00
+#define ABS_Y     0x01
+#define BTN_LEFT   0x110
+#define BTN_RIGHT  0x111
+#define BTN_MIDDLE 0x112
 
 /* Linux keycodes we care about; rest fall through unchanged. */
 #define KEY_ESC      1
@@ -133,8 +144,36 @@ static void emit(uint32_t code, uint16_t keycode, bool down) {
 
 static void handle_event(const struct virtio_input_event *e) {
     if (e->type == EV_SYN) return;
+
+    /* Pointer motion (mouse: relative; tablet: absolute) and wheel. */
+    if (e->type == EV_REL) {
+        if (e->code == REL_X)          canboot_input_mouse_move_rel((int32_t)e->value, 0);
+        else if (e->code == REL_Y)     canboot_input_mouse_move_rel(0, (int32_t)e->value);
+        else if (e->code == REL_WHEEL) canboot_input_mouse_wheel((int32_t)e->value);
+        return;
+    }
+    if (e->type == EV_ABS) {
+        /* virtio tablet reports absolute coords in its own axis range
+         * (QEMU's default is 0..32767). Scale to framebuffer pixels. We
+         * don't read the device's abs_info, so assume that common range. */
+        static int32_t rawx, rawy;
+        if (e->code == ABS_X) rawx = (int32_t)e->value;
+        else if (e->code == ABS_Y) rawy = (int32_t)e->value;
+        else return;
+        int32_t w = hal_display_width();
+        int32_t h = hal_display_height();
+        int32_t px = w > 0 ? (int32_t)((int64_t)rawx * (w - 1) / 32767) : rawx;
+        int32_t py = h > 0 ? (int32_t)((int64_t)rawy * (h - 1) / 32767) : rawy;
+        canboot_input_mouse_move_abs(px, py);
+        return;
+    }
     if (e->type != EV_KEY) return;
     bool down = (e->value != 0);
+
+    /* Pointer buttons arrive as EV_KEY with BTN_* codes. */
+    if (e->code == BTN_LEFT)   { canboot_input_mouse_button(CANBOOT_MOUSE_LEFT, down);   return; }
+    if (e->code == BTN_RIGHT)  { canboot_input_mouse_button(CANBOOT_MOUSE_RIGHT, down);  return; }
+    if (e->code == BTN_MIDDLE) { canboot_input_mouse_button(CANBOOT_MOUSE_MIDDLE, down); return; }
 
     /* Track shift state via virtio key codes (Linux keycodes). */
     if (e->code == KEY_LSHIFT || e->code == KEY_RSHIFT) {

@@ -25,11 +25,5 @@ if [ -f "$PROBE_PNG" ]; then
     mcopy -i "$OUT" "$PROBE_PNG" ::/probe.png
 fi
 
-# GUI toolkit + demo so booted scripts can include("/gui.cdo").
-for f in gui.cdo gui_demo.cdo; do
-    if [ -f "$ROOT/initramfs/$f" ]; then
-        mcopy -i "$OUT" "$ROOT/initramfs/$f" "::/$f"
-    fi
-done
 
 echo "wrote $OUT"

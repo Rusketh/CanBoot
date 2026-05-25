@@ -1,4 +1,4 @@
-# input — polled keyboard input
+# input — polled keyboard + mouse input
 
 Polled access to the HAL input queue. Sits on top of the in-kernel
 input ring buffer that's fed by PS/2 (`hal/input/ps2.c`) and
@@ -25,6 +25,29 @@ code of the next key, or `null` if no key arrived within `timeoutMs`.
 ```cdo
 VAR c = input.waitKey(5000);  // up to 5 seconds
 ```
+
+## `input.mouse() -> object`
+
+Pumps the input devices, then returns the current pointer state from any
+attached pointing device (PS/2 mouse or virtio pointer/tablet):
+
+```cdo
+VAR m = input.mouse();
+print(m.x, m.y, m.left, m.wheel);
+```
+
+| Field | Meaning |
+|-------|---------|
+| `x`, `y` | Cursor position in framebuffer pixels (clamped to the screen). |
+| `buttons` | Bitmask: `1`=left, `2`=right, `4`=middle. |
+| `left`, `right`, `middle` | The same buttons broken out as `0`/`1`. |
+| `wheel` | Accumulated wheel notches since the last call (read-and-clear; `+`=up). |
+| `present` | `1` once any pointing device has reported, else `0`. |
+
+Motion may arrive relative (PS/2, virtio `EV_REL`) or absolute (virtio
+tablet `EV_ABS`); both accumulate into the same clamped position. There
+is no separate button-event queue — poll this each frame and edge-detect
+button changes yourself (the [`gui`](gui.md) module does exactly this).
 
 ## `input.flush() -> number`
 

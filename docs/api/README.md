@@ -23,7 +23,7 @@ underlying HAL / runtime they sit on top of is documented in
 
 | Library | What it does |
 |---------|--------------|
-| [gui](gui.md) | Retained-mode widget toolkit (`include("/gui.cdo")`) over `display` + `input` |
+| [gui](gui.md) | Optional retained-mode widget toolkit (`modules/gui/`, `include`-it-yourself) over `display` + `input`, mouse + keyboard |
 
 ## Storage
 
