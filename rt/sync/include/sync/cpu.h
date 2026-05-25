@@ -1,0 +1,64 @@
+#ifndef CANBOOT_SYNC_CPU_H
+#define CANBOOT_SYNC_CPU_H
+
+/*
+ * Per-CPU primitives the scheduler and locks build on: local interrupt
+ * masking, a relax hint for spin loops, and the logical CPU index.
+ *
+ * Milestone status (M1): single logical CPU. canboot_cpu_id() always
+ * returns 0. SMP (M3) replaces the body with a LAPIC-id / MPIDR_EL1
+ * lookup against a registration map populated during AP bring-up.
+ */
+
+#include <stdint.h>
+
+typedef unsigned long canboot_irqflags_t;
+
+/* Save the current interrupt-enable state and disable local interrupts.
+ * Returns an opaque token to hand back to canboot_irq_restore(). */
+static inline canboot_irqflags_t canboot_irq_save(void) {
+    canboot_irqflags_t flags;
+#if defined(__x86_64__)
+    __asm__ volatile ("pushfq\n\t"
+                      "popq %0\n\t"
+                      "cli"
+                      : "=r"(flags) : : "memory");
+#elif defined(__aarch64__)
+    /* DAIF bit 1 (I) masks IRQ. Save the whole DAIF then set I. */
+    __asm__ volatile ("mrs %0, daif\n\t"
+                      "msr daifset, #2"
+                      : "=r"(flags) : : "memory");
+#else
+    flags = 0;
+#endif
+    return flags;
+}
+
+/* Restore a previously saved interrupt-enable state. */
+static inline void canboot_irq_restore(canboot_irqflags_t flags) {
+#if defined(__x86_64__)
+    __asm__ volatile ("pushq %0\n\t"
+                      "popfq"
+                      : : "r"(flags) : "memory", "cc");
+#elif defined(__aarch64__)
+    __asm__ volatile ("msr daif, %0" : : "r"(flags) : "memory");
+#else
+    (void)flags;
+#endif
+}
+
+/* Spin-loop relaxation hint (PAUSE / YIELD). */
+static inline void canboot_cpu_relax(void) {
+#if defined(__x86_64__)
+    __asm__ volatile ("pause" : : : "memory");
+#elif defined(__aarch64__)
+    __asm__ volatile ("yield" : : : "memory");
+#endif
+}
+
+/* Logical CPU index in [0, CANBOOT_NR_CPUS). Always 0 until SMP (M3). */
+static inline unsigned canboot_cpu_id(void) {
+    return 0u;
+}
+
+#endif /* CANBOOT_SYNC_CPU_H */

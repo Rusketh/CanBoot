@@ -108,8 +108,10 @@ virtio-pci transport.
 directory), read+write ext4 (lwext4) and NTFS (libntfs-3g + mkntfs),
 GPT/MBR partition tables.
 
-**Runtime** — picolibc 1.8.11 as the C library, cooperative pthread stub
-backed by setjmp/longjmp fibers, a 4 MiB static heap.
+**Runtime** — picolibc 1.8.11 as the C library, a preemptive-capable
+thread scheduler (`rt/sched`) with a full register context switch behind
+the POSIX pthread surface, a 4 MiB static heap. Timer-driven preemption
+and SMP are staged on top of this core (see `rt/sched/include/sched/sched.h`).
 
 **Network + TLS** — lwIP 2.2.1 in NO_SYS mode over virtio-net (DHCP /
 UDP / TCP / HTTP); Mbed TLS 3.6.x LTS with hardware entropy
@@ -136,7 +138,8 @@ hal/                     hardware abstraction layer (console, input,
                          disk, display, net, audio, pci, virtio)
 fs/                      ISO9660, FAT32, ext4, NTFS, partition tables
 net/                     lwIP + Mbed TLS ports
-rt/                      picolibc syscall stubs, pthread fiber stub
+rt/                      picolibc syscall stubs, thread scheduler (sched),
+                         spinlocks (sync), POSIX pthread shim
 cando_port/
   lib/                   CanDo language bindings (one per namespace)
   runtime/               POSIX function stubs

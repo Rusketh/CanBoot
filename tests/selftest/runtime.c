@@ -1,7 +1,9 @@
 /*
  * Milestone 5 self-test: prove picolibc (printf, malloc/free, string
- * functions) and the cooperative pthread stub (create, join, mutex
- * protected counter) work end-to-end.
+ * functions) and the thread scheduler (create, join, mutex-protected
+ * counter, yield) work end-to-end. Doubles as the smoke test for the
+ * rt/sched preemptive-capable scheduler that replaced the old
+ * setjmp/longjmp fiber stub.
  *
  * Run from kmain after the input loop. On success the kernel prints
  * "selftest: self-test ok"; on any failure it prints the failure

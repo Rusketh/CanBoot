@@ -1,0 +1,375 @@
+/*
+ * CanBoot thread scheduler core (Milestone 1).
+ *
+ * A real preemptive-capable scheduler that replaces the old
+ * setjmp/longjmp cooperative fiber stub. Threads are switched via a
+ * full callee-saved register context switch (rt/sched/arch/ctx_*.S),
+ * blocked threads park on intrusive wait queues, and all scheduler
+ * state is serialised by a single global lock (g_sched).
+ *
+ * What M1 deliberately does NOT do yet:
+ *   - No timer interrupt drives preemption, so in practice threads only
+ *     switch at yield / block points. M2 wires the LAPIC timer to call
+ *     into reschedule() from IRQ context.
+ *   - g_sched is one big lock. M3 shards it per-CPU and adds reschedule
+ *     IPIs + work stealing for true SMP parallelism.
+ *   - The idle thread spins (cpu_relax) instead of halting, because with
+ *     interrupts effectively masked there is nothing to wake a hlt/wfi.
+ *     M2 switches it to halt-until-interrupt.
+ *   - The thread pool is static (no heap dependency); making the
+ *     picolibc allocator SMP-safe is M5.
+ *
+ * UNVERIFIED: this has not been compiled or booted (the build
+ * environment has no cross-toolchain, QEMU, or the cando submodule).
+ */
+
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+
+#include "sync/spinlock.h"
+#include "sched/sched.h"
+#include "sched/percpu.h"
+
+#define CANBOOT_THREAD_POOL   16u
+#define CANBOOT_THREAD_STACK  (32u * 1024u)
+#define CANBOOT_IDLE_STACK    (8u * 1024u)  /* idle does almost nothing */
+
+struct canboot_cpu canboot_cpus[CANBOOT_NR_CPUS];
+
+/* Global scheduler lock. Protects every run queue, every wait queue,
+ * and all thread.state transitions. Held across context switches: the
+ * thread that resumes is responsible for releasing it (see the
+ * resume-side spin_unlock in reschedule() / the trampoline). */
+static spinlock_t g_sched = SPINLOCK_INITIALIZER;
+
+/* Thread pool. Slot 0 is the adopted boot/main thread (no owned stack).
+ * Remaining slots back pthread_create. Per-CPU idle threads live in
+ * their own array so the pool stays available for user threads. */
+static struct canboot_thread g_threads[CANBOOT_THREAD_POOL];
+static __attribute__((aligned(16)))
+    unsigned char g_stacks[CANBOOT_THREAD_POOL][CANBOOT_THREAD_STACK];
+
+static struct canboot_thread g_idle[CANBOOT_NR_CPUS];
+static __attribute__((aligned(16)))
+    unsigned char g_idle_stacks[CANBOOT_NR_CPUS][CANBOOT_IDLE_STACK];
+
+/* ------------------------------------------------------------------ */
+/* Arch context bootstrap: lay down a fake callee-saved frame so the    */
+/* first switch into a new thread "returns" into the trampoline. The    */
+/* layout MUST match the pop/ldp order in rt/sched/arch/ctx_<arch>.S.   */
+/* ------------------------------------------------------------------ */
+
+static void thread_trampoline(void);
+
+static void arch_ctx_init(struct canboot_arch_ctx *ctx,
+                          void *stack_top_in) {
+    uintptr_t top = ((uintptr_t)stack_top_in) & ~(uintptr_t)0xF;
+
+#if defined(__x86_64__)
+    /* 8 slots: [0..5]=r15,r14,r13,r12,rbx,rbp  [6]=return addr  [7]=pad.
+     * Picking sp = top-64 leaves rsp = top-8 on entry to the trampoline,
+     * i.e. (rsp % 16) == 8 — the SysV state right after a `call`. */
+    uint64_t *s = (uint64_t *)(top - 64u);
+    for (int i = 0; i < 8; i++) s[i] = 0;
+    s[6] = (uint64_t)(uintptr_t)&thread_trampoline; /* ret target */
+    ctx->sp = (void *)s;
+#elif defined(__aarch64__)
+    /* 20 slots: [0..9]=x19..x28, [10]=x29(fp), [11]=x30(lr),
+     * [12..19]=d8..d15. sp must stay 16-aligned; 160 bytes keeps it so. */
+    uint64_t *s = (uint64_t *)(top - 160u);
+    for (int i = 0; i < 20; i++) s[i] = 0;
+    s[11] = (uint64_t)(uintptr_t)&thread_trampoline; /* x30 -> ret */
+    ctx->sp = (void *)s;
+#else
+#error "unsupported architecture for context switch"
+#endif
+}
+
+/* ------------------------------------------------------------------ */
+/* Run-queue + wait-queue primitives. All callers hold g_sched.         */
+/* ------------------------------------------------------------------ */
+
+static void rq_push(struct canboot_cpu *cpu, struct canboot_thread *t) {
+    t->q_next = NULL;
+    if (cpu->rq_tail)
+        cpu->rq_tail->q_next = t;
+    else
+        cpu->rq_head = t;
+    cpu->rq_tail = t;
+}
+
+static struct canboot_thread *rq_pop(struct canboot_cpu *cpu) {
+    struct canboot_thread *t = cpu->rq_head;
+    if (t) {
+        cpu->rq_head = t->q_next;
+        if (!cpu->rq_head)
+            cpu->rq_tail = NULL;
+        t->q_next = NULL;
+    }
+    return t;
+}
+
+static void wq_push(struct canboot_wait_queue *wq, struct canboot_thread *t) {
+    t->q_next = NULL;
+    if (wq->tail)
+        wq->tail->q_next = t;
+    else
+        wq->head = t;
+    wq->tail = t;
+}
+
+static struct canboot_thread *wq_pop(struct canboot_wait_queue *wq) {
+    struct canboot_thread *t = wq->head;
+    if (t) {
+        wq->head = t->q_next;
+        if (!wq->head)
+            wq->tail = NULL;
+        t->q_next = NULL;
+    }
+    return t;
+}
+
+/* ------------------------------------------------------------------ */
+/* Core switch. Caller holds g_sched and has saved/disabled IRQs. On     */
+/* return (when 'prev' is later resumed) g_sched is STILL held — the     */
+/* resumed context's own caller releases it.                            */
+/* ------------------------------------------------------------------ */
+
+static void reschedule(void) {
+    struct canboot_cpu *cpu = this_cpu();
+    struct canboot_thread *prev = cpu->current;
+    struct canboot_thread *next = rq_pop(cpu);
+
+    if (!next)
+        next = cpu->idle;
+
+    if (next == prev) {
+        next->state = CANBOOT_TH_RUNNING;
+        return;
+    }
+
+    next->state = CANBOOT_TH_RUNNING;
+    next->cpu   = cpu;
+    cpu->current = next;
+
+    canboot_arch_ctx_switch(&prev->ctx, &next->ctx);
+    /* Resumed: 'prev' is current again. g_sched is held. */
+}
+
+static void thread_trampoline(void) {
+    /* First instruction of every freshly created thread. The switch
+     * that landed us here was performed with g_sched held; release it
+     * before running user code (mirrors reschedule()'s resume side). */
+    spin_unlock(&g_sched);
+    /* NOTE (M2): new threads should run with IRQs enabled. M1 leaves
+     * them masked — there is no timer/IRQ source yet, so this is inert,
+     * and it keeps the cooperative I/O paths race-free until M5. */
+
+    struct canboot_thread *self = canboot_thread_current();
+    void *ret = self->entry(self->arg);
+    canboot_thread_exit(ret);
+}
+
+/* ------------------------------------------------------------------ */
+/* Public lock / block API                                             */
+/* ------------------------------------------------------------------ */
+
+void canboot_sched_lock(canboot_irqflags_t *saved_flags) {
+    canboot_irqflags_t f = canboot_irq_save();
+    spin_lock(&g_sched);
+    if (saved_flags)
+        *saved_flags = f;
+}
+
+void canboot_sched_unlock(canboot_irqflags_t saved_flags) {
+    spin_unlock(&g_sched);
+    canboot_irq_restore(saved_flags);
+}
+
+void canboot_sched_block_on(struct canboot_wait_queue *wq) {
+    /* g_sched held on entry and on return. */
+    struct canboot_thread *self = this_cpu()->current;
+    self->state = CANBOOT_TH_BLOCKED;
+    wq_push(wq, self);
+    reschedule();
+}
+
+void canboot_sched_wake_one(struct canboot_wait_queue *wq) {
+    struct canboot_thread *t = wq_pop(wq);
+    if (t) {
+        t->state = CANBOOT_TH_RUNNABLE;
+        rq_push(this_cpu(), t);
+    }
+}
+
+void canboot_sched_wake_all(struct canboot_wait_queue *wq) {
+    struct canboot_thread *t;
+    while ((t = wq_pop(wq)) != NULL) {
+        t->state = CANBOOT_TH_RUNNABLE;
+        rq_push(this_cpu(), t);
+    }
+}
+
+void canboot_sched_yield(void) {
+    canboot_irqflags_t f;
+    canboot_sched_lock(&f);
+    struct canboot_thread *self = this_cpu()->current;
+    if (self->state == CANBOOT_TH_RUNNING) {
+        self->state = CANBOOT_TH_RUNNABLE;
+        rq_push(this_cpu(), self);
+    }
+    reschedule();
+    canboot_sched_unlock(f);
+}
+
+/* ------------------------------------------------------------------ */
+/* Lifecycle                                                            */
+/* ------------------------------------------------------------------ */
+
+struct canboot_thread *canboot_thread_current(void) {
+    return this_cpu()->current;
+}
+
+struct canboot_thread *canboot_thread_by_id(int id) {
+    if (id < 0 || (unsigned)id >= CANBOOT_THREAD_POOL)
+        return NULL;
+    return &g_threads[id];
+}
+
+static void *idle_entry(void *arg) {
+    (void)arg;
+    /* The idle thread is never placed on a run queue: reschedule() falls
+     * back to cpu->idle only when nothing else is runnable. So we just
+     * re-run the picker (without enqueuing ourselves) and spin. M2 makes
+     * this halt-until-interrupt once a timer IRQ can wake a blocked
+     * thread; until then a blocked-everywhere system would wedge on a
+     * hlt, so we busy-relax instead. */
+    for (;;) {
+        canboot_irqflags_t f;
+        canboot_sched_lock(&f);
+        reschedule();
+        canboot_sched_unlock(f);
+        canboot_cpu_relax();
+    }
+}
+
+void canboot_sched_init(void) {
+    memset(canboot_cpus, 0, sizeof(canboot_cpus));
+    memset(g_threads, 0, sizeof(g_threads));
+    memset(g_idle, 0, sizeof(g_idle));
+    spin_init(&g_sched);
+
+    struct canboot_cpu *cpu = &canboot_cpus[0];
+    cpu->id = 0;
+    cpu->online = 1;
+
+    /* Slot 0: adopt whatever stack/context is running right now. Its
+     * ctx.sp is filled in by the first switch away from it. */
+    struct canboot_thread *main_th = &g_threads[0];
+    main_th->id    = 0;
+    main_th->state = CANBOOT_TH_RUNNING;
+    main_th->cpu   = cpu;
+    main_th->stack = NULL; /* not owned */
+    cpu->current   = main_th;
+
+    /* Per-CPU idle thread (CPU 0 only in M1). */
+    struct canboot_thread *idle = &g_idle[0];
+    idle->id         = -1;
+    idle->entry      = idle_entry;
+    idle->arg        = NULL;
+    idle->state      = CANBOOT_TH_RUNNABLE;
+    idle->cpu        = cpu;
+    idle->stack      = g_idle_stacks[0];
+    idle->stack_size = CANBOOT_IDLE_STACK;
+    arch_ctx_init(&idle->ctx, g_idle_stacks[0] + CANBOOT_IDLE_STACK);
+    cpu->idle = idle;
+}
+
+struct canboot_thread *canboot_thread_create(void *(*fn)(void *), void *arg) {
+    canboot_irqflags_t f;
+    canboot_sched_lock(&f);
+
+    struct canboot_thread *t = NULL;
+    for (unsigned i = 1; i < CANBOOT_THREAD_POOL; i++) {
+        if (g_threads[i].state == CANBOOT_TH_FREE) {
+            t = &g_threads[i];
+            break;
+        }
+    }
+    if (!t) {
+        canboot_sched_unlock(f);
+        return NULL; /* pool exhausted */
+    }
+
+    int id = (int)(t - g_threads);
+    memset(t, 0, sizeof(*t));
+    t->id         = id;
+    t->entry      = fn;
+    t->arg        = arg;
+    t->state      = CANBOOT_TH_RUNNABLE;
+    t->stack      = g_stacks[id];
+    t->stack_size = CANBOOT_THREAD_STACK;
+    arch_ctx_init(&t->ctx, g_stacks[id] + CANBOOT_THREAD_STACK);
+
+    rq_push(this_cpu(), t);
+
+    canboot_sched_unlock(f);
+    return t;
+}
+
+void canboot_thread_detach(struct canboot_thread *t) {
+    canboot_irqflags_t f;
+    canboot_sched_lock(&f);
+    if (t->state == CANBOOT_TH_EXITED) {
+        /* Already finished and waiting to be reaped: free it now. */
+        t->state = CANBOOT_TH_FREE;
+    } else {
+        t->detached = 1;
+    }
+    canboot_sched_unlock(f);
+}
+
+__attribute__((noreturn)) void canboot_thread_exit(void *retval) {
+    canboot_irqflags_t f;
+    canboot_sched_lock(&f);
+
+    struct canboot_thread *self = this_cpu()->current;
+    self->retval = retval;
+    canboot_sched_wake_all(&self->join_q);
+
+    if (self->detached && self->id >= 0) {
+        self->state = CANBOOT_TH_FREE; /* nobody will join; reap now */
+    } else {
+        self->state = CANBOOT_TH_EXITED;
+    }
+
+    /* Switch away forever. We never re-enter this thread, so the thread
+     * we switch into is the one that releases g_sched (resume side). */
+    reschedule();
+
+    /* Unreachable: an EXITED/FREE thread is never put back on a run
+     * queue. Guard anyway so the noreturn contract holds. */
+    for (;;)
+        canboot_cpu_relax();
+}
+
+int canboot_thread_join(struct canboot_thread *t, void **retval) {
+    if (!t)
+        return -1;
+
+    canboot_irqflags_t f;
+    canboot_sched_lock(&f);
+
+    while (t->state != CANBOOT_TH_EXITED && t->state != CANBOOT_TH_FREE)
+        canboot_sched_block_on(&t->join_q);
+
+    if (retval)
+        *retval = t->retval;
+
+    if (t->id >= 0)
+        t->state = CANBOOT_TH_FREE; /* reap the slot */
+
+    canboot_sched_unlock(f);
+    return 0;
+}

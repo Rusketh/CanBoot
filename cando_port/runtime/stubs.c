@@ -107,17 +107,15 @@ pid_t getppid(void)                                 { return 0; }
 
 /* ---- Scheduling / threading ------------------------------------------ */
 
-int sched_yield(void) { __asm__ volatile (
-#if defined(__x86_64__)
-        "pause"
-#elif defined(__aarch64__)
-        "yield"
-#endif
-    ); return 0; }
+/* Real yield into the CanBoot scheduler (rt/sched). Forward-declared to
+ * avoid pulling the scheduler headers into this POSIX-surface stub. */
+void canboot_sched_yield(void);
+int sched_yield(void) { canboot_sched_yield(); return 0; }
 
 long syscall(long number, ...) { (void)number; STUB_FAIL_ERRNO(-1L, ENOSYS); }
 
-int pthread_detach(unsigned long t) { (void)t; return 0; }
+/* pthread_detach now lives in rt/pthread_stub/pthread.c (real scheduler
+ * shim) — it actually reaps the thread slot rather than no-op'ing. */
 
 struct timespec; /* opaque - we ignore the contents */
 int nanosleep(const struct timespec *req, struct timespec *rem) {

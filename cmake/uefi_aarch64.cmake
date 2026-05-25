@@ -91,6 +91,10 @@ set(EFI_AARCH64_SOURCES
     hal/audio/virtio_snd.c
     cando_port/jit/codegen_stub_aarch64.c
 
+    # aarch64 thread context switch (the scheduler core itself,
+    # rt/sched/sched.c, rides in via CANBOOT_PORTABLE_SOURCES below).
+    rt/sched/arch/ctx_aarch64.S
+
     # Everything else is the same set both arches build. Sourced
     # from cmake/sources.cmake so adding a new cando_port/lib/*.c
     # reaches the aarch64-UEFI build without per-arch source-list
@@ -171,6 +175,8 @@ foreach(src ${EFI_AARCH64_SOURCES})
             -I${CMAKE_SOURCE_DIR}/hal/include
             -I${CMAKE_SOURCE_DIR}/kernel/include
             -I${CMAKE_SOURCE_DIR}/rt/pthread_stub/include
+            -I${CMAKE_SOURCE_DIR}/rt/sched/include
+            -I${CMAKE_SOURCE_DIR}/rt/sync/include
             -I${CMAKE_SOURCE_DIR}/net/lwip_port/include
             -I${CMAKE_SOURCE_DIR}/net/mbedtls_port/include
             -I${CMAKE_SOURCE_DIR}/net/mbedtls_port

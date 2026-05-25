@@ -107,9 +107,12 @@ set(CANBOOT_PORTABLE_SOURCES
     net/mbedtls_port/inet_pton.c
     net/mbedtls_port/lwip_bio.c
 
-    # Freestanding runtime: picolibc syscall shims, cooperative
-    # pthread fiber stub.
+    # Freestanding runtime: picolibc syscall shims, the preemptive-capable
+    # thread scheduler core (rt/sched), and the POSIX pthread shim layered
+    # over it. The arch-specific context-switch asm (rt/sched/arch/ctx_*.S)
+    # is added per-arch by the kernel/UEFI source lists, not here.
     rt/picolibc_port/syscalls.c
+    rt/sched/sched.c
     rt/pthread_stub/pthread.c
 )
 
@@ -120,6 +123,7 @@ set(CANBOOT_KERNEL_COMMON
     # x86_64-specific kernel.
     arch/x86_64/idt.c
     arch/x86_64/idt_stubs.S
+    rt/sched/arch/ctx_x86_64.S
     kernel/kmain.c
 
     # x86_64-specific HAL: 16550 UART (COM1), PS/2 i8042, AHCI SATA,

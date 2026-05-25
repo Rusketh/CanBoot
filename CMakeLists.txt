@@ -64,6 +64,8 @@ elseif(CANBOOT_ARCH STREQUAL "aarch64")
         hal/console/serial_aarch64.c
         hal/input/input_stub_aarch64.c
         rt/picolibc_port/syscalls.c
+        rt/sched/sched.c
+        rt/sched/arch/ctx_aarch64.S
         rt/pthread_stub/pthread.c
     )
     # Input note: this aarch64 target is a minimal bring-up that stubs the
@@ -137,6 +139,7 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
     set_source_files_properties(
         arch/x86_64/bootstrap.S
         arch/x86_64/idt_stubs.S
+        rt/sched/arch/ctx_x86_64.S
         boot/multiboot2/header.S
         PROPERTIES LANGUAGE ASM
     )
@@ -149,6 +152,8 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
         hal/include
         kernel/include
         rt/pthread_stub/include
+        rt/sched/include
+        rt/sync/include
         net/lwip_port/include
         net/mbedtls_port/include
         net/mbedtls_port
@@ -208,6 +213,7 @@ elseif(CANBOOT_ARCH STREQUAL "aarch64")
 
     set_source_files_properties(
         arch/aarch64/bootstrap.S
+        rt/sched/arch/ctx_aarch64.S
         PROPERTIES LANGUAGE ASM
     )
 
@@ -215,6 +221,8 @@ elseif(CANBOOT_ARCH STREQUAL "aarch64")
         hal/include
         kernel/include
         rt/pthread_stub/include
+        rt/sched/include
+        rt/sync/include
         ${CMAKE_SOURCE_DIR}
         ${PICOLIBC_INCLUDE}
     )

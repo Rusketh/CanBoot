@@ -115,6 +115,8 @@ if(GNUEFI_INCLUDE_DIR AND GNUEFI_ARCH_INCLUDE_DIR
                 -I${CMAKE_SOURCE_DIR}/hal/include
                 -I${CMAKE_SOURCE_DIR}/kernel/include
                 -I${CMAKE_SOURCE_DIR}/rt/pthread_stub/include
+                -I${CMAKE_SOURCE_DIR}/rt/sched/include
+                -I${CMAKE_SOURCE_DIR}/rt/sync/include
                 -I${CMAKE_SOURCE_DIR}/net/lwip_port/include
                 -I${CMAKE_SOURCE_DIR}/net/mbedtls_port/include
                 -I${CMAKE_SOURCE_DIR}/net/mbedtls_port
