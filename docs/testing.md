@@ -119,6 +119,23 @@ bash tests/run-qemu-aarch64-uefi.sh build-aarch64/canboot-aarch64-uefi.img
 Each script returns 0 on success and prints the captured serial log
 prefixed with `  |` on failure.
 
+## Pointer (mouse) smoke
+
+The x86_64 runners drive the `input.mouse()` probe in `init.cdo`. By
+default they inject a relative PS/2 mouse over the HMP monitor. The BIOS
+runner also takes a second pointer case via an env knob:
+
+```bash
+POINTER=tablet bash tests/run-qemu-bios.sh build/canboot-x86_64-bios.iso
+```
+
+`tablet` binds a `virtio-tablet` and injects **absolute** coordinates
+over QMP, exercising the `EV_ABS` path in `hal/input/virtio_input.c`
+(the virtio keyboard is dropped so the single virtio-input driver binds
+the tablet; the PS/2 keyboard still serves `sendkey`). Reaching the
+probe is asserted; the injected click is reported non-fatally because
+host QEMU pointer-injection support varies.
+
 ## Adding a test
 
 There's no separate test harness — tests are assertions in the QEMU

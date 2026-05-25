@@ -50,6 +50,36 @@ print("cando got key3:", k3);
 
 print("cando input poll end");
 
+// ---- Pointer: input.mouse() ------------------------------------------
+// Best-effort pointer probe. The smoke runner injects mouse motion + a
+// left click during this window (run-qemu-bios.sh); guarded so it is a
+// no-op on builds/arches where the mouse accessor isn't registered.
+print("cando mouse probe begin");
+IF (input.mouse != NULL) {
+    input.flush();
+    VAR m0 = input.mouse();
+    print("cando mouse present initial =", m0.present);
+    VAR mt0 = time.ms();
+    VAR sawBtn = false;
+    VAR moved = false;
+    VAR lastx = m0.x;
+    VAR lasty = m0.y;
+    WHILE (time.ms() - mt0 < 2500) {
+        VAR mm = input.mouse();
+        IF (mm.x != lastx || mm.y != lasty) { moved = true; }
+        IF (mm.left != 0 || mm.right != 0 || mm.middle != 0) {
+            print("cando mouse click x =", mm.x, "y =", mm.y, "buttons =", mm.buttons);
+            sawBtn = true;
+            BREAK;
+        }
+    }
+    print("cando mouse moved =", moved);
+    print("cando mouse button =", sawBtn);
+} ELSE {
+    print("cando mouse unavailable");
+}
+print("cando mouse probe end");
+
 // ---- Milestone 13: system libs (time / file / net / tls) ------------
 
 print("cando sys libs begin");

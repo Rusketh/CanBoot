@@ -15,15 +15,50 @@
 #include "hal/input.h"
 
 #define I8042_DATA 0x60
+#define I8042_CMD  0x64   /* write: command; read: status */
 #define I8042_STATUS 0x64
 
 #define STATUS_OUTPUT_FULL 0x01
+#define STATUS_INPUT_FULL  0x02
+#define STATUS_AUX         0x20   /* output byte came from the aux (mouse) port */
 
 static inline uint8_t inb(uint16_t port) {
     uint8_t v;
     __asm__ volatile ("inb %1, %0" : "=a"(v) : "Nd"(port));
     return v;
 }
+
+static inline void outb(uint16_t port, uint8_t v) {
+    __asm__ volatile ("outb %0, %1" : : "a"(v), "Nd"(port));
+}
+
+/* Spin until the controller's input buffer is empty (safe to write) or a
+ * bounded guard expires. No timers this early, so the guard is a plain
+ * spin count - generous enough for QEMU and real i8042s. */
+static void i8042_wait_write(void) {
+    uint32_t guard = 100000;
+    while (guard-- && (inb(I8042_STATUS) & STATUS_INPUT_FULL)) { }
+}
+
+/* Wait for an output byte, returning -1 on timeout. */
+static int i8042_wait_read(void) {
+    uint32_t guard = 100000;
+    while (guard--) {
+        if (inb(I8042_STATUS) & STATUS_OUTPUT_FULL) return (int)inb(I8042_DATA);
+    }
+    return -1;
+}
+
+/* Send a command byte to the mouse (aux) device and swallow its ACK. */
+static void mouse_write(uint8_t cmd) {
+    i8042_wait_write(); outb(I8042_CMD, 0xD4);   /* next byte -> aux port */
+    i8042_wait_write(); outb(I8042_DATA, cmd);
+    (void)i8042_wait_read();                     /* 0xFA ACK (ignored) */
+}
+
+static bool g_mouse_enabled;
+static uint8_t g_mouse_pkt[3];
+static uint8_t g_mouse_idx;
 
 static bool g_shift;
 static bool g_extended;        /* set by 0xE0 prefix, consumed by next byte */
@@ -117,14 +152,72 @@ static void process_scancode(uint8_t sc) {
     emit(apply_shift(code), make, is_release);
 }
 
+/* Decode standard 3-byte PS/2 mouse packets. byte0 carries the button
+ * bits + movement sign/overflow; bytes 1/2 are dx/dy (9-bit signed). PS/2
+ * Y grows upward, so we negate it to match the framebuffer's top-left
+ * origin. */
+static void process_mouse_byte(uint8_t b) {
+    /* Resync: the first packet byte always has bit3 set. */
+    if (g_mouse_idx == 0 && !(b & 0x08)) return;
+
+    g_mouse_pkt[g_mouse_idx++] = b;
+    if (g_mouse_idx < 3) return;
+    g_mouse_idx = 0;
+
+    uint8_t flags = g_mouse_pkt[0];
+    if (flags & 0xC0) return;   /* X/Y overflow - drop the packet */
+
+    int32_t dx = g_mouse_pkt[1];
+    int32_t dy = g_mouse_pkt[2];
+    if (flags & 0x10) dx -= 256;
+    if (flags & 0x20) dy -= 256;
+
+    canboot_input_mouse_move_rel(dx, -dy);
+    canboot_input_mouse_button(CANBOOT_MOUSE_LEFT,   (flags & 0x01) != 0);
+    canboot_input_mouse_button(CANBOOT_MOUSE_RIGHT,  (flags & 0x02) != 0);
+    canboot_input_mouse_button(CANBOOT_MOUSE_MIDDLE, (flags & 0x04) != 0);
+}
+
 static void ps2_pump(void) {
-    /* Drain any bytes the controller has queued. The output-buffer-full
-     * bit in STATUS tells us whether there's data ready. */
-    uint8_t guard = 32;
-    while (guard-- && (inb(I8042_STATUS) & STATUS_OUTPUT_FULL)) {
-        uint8_t sc = inb(I8042_DATA);
-        process_scancode(sc);
+    /* Drain any bytes the controller has queued. STATUS bit 5 tells us
+     * whether each byte came from the keyboard or the aux (mouse) port. */
+    uint8_t guard = 64;
+    while (guard--) {
+        uint8_t st = inb(I8042_STATUS);
+        if (!(st & STATUS_OUTPUT_FULL)) break;
+        uint8_t data = inb(I8042_DATA);
+        if (g_mouse_enabled && (st & STATUS_AUX)) {
+            process_mouse_byte(data);
+        } else {
+            process_scancode(data);
+        }
     }
+}
+
+/* Bring up the i8042 aux port + mouse: enable the aux clock, then tell the
+ * mouse to stream movement packets. Best-effort; if no mouse is attached
+ * the ACK reads simply time out and g_mouse_enabled stays useful only as a
+ * routing hint (spurious aux bytes are rare). */
+static void ps2_mouse_init(void) {
+    /* Enable the auxiliary device. */
+    i8042_wait_write(); outb(I8042_CMD, 0xA8);
+
+    /* Read the controller config byte, enable the aux clock (clear bit 5),
+     * and write it back. We stay on polling, so leave the IRQ-enable bits
+     * untouched to avoid unhandled IRQ12s. */
+    i8042_wait_write(); outb(I8042_CMD, 0x20);
+    int cfg = i8042_wait_read();
+    if (cfg >= 0) {
+        uint8_t c = (uint8_t)cfg;
+        c &= (uint8_t)~0x20;                 /* enable aux clock */
+        i8042_wait_write(); outb(I8042_CMD, 0x60);
+        i8042_wait_write(); outb(I8042_DATA, c);
+    }
+
+    mouse_write(0xF6);   /* set defaults (sample rate, resolution, scaling) */
+    mouse_write(0xF4);   /* enable data reporting (start streaming packets) */
+    g_mouse_enabled = true;
+    g_mouse_idx = 0;
 }
 
 bool canboot_ps2_init(void) {
@@ -135,12 +228,18 @@ bool canboot_ps2_init(void) {
     g_shift = false;
     g_extended = false;
 
+    g_mouse_enabled = false;
+    g_mouse_idx = 0;
+
     /* Drain stale bytes that may have been queued during firmware
      * boot-time interactions (eg. UEFI splash skipping). */
     uint8_t guard = 32;
     while (guard-- && (inb(I8042_STATUS) & STATUS_OUTPUT_FULL)) {
         (void)inb(I8042_DATA);
     }
+
+    /* Bring up the PS/2 mouse on the same controller (best-effort). */
+    ps2_mouse_init();
 
     canboot_input_register_pump(ps2_pump);
     return true;

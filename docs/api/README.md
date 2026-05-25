@@ -19,6 +19,12 @@ underlying HAL / runtime they sit on top of is documented in
 | [display](display.md) | Framebuffer painter: clear, fillRect, line, text, image, pixel |
 | [fb](fb.md)           | Scanout flush / present for explicit-present devices |
 
+## GUI toolkit
+
+| Library | What it does |
+|---------|--------------|
+| [gui](../../modules/gui/gui.md) | Optional retained-mode widget toolkit (`modules/gui/`, `include`-it-yourself) over `display` + `input`, mouse + keyboard |
+
 ## Storage
 
 | Library | What it does |

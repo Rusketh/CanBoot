@@ -1,0 +1,200 @@
+# gui — retained-mode widget toolkit
+
+A widget toolkit written entirely in CanDo on top of
+[`display`](../../docs/api/display.md) and [`input`](../../docs/api/input.md). Unlike the other
+entries here it is **not** a built-in namespace, and it is **not** baked
+into the boot image — it is an optional module that lives at
+`modules/gui/gui.cdo` in the source tree. Copy it onto your boot media
+(see [Shipping onto a boot image](#shipping-onto-a-boot-image) below) and
+load it with `include`:
+
+```cdo
+VAR GUI = include("/gui.cdo");
+
+VAR f = GUI.Create("Frame");
+f:SetSize(300, 200);
+f:Center();
+f:SetTitle("Hello");
+f:MakePopup();
+
+VAR b = GUI.Create("Button", f);
+b:Dock(GUI.TOP);
+b:SetText("Click me");
+b.DoClick = FUNCTION(self) { print("clicked"); };
+
+GUI.run();
+```
+
+The whole library is wrapped in an IIFE; the returned `GUI` table is the
+only thing it adds to scope (nothing leaks into globals, and the widget
+classes themselves are private — you reach them by name through
+`GUI.Create`).
+
+## Files
+
+- `gui.cdo` — the library (include this).
+- `gui_demo.cdo` — a showcase; co-locate it with `gui.cdo` and run it as
+  `/init.cdo`, or `include("./gui_demo.cdo")` from your own init.
+- `gui.md` — this document.
+
+## Shipping onto a boot image
+
+The build scripts don't ship it. Stage it next to `init.cdo` yourself,
+then `include` it from your init script:
+
+```bash
+mcopy -i build/canboot-fat32.img modules/gui/gui.cdo ::/gui.cdo   # FAT32
+cp modules/gui/gui.cdo "$ISO_ROOT/gui.cdo"                        # ISO root
+```
+
+```cdo
+VAR GUI = include("/gui.cdo");
+```
+
+## Input model
+
+The toolkit drives an on-screen cursor from a pointing device when one is
+present (PS/2 or virtio, surfaced by [`input.mouse()`](../../docs/api/input.md)), and
+falls back to the keyboard otherwise. `GUI.run()` reads the mouse each
+frame via `GUI.pollMouse`; the underlying model is a real mouse pipeline
+(hit-testing, hover, press/move/release, drag capture).
+
+| Action            | Mouse        | Keyboard |
+|-------------------|--------------|----------|
+| Move cursor       | move         | arrow keys |
+| Click / press     | left button  | Enter |
+| Drag              | hold + move  | click to grab, arrows, Enter/Esc to drop |
+| Scroll            | wheel        | drag the scrollbar |
+| Cycle focus       | —            | Tab (warps the cursor to the focused widget) |
+| Cancel / close    | click off / Esc | Esc (closes menus, blurs a field, closes the top frame) |
+| Type / edit       | —            | printable keys + Backspace go to the focused text field |
+
+In a focused `TextBox` (multi-line) the arrow keys move the caret; in a
+single-line `TextEntry` only Left/Right are caret moves and Up/Down move
+the cursor.
+
+External event entry points (used by `pollMouse`, and available if you
+drive your own loop): `GUI.mouseMove(x, y)`, `GUI.mouseDown(x, y)`,
+`GUI.mouseUp(x, y)`, `GUI.mouseWheel(x, y, delta)`, and the atomic
+`GUI.feedClick(x, y)` / `GUI.feedCursor(x, y)`.
+
+## Module functions
+
+| Call | Effect |
+|------|--------|
+| `GUI.Create(class [, parent])` | Construct a registered widget; parents to `parent` or the root. |
+| `GUI.getRoot()` | The screen-sized root panel that owns every top-level frame. |
+| `GUI.run()` | Enter the event loop (blocks, pumping input + repainting). |
+| `GUI.frame()` | Run one layout + think + paint cycle (for a custom loop). |
+| `GUI.pump()` | Drain queued input without blocking. |
+| `GUI.quit()` | Stop `GUI.run()`. |
+| `GUI.Color(r, g, b [, a])` | A colour value (alpha is carried but the framebuffer is opaque). |
+| `GUI.newline()` | A real newline string — the port does not interpret `"\n"` escapes. |
+| `GUI.register(name, class)` | Register a custom widget class for `Create`. |
+| `GUI.setBackend(display, input [, fb])` | Override the draw/input backends (used for testing). |
+| `GUI.feedCursor(x, y)` / `GUI.feedClick(x, y)` | Drive the cursor / a click from an external source. |
+| `GUI.mouseMove/mouseDown/mouseUp/mouseWheel` | Real press/move/release pointer events (enable dragging). |
+| `GUI.pollMouse()` | Read `input.mouse()` once and dispatch move/press/release/wheel. |
+
+Tunables: `GUI.cursorStep`, `GUI.dragStep`, `GUI.tickMs`,
+`GUI.showCursor`. Theme colours live in `GUI.skin` (mutate before
+building UI to retheme everything). Dock constants: `GUI.FILL`,
+`GUI.LEFT`, `GUI.TOP`, `GUI.RIGHT`, `GUI.BOTTOM`, `GUI.NODOCK`. Key
+codes: `GUI.keys.{UP,DOWN,LEFT,RIGHT,ENTER,ESC,TAB,BACKSP}`.
+
+## Widgets
+
+| Class | Notes |
+|-------|-------|
+| `Panel` | Base widget: position, size, parenting, docking, paint hooks. |
+| `Frame` | Title bar, close button, drag, `SetTitle`, `MakePopup`, `Center`, `OnClose`. |
+| `Label` | Text, `SetContentAlignment`, `SizeToContents`. |
+| `Button` | `SetText`, hover/press states, `DoClick`. |
+| `CheckBox` / `CheckBoxLabel` | `SetChecked`, `GetChecked`, `OnChange`. |
+| `TextEntry` | Single-line editable text + caret, `GetValue`, `OnEnter`, `OnChange`, `SetNumeric`. |
+| `TextBox` | Multi-line editable text area; `SetMultiline(bool)`, `GetLines`, `GetValue`, `OnChange`, `OnEnter` (single-line mode). |
+| `NumberEntry` | Numeric text entry with `SetMinMax`, numeric `GetValue`. |
+| `Progress` | `SetFraction`. |
+| `Slider` | Draggable value slider, `SetMinMax`, `OnValueChanged`. |
+| `NumSlider` | Label + slider + numeric readout. |
+| `ComboBox` | `AddChoice`, `GetSelected`, `OnSelect` (opens a `Menu`). |
+| `Menu` / `MenuOption` | Popup option list, `AddOption(text, fn)`. |
+| `ScrollPanel` | Scrollable canvas with a vertical bar; `GetCanvas`, `AddItem`. |
+| `ListView` | Columns + selectable rows, `AddColumn`, `AddLine`, `OnRowSelected`. |
+| `PropertySheet` | Tabbed container, `AddSheet(label, panel)`, `SetActiveTab`. |
+| `ColorMixer` | RGB sliders + swatch, `SetColor`, `GetColor`, `OnChange`. |
+
+## Panel methods (common)
+
+Geometry: `SetPos`/`GetPos`, `SetSize`/`GetSize`, `SetWide`/`SetTall`,
+`GetWide`/`GetTall`, `Center`. Tree: `SetParent`, `Add`, `Remove`,
+`GetChildren`, `LocalToScreen`/`ScreenToLocal`. Docking: `Dock(mode)`,
+`DockMargin(l,t,r,b)`, `DockPadding(l,t,r,b)`, `SetZPos`. State:
+`SetVisible`/`IsVisible`, `SetEnabled`/`IsEnabled`, `SetMouseInputEnabled`,
+`SetKeyboardInputEnabled`, `RequestFocus`, `HasFocus`, `IsHovered`,
+`MoveToFront`, `MakePopup`. Appearance: `SetText`, `SetTextColor`,
+`SetContentAlignment`, `SetBGColor`, `SetPaintBackground`.
+
+## TextBox
+
+A multi-line editor. By default Enter inserts a newline and Up/Down move
+the caret between rows; it scrolls vertically to keep the caret visible.
+`SetMultiline(FALSE)` turns it into a single-line field (existing
+newlines are flattened to spaces, Enter fires `OnEnter`, and Up/Down fall
+through to move the cursor).
+
+```cdo
+VAR box = GUI.Create("TextBox", parent);
+box:Dock(GUI.FILL);
+box:SetValue("line one" + GUI.newline() + "line two");
+box.OnChange = FUNCTION(self, text) { print("now: " + text); };
+
+VAR single = GUI.Create("TextBox", parent);
+single:SetMultiline(FALSE);
+single.OnEnter = FUNCTION(self, text) { print("submit: " + text); };
+```
+
+`GetValue()` returns the full string (rows joined by `GUI.newline()`);
+`GetLines()` returns the rows as an array.
+
+## Hooks
+
+Assign these as instance fields. **CanDo enforces exact arity**, so a
+hook must take exactly the documented parameters (the leading `self` is
+supplied by the `:` call):
+
+| Hook | Signature |
+|------|-----------|
+| `Paint` / `PaintOver` | `(self, w, h)` |
+| `PerformLayout` | `(self, w, h)` |
+| `Think` | `(self)` |
+| `DoClick` | `(self)` |
+| `OnMousePressed` / `OnMouseReleased` | `(self, mouseCode, x, y)` |
+| `OnCursorEntered` / `OnCursorExited` | `(self)` |
+| `OnChange` | `(self, value)` |
+| `OnValueChanged` | `(self, value)` |
+| `OnSelect` | `(self, index, text, data)` |
+| `OnRowSelected` | `(self, row, line)` |
+| `OnEnter` | `(self, value)` |
+| `OnFocusChanged` | `(self, gained)` |
+| `OnClose` / `OnRemove` | `(self)` |
+
+## Notes
+
+- Text uses the framebuffer's fixed 8×8 font; `SetFont` is accepted for
+  API parity but does not change glyph size.
+- Colours are opaque `0xRRGGBB`; alpha is stored on `Color` values but
+  solid fills ignore it (`GUI.blend` composites against a known
+  background where needed).
+- The pinned CanDo port does not interpret `"\n"` / `"\t"` escape
+  sequences, hex/binary number literals, arrow functions, or unary `~`;
+  the library sticks to what the port supports. Use `GUI.newline()` for
+  literal newlines.
+- The library is exercised headlessly against a mock framebuffer in the
+  CanDo test harness; see the source header of `modules/gui/gui.cdo`.
+
+## See also
+
+- [`display`](../../docs/api/display.md) — the framebuffer painter it draws through
+- [`input`](../../docs/api/input.md) — the key codes it reads (incl. arrows + Esc)
+- [`image`](../../docs/api/image.md) — decode + draw images into panels

@@ -21,6 +21,8 @@
  * stuck inside input.waitKey loops. */
 extern void canboot_audio_pump_default(void);
 
+#include <string.h>
+
 #include "core/value.h"
 #include "vm/vm.h"
 #include "vm/bridge.h"
@@ -96,11 +98,50 @@ static int in_events(CandoVM *vm, int argc, CandoValue *args) {
     return 1;
 }
 
+static void obj_set_num(CandoVM *vm, CdoObject *obj, const char *name, f64 v) {
+    CdoString *k = cdo_string_intern(name, (uint32_t)strlen(name));
+    cdo_object_rawset(obj, k, cando_bridge_to_cdo(vm, cando_number(v)), FIELD_NONE);
+    cdo_string_release(k);
+}
+
+/*
+ * input.mouse() -> { x, y, buttons, left, right, middle, wheel, present }
+ *
+ * Pumps the input devices, then returns the current pointer state. `x`/`y`
+ * are framebuffer pixels; `buttons` is a bitmask (1=left, 2=right,
+ * 4=middle) with left/right/middle also broken out as 0/1; `wheel` is the
+ * accumulated notch delta since the last call (read-and-clear); `present`
+ * is 1 once any pointing device has reported.
+ */
+static int in_mouse(CandoVM *vm, int argc, CandoValue *args) {
+    (void)argc; (void)args;
+    hal_input_pump();
+
+    int32_t  x = 0, y = 0;
+    uint32_t btn = 0;
+    canboot_input_mouse_state(&x, &y, &btn);
+    int32_t wheel = canboot_input_mouse_take_wheel();
+
+    CandoValue obj_val = cando_bridge_new_object(vm);
+    CdoObject *obj     = cando_bridge_resolve(vm, cando_as_handle(obj_val));
+    obj_set_num(vm, obj, "x", (f64)x);
+    obj_set_num(vm, obj, "y", (f64)y);
+    obj_set_num(vm, obj, "buttons", (f64)btn);
+    obj_set_num(vm, obj, "left",   (btn & CANBOOT_MOUSE_LEFT)   ? 1.0 : 0.0);
+    obj_set_num(vm, obj, "right",  (btn & CANBOOT_MOUSE_RIGHT)  ? 1.0 : 0.0);
+    obj_set_num(vm, obj, "middle", (btn & CANBOOT_MOUSE_MIDDLE) ? 1.0 : 0.0);
+    obj_set_num(vm, obj, "wheel",  (f64)wheel);
+    obj_set_num(vm, obj, "present", canboot_input_mouse_present() ? 1.0 : 0.0);
+    cando_vm_push(vm, obj_val);
+    return 1;
+}
+
 static const LibutilMethodEntry input_methods[] = {
     { "poll",    in_poll     },
     { "waitKey", in_wait_key },
     { "flush",   in_flush    },
     { "events",  in_events   },
+    { "mouse",   in_mouse    },
 };
 
 void canboot_cando_open_inputlib(CandoVM *vm) {

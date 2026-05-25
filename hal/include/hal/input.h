@@ -64,6 +64,11 @@ struct canboot_event {
 #define CANBOOT_KEY_RIGHT    0x123
 #define CANBOOT_KEY_F1       0x130
 
+/* Mouse button bitmask. */
+#define CANBOOT_MOUSE_LEFT   0x1u
+#define CANBOOT_MOUSE_RIGHT  0x2u
+#define CANBOOT_MOUSE_MIDDLE 0x4u
+
 /* Initialise the input subsystem and all detected device drivers.
  * Must be called after hal_pci_init() so virtio-input can be discovered. */
 void hal_input_init(void);
@@ -94,6 +99,24 @@ uint32_t canboot_input_dropped_events(void);
 /* Device drivers register a pump callback so hal_input_pump() can drain
  * them in registration order on a single call. */
 void canboot_input_register_pump(void (*fn)(void));
+
+/*
+ * Pointer (mouse) state. Pointing-device drivers feed motion and button
+ * changes through the canboot_input_mouse_* sinks; consumers read the
+ * accumulated absolute position (clamped to the framebuffer) and the
+ * current button mask. Motion may arrive relative (PS/2, virtio EV_REL)
+ * or absolute (virtio EV_ABS tablet); both land in the same state.
+ */
+void    canboot_input_mouse_move_rel(int32_t dx, int32_t dy);
+void    canboot_input_mouse_move_abs(int32_t x, int32_t y);
+void    canboot_input_mouse_button(uint32_t mask, bool down);
+void    canboot_input_mouse_wheel(int32_t delta);
+void    canboot_input_mouse_state(int32_t *x, int32_t *y, uint32_t *buttons);
+/* Read and clear the accumulated wheel delta (notches; +up / -down). */
+int32_t canboot_input_mouse_take_wheel(void);
+/* True once a pointing device has reported. */
+bool    canboot_input_mouse_present(void);
+void    canboot_input_mouse_set_present(bool present);
 
 /* Device initialisers - call after hal_input_init() (and, for virtio,
  * after hal_pci_init()). */

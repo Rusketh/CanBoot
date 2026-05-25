@@ -1,0 +1,1702 @@
+// gui.cdo -- a retained-mode widget toolkit for CanBoot.
+//
+//   VAR GUI = include("/gui.cdo");
+//   VAR f = GUI.Create("Frame");
+//   f:SetSize(300, 200); f:Center(); f:SetTitle("Hello"); f:MakePopup();
+//   VAR b = GUI.Create("Button", f);
+//   b:Dock(GUI.TOP); b:SetText("Click me");
+//   b.DoClick = FUNCTION(self) { print("clicked"); };
+//   GUI.run();
+//
+// The whole library lives inside one IIFE so nothing leaks into the host
+// global namespace -- the returned `GUI` table is the only export.
+//
+// It paints through the `display` framebuffer lib and is driven by the
+// `input` lib. CanBoot has no pointing device, so the cursor is driven by
+// the keyboard: arrow keys move it, Enter is a left click, Tab cycles
+// keyboard focus, Esc cancels/closes, and typing routes to the focused
+// text field. The widget layer underneath is a genuine mouse model
+// (hit-testing, hover, OnMousePressed/Released, drag capture) so a real
+// pointer source drops straight in via GUI.feedCursor / GUI.feedClick.
+
+RETURN (FUNCTION() {
+
+VAR GUI = {};
+GUI.version = "1.0.0";
+
+// ----------------------------------------------------------------------
+// Backend capture. display / input / fb are host globals in CanBoot but
+// absent in a plain desktop CanDo, so capture defensively and let tests
+// inject mocks via GUI.setBackend.
+// ----------------------------------------------------------------------
+VAR B = { d: NULL, inp: NULL, fb: NULL };
+TRY { B.d   = display; } CATCH (e) { }
+TRY { B.inp = input;   } CATCH (e) { }
+TRY { B.fb  = fb;      } CATCH (e) { }
+
+GUI.setBackend = FUNCTION(d, ind, ...rest) {
+    IF (d   != NULL) { B.d   = d;   }
+    IF (ind != NULL) { B.inp = ind; }
+    B.fb = (#rest > 0 ? rest[0] : NULL);
+};
+
+// ----------------------------------------------------------------------
+// Key codes (as surfaced by CanBoot's hal_input_getc after the navigation
+// keys were unblocked). Printable ASCII arrives as itself.
+// ----------------------------------------------------------------------
+VAR KEY_BACKSP = 8;
+VAR KEY_TAB    = 9;
+VAR KEY_ENTER  = 10;
+VAR KEY_ESC    = 257;
+VAR KEY_UP     = 288;
+VAR KEY_DOWN   = 289;
+VAR KEY_LEFT   = 290;
+VAR KEY_RIGHT  = 291;
+GUI.keys = { BACKSP: 8, TAB: 9, ENTER: 10, ESC: 257,
+               UP: 288, DOWN: 289, LEFT: 290, RIGHT: 291 };
+
+VAR MOUSE_LEFT = 107;
+GUI.MOUSE_LEFT = 107;
+
+// Real newline (code 10). The port does not interpret "\n" escapes -- a
+// double-quoted "\n" is the two bytes backslash + n -- so build it directly.
+VAR NL = string.fromCodePoint(10);
+// Exposed so scripts can splice newlines into TextBox values.
+GUI.newline = FUNCTION() { RETURN NL; };
+
+// Dock modes.
+GUI.NODOCK = 0;
+GUI.FILL   = 1;
+GUI.LEFT   = 2;
+GUI.TOP    = 4;
+GUI.RIGHT  = 8;
+GUI.BOTTOM = 16;
+
+// ----------------------------------------------------------------------
+// Colours. A colour is { r, g, b, a }; alpha is carried for API parity but
+// the framebuffer is opaque 0xRRGGBB, so fills ignore it. _pk packs a
+// colour (or a raw number) into the 0xRRGGBB the display lib expects.
+// ----------------------------------------------------------------------
+// Alpha is optional (CanDo enforces exact arity, so the tail is variadic).
+VAR Color = FUNCTION(r, g, b, ...rest) {
+    RETURN { r: r, g: g, b: b, a: (#rest > 0 ? rest[0] : 255) };
+};
+GUI.Color = Color;
+
+// Split on newline, exact (always #newlines + 1 entries). string.split
+// drops trailing empties and returns nothing for "", neither of which the
+// text caret can tolerate, so slice it ourselves.
+VAR _splitLines = FUNCTION(s) {
+    VAR lines = []; VAR rest = s;
+    VAR p = string.indexOf(rest, NL);
+    WHILE (p >= 0) {
+        array.push(lines, string.sub(rest, 0, p));
+        rest = string.sub(rest, p + 1, #rest);
+        p = string.indexOf(rest, NL);
+    }
+    array.push(lines, rest);
+    RETURN lines;
+};
+
+// CanDo has no tonumber(); parse a decimal string ourselves. Returns NULL
+// on anything that isn't a clean [+-]?digits[.digits].
+VAR _toNum = FUNCTION(s) {
+    s = toString(s);
+    VAR n = #s;
+    IF (n == 0) { RETURN NULL; }
+    VAR i = 0; VAR sign = 1;
+    VAR c0 = string.codePointAt(s, 0);
+    IF (c0 == 45) { sign = -1; i = 1; }
+    ELSE IF (c0 == 43) { i = 1; }
+    VAR intp = 0; VAR frac = 0; VAR fdiv = 1; VAR dot = FALSE; VAR seen = FALSE;
+    WHILE (i < n) {
+        VAR c = string.codePointAt(s, i);
+        IF (c == 46) {
+            IF (dot) { RETURN NULL; }
+            dot = TRUE;
+        } ELSE IF (c >= 48 && c <= 57) {
+            seen = TRUE;
+            VAR d = c - 48;
+            IF (dot) { fdiv = fdiv * 10; frac = frac * 10 + d; }
+            ELSE { intp = intp * 10 + d; }
+        } ELSE {
+            RETURN NULL;
+        }
+        i = i + 1;
+    }
+    IF (!seen) { RETURN NULL; }
+    RETURN sign * (intp + frac / fdiv);
+};
+GUI.toNumber = _toNum;
+
+VAR _pk = FUNCTION(c) {
+    IF (type(c) == "number") { RETURN c; }
+    IF (c == NULL || c.r == NULL) { RETURN 0; }
+    RETURN ((c.r & 255) << 16) | ((c.g & 255) << 8) | (c.b & 255);
+};
+
+// Blend src over dst by src alpha (0..255) -> opaque colour. Used by the
+// skin where the destination colour is known up front.
+GUI.blend = FUNCTION(dst, src) {
+    VAR a = src.a == NULL ? 255 : src.a;
+    VAR ia = 255 - a;
+    RETURN Color((src.r * a + dst.r * ia) / 255,
+                 (src.g * a + dst.g * ia) / 255,
+                 (src.b * a + dst.b * ia) / 255, 255);
+};
+
+// ----------------------------------------------------------------------
+// Skin: every colour the default widgets use. Mutate GUI.skin before
+// building UI to retheme everything at once.
+// ----------------------------------------------------------------------
+VAR skin = {
+    desktop:      Color(32, 32, 35),
+    panelBg:      Color(60, 60, 64),
+    frameBg:      Color(45, 45, 48),
+    titleBar:     Color(33, 33, 36),
+    titleText:    Color(235, 235, 235),
+    accent:       Color(59, 142, 234),
+    accentDim:    Color(40, 90, 150),
+    button:       Color(74, 74, 80),
+    buttonHover:  Color(92, 92, 100),
+    buttonDown:   Color(59, 142, 234),
+    buttonText:   Color(235, 235, 235),
+    border:       Color(28, 28, 30),
+    text:         Color(230, 230, 230),
+    textDim:      Color(150, 150, 155),
+    entryBg:      Color(24, 24, 26),
+    entryText:    Color(235, 235, 235),
+    check:        Color(59, 142, 234),
+    scrollTrack:  Color(36, 36, 40),
+    scrollThumb:  Color(90, 90, 96),
+    selected:     Color(45, 95, 155),
+    progress:     Color(59, 142, 234)
+};
+GUI.skin = skin;
+
+// ----------------------------------------------------------------------
+// Render context. Widgets paint in LOCAL coordinates; the framework sets
+// R's origin (R.ox, R.oy = the panel's absolute top-left) and clip rect
+// (R.cx/cy/cw/ch, absolute) before invoking each Paint hook. The R.*
+// helpers translate to absolute coords and clip.
+// ----------------------------------------------------------------------
+VAR R = { ox: 0, oy: 0, cx: 0, cy: 0, cw: 0, ch: 0 };
+
+R.rect = FUNCTION(x, y, w, h, col) {
+    VAR ax = R.ox + x; VAR ay = R.oy + y;
+    VAR x0 = math.max(ax, R.cx);        VAR y0 = math.max(ay, R.cy);
+    VAR x1 = math.min(ax + w, R.cx + R.cw); VAR y1 = math.min(ay + h, R.cy + R.ch);
+    IF (x1 > x0 && y1 > y0) {
+        B.d.fillRect(math.floor(x0), math.floor(y0),
+                     math.floor(x1 - x0), math.floor(y1 - y0), _pk(col));
+    }
+};
+
+R.outline = FUNCTION(x, y, w, h, col, t) {
+    VAR th = t == NULL ? 1 : t;
+    R.rect(x, y, w, th, col);
+    R.rect(x, y + h - th, w, th, col);
+    R.rect(x, y, th, h, col);
+    R.rect(x + w - th, y, th, h, col);
+};
+
+// 8x8 fixed font. Width is exact; clip whole glyphs.
+VAR FONT_W = 8;
+VAR FONT_H = 8;
+R.textW = FUNCTION(s) { RETURN (s == NULL ? 0 : #toString(s)) * FONT_W; };
+R.textH = FUNCTION() { RETURN FONT_H; };
+
+R.text = FUNCTION(x, y, s, col) {
+    IF (s == NULL) { RETURN; }
+    s = toString(s);
+    IF (#s == 0) { RETURN; }
+    VAR ax = R.ox + x; VAR ay = R.oy + y;
+    IF (ay < R.cy || ay + FONT_H > R.cy + R.ch) { RETURN; } // coarse vertical clip
+    VAR clipL = R.cx; VAR clipR = R.cx + R.cw;
+    VAR n = #s;
+    IF (ax < clipL) {
+        VAR drop = math.floor((clipL - ax) / FONT_W);
+        IF (drop >= n) { RETURN; }
+        s = string.sub(s, drop, n);
+        ax = ax + drop * FONT_W;
+        n = #s;
+    }
+    VAR maxc = math.floor((clipR - ax) / FONT_W);
+    IF (maxc <= 0) { RETURN; }
+    IF (maxc < n) { s = string.sub(s, 0, maxc); }
+    B.d.text(math.floor(ax), math.floor(ay), s, _pk(col), 0);
+};
+
+// Aligned text in a box (numpad-style alignment 1..9, 5 = centre).
+R.textAligned = FUNCTION(x, y, w, h, s, col, align) {
+    IF (s == NULL) { RETURN; }
+    s = toString(s);
+    VAR tw = #s * FONT_W; VAR th = FONT_H;
+    VAR a = align == NULL ? 5 : align;
+    VAR tx = x; VAR ty = y;
+    // horizontal
+    IF (a == 8 || a == 5 || a == 2) { tx = x + math.floor((w - tw) / 2); }
+    ELSE IF (a == 9 || a == 6 || a == 3) { tx = x + w - tw; }
+    // vertical
+    IF (a == 4 || a == 5 || a == 6) { ty = y + math.floor((h - th) / 2); }
+    ELSE IF (a == 1 || a == 2 || a == 3) { ty = y + h - th; }
+    R.text(tx, ty, s, col);
+};
+
+// ----------------------------------------------------------------------
+// Engine state.
+// ----------------------------------------------------------------------
+GUI._root    = NULL;
+GUI._focus   = NULL;   // keyboard focus
+GUI._hover   = NULL;   // panel under cursor
+GUI._capture = NULL;   // panel currently dragged/grabbed
+GUI._capMode = NULL;
+GUI._menu    = NULL;   // open popup menu, if any
+GUI._cx      = 320;
+GUI._cy      = 240;
+GUI._running = FALSE;
+GUI._nextId  = 1;
+GUI._mdown   = FALSE;   // left mouse button currently held
+GUI._pressTarget = NULL;
+GUI._lastmx  = -1;
+GUI._lastmy  = -1;
+GUI.cursorStep = 12;   // pixels per arrow tap
+GUI.dragStep   = 6;
+GUI.tickMs     = 30;
+GUI.showCursor = TRUE;
+GUI.mouseEnabled = TRUE; // poll a pointing device in run() when present
+
+// ----------------------------------------------------------------------
+// Panel -- the base of every widget.
+// ----------------------------------------------------------------------
+VAR Panel = CLASS Panel (self) {
+    self.x = 0; self.y = 0; self.w = 64; self.h = 24;
+    self.parent = NULL; self.children = [];
+    self.visible = TRUE; self.enabled = TRUE;
+    self.paintBackground = TRUE;
+    self.bgColor = skin.panelBg;
+    self.dock = 0;
+    self.dockML = 0; self.dockMT = 0; self.dockMR = 0; self.dockMB = 0;
+    self.padL = 0; self.padT = 0; self.padR = 0; self.padB = 0;
+    self.zpos = 0;
+    self.mouseInput = TRUE; self.keyInput = FALSE;
+    self.hovered = FALSE; self.focused = FALSE;
+    self.text = ""; self.textColor = skin.text; self.font = 1; self.align = 5;
+    self._id = GUI._nextId; GUI._nextId = GUI._nextId + 1;
+    self._removed = FALSE;
+};
+
+Panel.SetPos    = FUNCTION(self, x, y) { self.x = x; self.y = y; RETURN self; };
+Panel.GetPos    = FUNCTION(self) { RETURN self.x, self.y; };
+Panel.SetSize   = FUNCTION(self, w, h) { self.w = w; self.h = h; RETURN self; };
+Panel.SetWide   = FUNCTION(self, w) { self.w = w; RETURN self; };
+Panel.SetTall   = FUNCTION(self, h) { self.h = h; RETURN self; };
+Panel.GetWide   = FUNCTION(self) { RETURN self.w; };
+Panel.GetTall   = FUNCTION(self) { RETURN self.h; };
+Panel.GetSize   = FUNCTION(self) { RETURN self.w, self.h; };
+
+Panel.SetVisible = FUNCTION(self, v) { self.visible = v; RETURN self; };
+Panel.IsVisible  = FUNCTION(self) { RETURN self.visible; };
+Panel.SetEnabled = FUNCTION(self, v) { self.enabled = v; RETURN self; };
+Panel.IsEnabled  = FUNCTION(self) { RETURN self.enabled; };
+
+Panel.SetMouseInputEnabled    = FUNCTION(self, v) { self.mouseInput = v; RETURN self; };
+Panel.SetKeyboardInputEnabled = FUNCTION(self, v) { self.keyInput = v; RETURN self; };
+
+Panel.SetText      = FUNCTION(self, t) { self.text = (t == NULL ? "" : toString(t)); RETURN self; };
+Panel.GetText      = FUNCTION(self) { RETURN self.text; };
+Panel.SetTextColor = FUNCTION(self, c) { self.textColor = c; RETURN self; };
+Panel.SetFont      = FUNCTION(self, f) { self.font = f; RETURN self; }; // 8x8 only; no-op spacing
+Panel.SetContentAlignment = FUNCTION(self, a) { self.align = a; RETURN self; };
+Panel.SetBGColor   = FUNCTION(self, c) { self.bgColor = c; self.paintBackground = TRUE; RETURN self; };
+Panel.SetPaintBackground = FUNCTION(self, v) { self.paintBackground = v; RETURN self; };
+Panel.SetZPos      = FUNCTION(self, z) { self.zpos = z; RETURN self; };
+Panel.SetCursor    = FUNCTION(self, c) { RETURN self; }; // accepted for parity
+
+Panel.GetParent = FUNCTION(self) { RETURN self.parent; };
+Panel.GetChildren = FUNCTION(self) { RETURN self.children; };
+
+Panel.SetParent = FUNCTION(self, p) {
+    IF (self.parent != NULL) {
+        VAR i = array.indexOf(self.parent.children, self);
+        IF (i >= 0) { array.remove(self.parent.children, i); }
+    }
+    self.parent = p;
+    IF (p != NULL) { array.push(p.children, self); }
+    RETURN self;
+};
+Panel.Add = FUNCTION(self, child) { child:SetParent(self); RETURN child; };
+
+Panel.Remove = FUNCTION(self) {
+    self._removed = TRUE;
+    FOR c OF array.copy(self.children) { c:Remove(); }
+    IF (GUI._focus == self)   { GUI._focus = NULL; }
+    IF (GUI._hover == self)   { GUI._hover = NULL; }
+    IF (GUI._capture == self) { GUI._capture = NULL; }
+    IF (self.OnRemove != NULL) { self:OnRemove(); }
+    IF (self.parent != NULL) {
+        VAR i = array.indexOf(self.parent.children, self);
+        IF (i >= 0) { array.remove(self.parent.children, i); }
+        self.parent = NULL;
+    }
+};
+
+Panel.Dock = FUNCTION(self, m) { self.dock = m; RETURN self; };
+Panel.DockMargin = FUNCTION(self, l, t, r, b) {
+    self.dockML = l; self.dockMT = t; self.dockMR = r; self.dockMB = b; RETURN self;
+};
+Panel.DockPadding = FUNCTION(self, l, t, r, b) {
+    self.padL = l; self.padT = t; self.padR = r; self.padB = b; RETURN self;
+};
+
+Panel.InvalidateLayout = FUNCTION(self) { RETURN self; }; // full-tree relayout each frame
+
+Panel._sortedKids = FUNCTION(self) {
+    VAR a = array.copy(self.children);
+    RETURN array.sort(a, FUNCTION(p, q) {
+        IF (p.zpos != q.zpos) { RETURN p.zpos - q.zpos; }
+        RETURN p._id - q._id;
+    });
+};
+
+// Absolute top-left of this panel's local (0,0).
+Panel.LocalToScreen = FUNCTION(self, x, y) {
+    VAR ax = x; VAR ay = y; VAR p = self;
+    WHILE (p != NULL) { ax = ax + p.x; ay = ay + p.y; p = p.parent; }
+    RETURN ax, ay;
+};
+Panel.ScreenToLocal = FUNCTION(self, x, y) {
+    VAR ax = 0; VAR ay = 0; VAR p = self;
+    WHILE (p != NULL) { ax = ax + p.x; ay = ay + p.y; p = p.parent; }
+    RETURN x - ax, y - ay;
+};
+
+Panel.IsHovered = FUNCTION(self) { RETURN self.hovered; };
+Panel.HasFocus  = FUNCTION(self) { RETURN GUI._focus == self; };
+Panel.RequestFocus = FUNCTION(self) { GUI._setFocus(self); RETURN self; };
+Panel.KillFocus    = FUNCTION(self) { IF (GUI._focus == self) { GUI._setFocus(NULL); } RETURN self; };
+
+Panel.Center = FUNCTION(self) {
+    VAR par = self.parent != NULL ? self.parent : GUI._ensureRoot();
+    self.x = math.floor((par.w - self.w) / 2);
+    self.y = math.floor((par.h - self.h) / 2);
+    RETURN self;
+};
+
+Panel.MoveToFront = FUNCTION(self) {
+    VAR top = 0;
+    IF (self.parent != NULL) {
+        FOR c OF self.parent.children { IF (c.zpos > top) { top = c.zpos; } }
+    }
+    self.zpos = top + 1;
+    RETURN self;
+};
+
+Panel.MakePopup = FUNCTION(self) {
+    IF (self.parent == NULL) { GUI._adopt(self, NULL); }
+    self:MoveToFront();
+    self.keyInput = TRUE;
+    GUI._setFocus(self);
+    RETURN self;
+};
+
+// Default look: a filled rounded-ish rect (no radius on an 8x8 grid).
+Panel.Paint = FUNCTION(self, w, h) { };
+
+GUI.register = NULL; // forward; assigned below once registry exists.
+
+// ----------------------------------------------------------------------
+// Label
+// ----------------------------------------------------------------------
+VAR Label = CLASS Label (self) {
+    Panel.__constructor(self);
+    self.paintBackground = FALSE;
+    self.mouseInput = FALSE;
+    self.align = 4;            // mid-left like GMod
+    self.textColor = skin.text;
+    self.w = 80; self.h = 18;
+    self.autoStretch = FALSE;
+};
+Label.__index = Panel;
+
+Label.SizeToContents = FUNCTION(self) {
+    self.w = #self.text * FONT_W + 2;
+    self.h = FONT_H + 4;
+    RETURN self;
+};
+Label.SizeToContentsX = FUNCTION(self) { self.w = #self.text * FONT_W + 2; RETURN self; };
+Label.SizeToContentsY = FUNCTION(self) { self.h = FONT_H + 4; RETURN self; };
+
+Label.Paint = FUNCTION(self, w, h) {
+    IF (self.paintBackground) { R.rect(0, 0, w, h, self.bgColor); }
+    VAR col = self.enabled ? self.textColor : skin.textDim;
+    R.textAligned(2, 0, w - 4, h, self.text, col, self.align);
+};
+
+// ----------------------------------------------------------------------
+// Button
+// ----------------------------------------------------------------------
+VAR Button = CLASS Button (self) {
+    Label.__constructor(self);
+    self.paintBackground = TRUE;
+    self.mouseInput = TRUE;
+    self.keyInput = TRUE;
+    self.align = 5;
+    self.w = 100; self.h = 24;
+    self.bgColor = skin.button;
+    self.textColor = skin.buttonText;
+    self._down = FALSE;
+};
+Button.__index = Label;
+
+Button.Paint = FUNCTION(self, w, h) {
+    VAR bg = skin.button;
+    IF (!self.enabled) { bg = skin.panelBg; }
+    ELSE IF (self._down) { bg = skin.buttonDown; }
+    ELSE IF (self.hovered) { bg = skin.buttonHover; }
+    R.rect(0, 0, w, h, bg);
+    R.outline(0, 0, w, h, skin.border, 1);
+    VAR tc = self.enabled ? self.textColor : skin.textDim;
+    R.textAligned(0, 0, w, h, self.text, tc, self.align);
+};
+Button._press = FUNCTION(self, lx, ly) { self._down = TRUE; };
+Button._release = FUNCTION(self, lx, ly) { self._down = FALSE; };
+
+// ----------------------------------------------------------------------
+// CheckBox + CheckBoxLabel
+// ----------------------------------------------------------------------
+VAR CheckBox = CLASS CheckBox (self) {
+    Panel.__constructor(self);
+    self.w = 16; self.h = 16;
+    self.paintBackground = FALSE;
+    self.keyInput = TRUE;
+    self.checked = FALSE;
+};
+CheckBox.__index = Panel;
+
+CheckBox.SetChecked = FUNCTION(self, v) { self.checked = v ? TRUE : FALSE; RETURN self; };
+CheckBox.GetChecked = FUNCTION(self) { RETURN self.checked; };
+CheckBox.Toggle = FUNCTION(self) {
+    self.checked = !self.checked;
+    IF (self.OnChange != NULL) { self:OnChange(self.checked); }
+};
+CheckBox._press = FUNCTION(self, lx, ly) { self:Toggle(); };
+
+CheckBox.Paint = FUNCTION(self, w, h) {
+    VAR s = math.min(w, h);
+    R.rect(0, 0, s, s, skin.entryBg);
+    R.outline(0, 0, s, s, self.hovered ? skin.accent : skin.border, 1);
+    IF (self.checked) { R.rect(3, 3, s - 6, s - 6, skin.check); }
+};
+
+VAR CheckBoxLabel = CLASS CheckBoxLabel (self) {
+    Panel.__constructor(self);
+    self.w = 140; self.h = 18;
+    self.paintBackground = FALSE;
+    self.keyInput = TRUE;
+    self.checked = FALSE;
+    self.align = 4;
+    self.textColor = skin.text;
+};
+CheckBoxLabel.__index = Panel;
+
+CheckBoxLabel.SetChecked = FUNCTION(self, v) { self.checked = v ? TRUE : FALSE; RETURN self; };
+CheckBoxLabel.GetChecked = FUNCTION(self) { RETURN self.checked; };
+CheckBoxLabel.Toggle = FUNCTION(self) {
+    self.checked = !self.checked;
+    IF (self.OnChange != NULL) { self:OnChange(self.checked); }
+};
+CheckBoxLabel._press = FUNCTION(self, lx, ly) { self:Toggle(); };
+
+CheckBoxLabel.Paint = FUNCTION(self, w, h) {
+    VAR bs = 14;
+    VAR by = math.floor((h - bs) / 2);
+    R.rect(0, by, bs, bs, skin.entryBg);
+    R.outline(0, by, bs, bs, self.hovered ? skin.accent : skin.border, 1);
+    IF (self.checked) { R.rect(3, by + 3, bs - 6, bs - 6, skin.check); }
+    R.textAligned(bs + 6, 0, w - bs - 6, h, self.text, self.textColor, 4);
+};
+
+// ----------------------------------------------------------------------
+// TextEntry
+// ----------------------------------------------------------------------
+VAR TextEntry = CLASS TextEntry (self) {
+    Panel.__constructor(self);
+    self.w = 120; self.h = 22;
+    self.paintBackground = TRUE;
+    self.keyInput = TRUE;
+    self.bgColor = skin.entryBg;
+    self.textColor = skin.entryText;
+    self.value = "";
+    self.caret = 0;
+    self.numeric = FALSE;
+    self._blink = 0;
+    self.align = 4;
+};
+TextEntry.__index = Panel;
+
+TextEntry.SetValue = FUNCTION(self, v) {
+    self.value = (v == NULL ? "" : toString(v));
+    self.caret = #self.value;
+    RETURN self;
+};
+TextEntry.SetText = FUNCTION(self, v) { RETURN self:SetValue(v); };
+TextEntry.GetValue = FUNCTION(self) { RETURN self.value; };
+TextEntry.GetText = FUNCTION(self) { RETURN self.value; };
+TextEntry.SetNumeric = FUNCTION(self, v) { self.numeric = v ? TRUE : FALSE; RETURN self; };
+
+TextEntry._isNumChar = FUNCTION(self, code) {
+    IF (code >= 48 && code <= 57) { RETURN TRUE; }   // 0-9
+    IF (code == 45 || code == 46) { RETURN TRUE; }   // - .
+    RETURN FALSE;
+};
+
+TextEntry.OnKeyCode = FUNCTION(self, code) {
+    IF (code >= 32 && code < 127) {
+        IF (self.numeric && !self:_isNumChar(code)) { RETURN TRUE; }
+        VAR ch = string.fromCodePoint(code);
+        self.value = string.sub(self.value, 0, self.caret) + ch
+                   + string.sub(self.value, self.caret, #self.value);
+        self.caret = self.caret + 1;
+        IF (self.OnChange != NULL) { self:OnChange(self.value); }
+        RETURN TRUE;
+    }
+    IF (code == KEY_BACKSP) {
+        IF (self.caret > 0) {
+            self.value = string.sub(self.value, 0, self.caret - 1)
+                       + string.sub(self.value, self.caret, #self.value);
+            self.caret = self.caret - 1;
+            IF (self.OnChange != NULL) { self:OnChange(self.value); }
+        }
+        RETURN TRUE;
+    }
+    IF (code == KEY_LEFT)  { self.caret = math.max(0, self.caret - 1); RETURN TRUE; }
+    IF (code == KEY_RIGHT) { self.caret = math.min(#self.value, self.caret + 1); RETURN TRUE; }
+    IF (code == KEY_ENTER) {
+        IF (self.OnEnter != NULL) { self:OnEnter(self.value); }
+        RETURN TRUE;
+    }
+    RETURN FALSE; // Up/Down/Esc/Tab fall through to the framework
+};
+
+TextEntry._press = FUNCTION(self, lx, ly) {
+    VAR rel = math.floor((lx - 4) / FONT_W);
+    self.caret = math.max(0, math.min(#self.value, rel));
+};
+TextEntry._tick = FUNCTION(self) { self._blink = self._blink + 1; };
+
+TextEntry.Paint = FUNCTION(self, w, h) {
+    R.rect(0, 0, w, h, self.bgColor);
+    R.outline(0, 0, w, h, self.focused ? skin.accent : skin.border, 1);
+    VAR ty = math.floor((h - FONT_H) / 2);
+    R.text(4, ty, self.value, self.textColor);
+    IF (self.focused && (math.floor(self._blink / 15) % 2 == 0)) {
+        VAR cx = 4 + self.caret * FONT_W;
+        R.rect(cx, ty - 1, 1, FONT_H + 2, self.textColor);
+    }
+};
+
+// ----------------------------------------------------------------------
+// NumberEntry -- numeric text entry returning a number.
+// ----------------------------------------------------------------------
+VAR NumberEntry = CLASS NumberEntry (self) {
+    TextEntry.__constructor(self);
+    self.numeric = TRUE;
+    self.min = 0; self.max = 100;
+    self.value = "0"; self.caret = 1;
+};
+NumberEntry.__index = TextEntry;
+
+NumberEntry.SetMin = FUNCTION(self, v) { self.min = v; RETURN self; };
+NumberEntry.SetMax = FUNCTION(self, v) { self.max = v; RETURN self; };
+NumberEntry.SetMinMax = FUNCTION(self, a, b) { self.min = a; self.max = b; RETURN self; };
+NumberEntry.GetValue = FUNCTION(self) {
+    VAR n = _toNum(self.value);
+    IF (n == NULL) { n = 0; }
+    RETURN math.clamp(n, self.min, self.max);
+};
+NumberEntry.SetValue = FUNCTION(self, v) {
+    VAR n = math.clamp(v, self.min, self.max);
+    self.value = toString(n);
+    self.caret = #self.value;
+    RETURN self;
+};
+
+// ----------------------------------------------------------------------
+// TextBox -- multi-line editable text area. SetMultiline(false) collapses
+// it to a single-line field (Enter then fires OnEnter instead of inserting
+// a newline, and Up/Down fall through to move the cursor). The value is a
+// flat string with embedded "\n"; the caret is a flat index into it.
+// ----------------------------------------------------------------------
+VAR TextBox = CLASS TextBox (self) {
+    Panel.__constructor(self);
+    self.w = 200; self.h = 96;
+    self.paintBackground = TRUE;
+    self.keyInput = TRUE;
+    self.bgColor = skin.entryBg;
+    self.textColor = skin.entryText;
+    self.value = "";
+    self.caret = 0;
+    self.multiline = TRUE;
+    self.scrollRow = 0;
+    self._blink = 0;
+    self._pad = 4;
+    self._lineH = FONT_H + 2;
+};
+TextBox.__index = Panel;
+
+TextBox.SetMultiline = FUNCTION(self, v) {
+    self.multiline = v ? TRUE : FALSE;
+    IF (!self.multiline) {
+        // collapse newlines so a single-line box never carries hidden rows
+        self.value = string.replace(self.value, NL, " ");
+        self.caret = math.min(self.caret, #self.value);
+    }
+    RETURN self;
+};
+TextBox.IsMultiline = FUNCTION(self) { RETURN self.multiline; };
+TextBox.SetValue = FUNCTION(self, v) {
+    self.value = (v == NULL ? "" : toString(v));
+    self.caret = #self.value;
+    RETURN self;
+};
+TextBox.SetText  = FUNCTION(self, v) { RETURN self:SetValue(v); };
+TextBox.GetValue = FUNCTION(self) { RETURN self.value; };
+TextBox.GetText  = FUNCTION(self) { RETURN self.value; };
+TextBox.GetLines = FUNCTION(self) { RETURN _splitLines(self.value); };
+
+// Flat caret index -> (row, col).
+TextBox._caretRowCol = FUNCTION(self) {
+    VAR row = 0; VAR col = 0; VAR i = 0;
+    WHILE (i < self.caret) {
+        IF (string.codePointAt(self.value, i) == 10) { row = row + 1; col = 0; }
+        ELSE { col = col + 1; }
+        i = i + 1;
+    }
+    RETURN row, col;
+};
+// (row, col) -> flat caret index, clamped to the row's length.
+TextBox._rowColToIndex = FUNCTION(self, row, col) {
+    VAR lines = self:GetLines();
+    IF (row < 0) { row = 0; }
+    IF (row >= #lines) { row = #lines - 1; }
+    VAR idx = 0; VAR r = 0;
+    WHILE (r < row) { idx = idx + #lines[r] + 1; r = r + 1; }
+    VAR ll = #lines[row];
+    RETURN idx + (col > ll ? ll : col);
+};
+TextBox._visibleRows = FUNCTION(self) {
+    RETURN math.max(1, math.floor((self.h - self._pad * 2) / self._lineH));
+};
+// Keep the caret row inside the visible window.
+TextBox._scrollToCaret = FUNCTION(self) {
+    VAR row, col = self:_caretRowCol();
+    IF (row < self.scrollRow) { self.scrollRow = row; }
+    VAR vis = self:_visibleRows();
+    IF (row > self.scrollRow + vis - 1) { self.scrollRow = row - vis + 1; }
+    IF (self.scrollRow < 0) { self.scrollRow = 0; }
+};
+
+TextBox.OnKeyCode = FUNCTION(self, code) {
+    IF (code >= 32 && code < 127) {
+        VAR ch = string.fromCodePoint(code);
+        self.value = string.sub(self.value, 0, self.caret) + ch
+                   + string.sub(self.value, self.caret, #self.value);
+        self.caret = self.caret + 1;
+        self:_scrollToCaret();
+        IF (self.OnChange != NULL) { self:OnChange(self.value); }
+        RETURN TRUE;
+    }
+    IF (code == KEY_BACKSP) {
+        IF (self.caret > 0) {
+            self.value = string.sub(self.value, 0, self.caret - 1)
+                       + string.sub(self.value, self.caret, #self.value);
+            self.caret = self.caret - 1;
+            self:_scrollToCaret();
+            IF (self.OnChange != NULL) { self:OnChange(self.value); }
+        }
+        RETURN TRUE;
+    }
+    IF (code == KEY_ENTER) {
+        IF (self.multiline) {
+            self.value = string.sub(self.value, 0, self.caret) + NL
+                       + string.sub(self.value, self.caret, #self.value);
+            self.caret = self.caret + 1;
+            self:_scrollToCaret();
+            IF (self.OnChange != NULL) { self:OnChange(self.value); }
+        } ELSE {
+            IF (self.OnEnter != NULL) { self:OnEnter(self.value); }
+        }
+        RETURN TRUE;
+    }
+    IF (code == KEY_LEFT)  { self.caret = math.max(0, self.caret - 1); self:_scrollToCaret(); RETURN TRUE; }
+    IF (code == KEY_RIGHT) { self.caret = math.min(#self.value, self.caret + 1); self:_scrollToCaret(); RETURN TRUE; }
+    IF (code == KEY_UP) {
+        IF (!self.multiline) { RETURN FALSE; }
+        VAR row, col = self:_caretRowCol();
+        self.caret = self:_rowColToIndex(row - 1, col);
+        self:_scrollToCaret();
+        RETURN TRUE;
+    }
+    IF (code == KEY_DOWN) {
+        IF (!self.multiline) { RETURN FALSE; }
+        VAR row, col = self:_caretRowCol();
+        self.caret = self:_rowColToIndex(row + 1, col);
+        self:_scrollToCaret();
+        RETURN TRUE;
+    }
+    RETURN FALSE;
+};
+
+TextBox._press = FUNCTION(self, lx, ly) {
+    VAR row = self.scrollRow + math.floor((ly - self._pad) / self._lineH);
+    VAR col = math.floor((lx - self._pad) / FONT_W);
+    IF (row < 0) { row = 0; }
+    self.caret = self:_rowColToIndex(row, math.max(0, col));
+    self:_scrollToCaret();
+};
+TextBox._tick = FUNCTION(self) { self._blink = self._blink + 1; };
+
+TextBox.Paint = FUNCTION(self, w, h) {
+    R.rect(0, 0, w, h, self.bgColor);
+    R.outline(0, 0, w, h, self.focused ? skin.accent : skin.border, 1);
+    VAR lines = self:GetLines();
+    VAR vis = self:_visibleRows();
+    VAR i = 0;
+    WHILE (i < vis && self.scrollRow + i < #lines) {
+        VAR ly = self._pad + i * self._lineH;
+        R.text(self._pad, ly, lines[self.scrollRow + i], self.textColor);
+        i = i + 1;
+    }
+    IF (self.focused && (math.floor(self._blink / 15) % 2 == 0)) {
+        VAR crow, ccol = self:_caretRowCol();
+        IF (crow >= self.scrollRow && crow < self.scrollRow + vis) {
+            VAR cx = self._pad + ccol * FONT_W;
+            VAR cy = self._pad + (crow - self.scrollRow) * self._lineH;
+            R.rect(cx, cy - 1, 1, FONT_H + 2, self.textColor);
+        }
+    }
+};
+
+// ----------------------------------------------------------------------
+// Progress
+// ----------------------------------------------------------------------
+VAR Progress = CLASS Progress (self) {
+    Panel.__constructor(self);
+    self.w = 160; self.h = 16;
+    self.mouseInput = FALSE;
+    self.bgColor = skin.entryBg;
+    self.frac = 0;
+};
+Progress.__index = Panel;
+Progress.SetFraction = FUNCTION(self, f) { self.frac = math.clamp(f, 0, 1); RETURN self; };
+Progress.GetFraction = FUNCTION(self) { RETURN self.frac; };
+Progress.Paint = FUNCTION(self, w, h) {
+    R.rect(0, 0, w, h, self.bgColor);
+    R.rect(0, 0, math.floor(w * self.frac), h, skin.progress);
+    R.outline(0, 0, w, h, skin.border, 1);
+};
+
+// ----------------------------------------------------------------------
+// Slider (horizontal)
+// ----------------------------------------------------------------------
+VAR Slider = CLASS Slider (self) {
+    Panel.__constructor(self);
+    self.w = 180; self.h = 18;
+    self.paintBackground = FALSE;
+    self.keyInput = TRUE;
+    self.min = 0; self.max = 1; self.value = 0;
+    self.decimals = 2;
+};
+Slider.__index = Panel;
+
+Slider.SetMin = FUNCTION(self, v) { self.min = v; RETURN self; };
+Slider.SetMax = FUNCTION(self, v) { self.max = v; RETURN self; };
+Slider.SetMinMax = FUNCTION(self, a, b) { self.min = a; self.max = b; RETURN self; };
+Slider.SetDecimals = FUNCTION(self, d) { self.decimals = d; RETURN self; };
+Slider.GetValue = FUNCTION(self) { RETURN self.value; };
+Slider.SetValue = FUNCTION(self, v) {
+    VAR nv = math.clamp(v, self.min, self.max);
+    IF (nv != self.value) {
+        self.value = nv;
+        IF (self.OnValueChanged != NULL) { self:OnValueChanged(nv); }
+    }
+    RETURN self;
+};
+Slider._frac = FUNCTION(self) {
+    IF (self.max <= self.min) { RETURN 0; }
+    RETURN (self.value - self.min) / (self.max - self.min);
+};
+Slider._press = FUNCTION(self, lx, ly) {
+    VAR f = math.clamp((lx - 6) / (self.w - 12), 0, 1);
+    self:SetValue(self.min + f * (self.max - self.min));
+    GUI._setCapture(self, "slider");
+};
+Slider._drag = FUNCTION(self, dir, step) {
+    VAR span = self.max - self.min;
+    VAR d = span * (step / (self.w - 12));
+    IF (dir == "l") { self:SetValue(self.value - d); }
+    ELSE IF (dir == "r") { self:SetValue(self.value + d); }
+};
+Slider._mdrag = FUNCTION(self, lx, ly, dx, dy) {
+    VAR f = math.clamp((lx - 6) / (self.w - 12), 0, 1);
+    self:SetValue(self.min + f * (self.max - self.min));
+};
+Slider.Paint = FUNCTION(self, w, h) {
+    VAR cy = math.floor(h / 2);
+    R.rect(6, cy - 2, w - 12, 4, skin.scrollTrack);
+    R.rect(6, cy - 2, math.floor((w - 12) * self:_frac()), 4, skin.accent);
+    VAR kx = 6 + math.floor((w - 12) * self:_frac());
+    VAR kc = (self.hovered || GUI._capture == self) ? skin.accent : skin.scrollThumb;
+    R.rect(kx - 4, cy - 7, 8, 14, kc);
+    R.outline(kx - 4, cy - 7, 8, 14, skin.border, 1);
+};
+
+// ----------------------------------------------------------------------
+// NumSlider -- label + slider + numeric readout in one widget.
+// ----------------------------------------------------------------------
+VAR NumSlider = CLASS NumSlider (self) {
+    Panel.__constructor(self);
+    self.w = 260; self.h = 22;
+    self.paintBackground = FALSE;
+    self.keyInput = TRUE;
+    self.min = 0; self.max = 100; self.value = 0; self.decimals = 0;
+    self.label = "";
+    self._labelW = 70;
+    self._readW = 44;
+};
+NumSlider.__index = Panel;
+
+NumSlider.SetText = FUNCTION(self, t) { self.label = toString(t); RETURN self; };
+NumSlider.SetMin = FUNCTION(self, v) { self.min = v; RETURN self; };
+NumSlider.SetMax = FUNCTION(self, v) { self.max = v; RETURN self; };
+NumSlider.SetMinMax = FUNCTION(self, a, b) { self.min = a; self.max = b; RETURN self; };
+NumSlider.SetDecimals = FUNCTION(self, d) { self.decimals = d; RETURN self; };
+NumSlider.GetValue = FUNCTION(self) { RETURN self.value; };
+NumSlider.SetValue = FUNCTION(self, v) {
+    VAR nv = math.clamp(v, self.min, self.max);
+    IF (nv != self.value) {
+        self.value = nv;
+        IF (self.OnValueChanged != NULL) { self:OnValueChanged(nv); }
+    }
+    RETURN self;
+};
+NumSlider._trackX = FUNCTION(self) { RETURN self._labelW; };
+NumSlider._trackW = FUNCTION(self) { RETURN self.w - self._labelW - self._readW; };
+NumSlider._frac = FUNCTION(self) {
+    IF (self.max <= self.min) { RETURN 0; }
+    RETURN (self.value - self.min) / (self.max - self.min);
+};
+NumSlider._press = FUNCTION(self, lx, ly) {
+    VAR f = math.clamp((lx - self:_trackX() - 6) / (self:_trackW() - 12), 0, 1);
+    self:SetValue(self.min + f * (self.max - self.min));
+    GUI._setCapture(self, "slider");
+};
+NumSlider._drag = FUNCTION(self, dir, step) {
+    VAR span = self.max - self.min;
+    VAR d = span * (step / (self:_trackW() - 12));
+    IF (self.decimals <= 0 && d < 1) { d = 1; }
+    IF (dir == "l") { self:SetValue(self.value - d); }
+    ELSE IF (dir == "r") { self:SetValue(self.value + d); }
+};
+NumSlider._mdrag = FUNCTION(self, lx, ly, dx, dy) {
+    VAR f = math.clamp((lx - self:_trackX() - 6) / (self:_trackW() - 12), 0, 1);
+    self:SetValue(self.min + f * (self.max - self.min));
+};
+NumSlider._fmt = FUNCTION(self) {
+    IF (self.decimals <= 0) { RETURN toString(math.round(self.value)); }
+    VAR m = math.pow(10, self.decimals);
+    RETURN toString(math.round(self.value * m) / m);
+};
+NumSlider.Paint = FUNCTION(self, w, h) {
+    R.textAligned(0, 0, self._labelW - 4, h, self.label, skin.text, 4);
+    VAR tx = self:_trackX(); VAR tw = self:_trackW();
+    VAR cy = math.floor(h / 2);
+    R.rect(tx + 6, cy - 2, tw - 12, 4, skin.scrollTrack);
+    R.rect(tx + 6, cy - 2, math.floor((tw - 12) * self:_frac()), 4, skin.accent);
+    VAR kx = tx + 6 + math.floor((tw - 12) * self:_frac());
+    VAR kc = (self.hovered || GUI._capture == self) ? skin.accent : skin.scrollThumb;
+    R.rect(kx - 4, cy - 7, 8, 14, kc);
+    R.outline(kx - 4, cy - 7, 8, 14, skin.border, 1);
+    R.rect(self.w - self._readW, 0, self._readW, h, skin.entryBg);
+    R.textAligned(self.w - self._readW, 0, self._readW, h, self:_fmt(), skin.text, 5);
+};
+
+// ----------------------------------------------------------------------
+// Frame -- titled, draggable, closable window.
+// ----------------------------------------------------------------------
+VAR TITLE_H = 24;
+VAR Frame = CLASS Frame (self) {
+    Panel.__constructor(self);
+    self.w = 320; self.h = 200;
+    self.bgColor = skin.frameBg;
+    self.keyInput = TRUE;
+    self.title = "Frame";
+    self.draggable = TRUE;
+    self.showClose = TRUE;
+    self.closeOnEscape = TRUE;
+    self.padL = 5; self.padT = TITLE_H + 5; self.padR = 5; self.padB = 5;
+};
+Frame.__index = Panel;
+
+Frame.SetTitle = FUNCTION(self, t) { self.title = toString(t); RETURN self; };
+Frame.SetDraggable = FUNCTION(self, v) { self.draggable = v ? TRUE : FALSE; RETURN self; };
+Frame.ShowCloseButton = FUNCTION(self, v) { self.showClose = v ? TRUE : FALSE; RETURN self; };
+
+Frame.Close = FUNCTION(self) {
+    IF (self.OnClose != NULL) { self:OnClose(); }
+    self:Remove();
+};
+
+Frame._press = FUNCTION(self, lx, ly) {
+    IF (ly < TITLE_H) {
+        IF (self.showClose && lx >= self.w - TITLE_H) { self:Close(); RETURN; }
+        IF (self.draggable) { GUI._setCapture(self, "move"); }
+    }
+};
+Frame._drag = FUNCTION(self, dir, step) {
+    IF (dir == "l") { self.x = self.x - step; }
+    ELSE IF (dir == "r") { self.x = self.x + step; }
+    ELSE IF (dir == "u") { self.y = self.y - step; }
+    ELSE IF (dir == "d") { self.y = self.y + step; }
+};
+Frame._mdrag = FUNCTION(self, lx, ly, dx, dy) {
+    self.x = self.x + dx; self.y = self.y + dy;
+};
+
+Frame.Paint = FUNCTION(self, w, h) {
+    R.rect(0, 0, w, h, self.bgColor);
+    R.outline(0, 0, w, h, skin.border, 1);
+    R.rect(0, 0, w, TITLE_H, skin.titleBar);
+    R.textAligned(8, 0, w - TITLE_H - 8, TITLE_H, self.title, skin.titleText, 4);
+    IF (self.showClose) {
+        VAR bx = w - TITLE_H;
+        VAR hot = self.hovered;
+        R.rect(bx, 0, TITLE_H, TITLE_H, hot ? Color(180, 60, 60) : skin.titleBar);
+        R.textAligned(bx, 0, TITLE_H, TITLE_H, "x", skin.titleText, 5);
+    }
+};
+
+// ----------------------------------------------------------------------
+// ScrollPanel -- viewport + scrollable canvas + vertical bar.
+// ----------------------------------------------------------------------
+VAR BAR_W = 12;
+VAR ScrollPanel = CLASS ScrollPanel (self) {
+    Panel.__constructor(self);
+    self.w = 200; self.h = 200;
+    self.bgColor = skin.panelBg;
+    self.scroll = 0;
+    self._canvasH = 0;
+};
+ScrollPanel.__index = Panel;
+
+ScrollPanel.GetCanvas = FUNCTION(self) { RETURN self; };
+ScrollPanel.AddItem = FUNCTION(self, child) { child:SetParent(self); RETURN child; };
+
+ScrollPanel._contentH = FUNCTION(self) {
+    VAR maxb = 0;
+    FOR c OF self.children {
+        IF (c.visible) {
+            VAR b = c.y + c.h;
+            IF (b > maxb) { maxb = b; }
+        }
+    }
+    RETURN maxb;
+};
+ScrollPanel._maxScroll = FUNCTION(self) {
+    RETURN math.max(0, self:_contentH() - self.h);
+};
+ScrollPanel.ScrollBy = FUNCTION(self, dy) {
+    self.scroll = math.clamp(self.scroll + dy, 0, self:_maxScroll());
+};
+
+// Children render shifted up by scroll: implemented by offsetting child y at
+// layout time would fight docking, so we apply the scroll as a paint/​hit
+// offset via a wrapper. Simplest: keep children laid out from 0 and shift
+// the whole subtree by adjusting this panel's reported child origin. We do
+// that by giving the scroll panel a virtual inner offset.
+ScrollPanel._press = FUNCTION(self, lx, ly) {
+    // click in the scrollbar track pages; otherwise ignore (children get clicks)
+    IF (lx >= self.w - BAR_W) {
+        VAR ms = self:_maxScroll();
+        IF (ms > 0) {
+            VAR f = math.clamp(ly / self.h, 0, 1);
+            self.scroll = f * ms;
+            GUI._setCapture(self, "scroll");
+        }
+    }
+};
+ScrollPanel._drag = FUNCTION(self, dir, step) {
+    IF (dir == "u") { self:ScrollBy(-step * 3); }
+    ELSE IF (dir == "d") { self:ScrollBy(step * 3); }
+};
+ScrollPanel._mdrag = FUNCTION(self, lx, ly, dx, dy) {
+    VAR ms = self:_maxScroll();
+    IF (ms > 0) { self.scroll = math.clamp((ly / self.h) * ms, 0, ms); }
+};
+ScrollPanel.Paint = FUNCTION(self, w, h) {
+    R.rect(0, 0, w, h, self.bgColor);
+    VAR ms = self:_maxScroll();
+    IF (ms > 0) {
+        R.rect(w - BAR_W, 0, BAR_W, h, skin.scrollTrack);
+        VAR th = math.max(20, math.floor(h * h / self:_contentH()));
+        VAR ty = math.floor((h - th) * (self.scroll / ms));
+        R.rect(w - BAR_W + 2, ty, BAR_W - 4, th, skin.scrollThumb);
+    }
+};
+
+// ----------------------------------------------------------------------
+// Menu / MenuOption -- popup option list.
+// ----------------------------------------------------------------------
+VAR MenuOption = CLASS MenuOption (self) {
+    Button.__constructor(self);
+    self.h = 20;
+    self.align = 4;
+    self.bgColor = skin.frameBg;
+};
+MenuOption.__index = Button;
+MenuOption.Paint = FUNCTION(self, w, h) {
+    R.rect(0, 0, w, h, self.hovered ? skin.selected : skin.frameBg);
+    R.textAligned(8, 0, w - 10, h, self.text, skin.text, 4);
+};
+
+VAR Menu = CLASS Menu (self) {
+    Panel.__constructor(self);
+    self.w = 140; self.h = 4;
+    self.bgColor = skin.frameBg;
+    self.padL = 2; self.padT = 2; self.padR = 2; self.padB = 2;
+    self.zpos = 100000;
+    self._optH = 20;
+};
+Menu.__index = Panel;
+
+// The DoClick closure may only capture AddOption's own locals (fn, self),
+// never the IIFE-level `GUI` -- so it dismisses through a method.
+Menu.AddOption = FUNCTION(self, text, ...rest) {
+    VAR fn = (#rest > 0 ? rest[0] : NULL);
+    VAR o = GUI.Create("MenuOption", self);
+    o:SetText(text);
+    o:Dock(GUI.TOP);
+    o.DoClick = FUNCTION(opt) {
+        IF (fn != NULL) { fn(opt); }
+        self:_dismiss();
+    };
+    self.h = self.padT + self.padB + (#self.children) * self._optH;
+    RETURN o;
+};
+Menu._dismiss = FUNCTION(self) {
+    IF (GUI._menu == self) { GUI._menu = NULL; }
+    self:Remove();
+};
+Menu.Open = FUNCTION(self, x, y) {
+    self.x = x; self.y = y;
+    self:MoveToFront();
+    GUI._menu = self;
+    RETURN self;
+};
+Menu.Paint = FUNCTION(self, w, h) {
+    R.rect(0, 0, w, h, self.bgColor);
+    R.outline(0, 0, w, h, skin.border, 1);
+};
+
+// ----------------------------------------------------------------------
+// ComboBox
+// ----------------------------------------------------------------------
+VAR ComboBox = CLASS ComboBox (self) {
+    Button.__constructor(self);
+    self.align = 4;
+    self.choices = [];
+    self.selected = -1;
+    self.text = "";
+    self.placeholder = "Select...";
+};
+ComboBox.__index = Button;
+
+ComboBox.AddChoice = FUNCTION(self, text, ...rest) {
+    array.push(self.choices, { text: toString(text), data: (#rest > 0 ? rest[0] : NULL) });
+    RETURN self;
+};
+ComboBox.Clear = FUNCTION(self) { self.choices = []; self.selected = -1; self.text = ""; RETURN self; };
+ComboBox.GetSelected = FUNCTION(self) {
+    IF (self.selected < 0) { RETURN NULL, NULL; }
+    VAR c = self.choices[self.selected];
+    RETURN c.text, c.data;
+};
+ComboBox.ChooseOption = FUNCTION(self, idx) {
+    IF (idx < 0 || idx >= #self.choices) { RETURN; }
+    self.selected = idx;
+    VAR c = self.choices[idx];
+    self.text = c.text;
+    IF (self.OnSelect != NULL) { self:OnSelect(idx, c.text, c.data); }
+};
+ComboBox._press = FUNCTION(self, lx, ly) {
+    self._down = TRUE;
+    VAR menu = GUI.Create("Menu");
+    menu:SetWide(math.max(self.w, 120));
+    VAR i = 0;
+    FOR c OF self.choices {
+        // Loop bindings are shared, so stash the index on the option and
+        // read it back at click time rather than capturing the loop var.
+        VAR o = menu:AddOption(c.text, FUNCTION(opt) { self:ChooseOption(opt._idx); });
+        o._idx = i;
+        i = i + 1;
+    }
+    VAR sx, sy = self:LocalToScreen(0, self.h);
+    menu:Open(sx, sy);
+};
+ComboBox.Paint = FUNCTION(self, w, h) {
+    VAR bg = self.hovered ? skin.buttonHover : skin.button;
+    R.rect(0, 0, w, h, bg);
+    R.outline(0, 0, w, h, skin.border, 1);
+    VAR shown = self.selected >= 0 ? self.text : self.placeholder;
+    VAR tc = self.selected >= 0 ? self.textColor : skin.textDim;
+    R.textAligned(6, 0, w - 22, h, shown, tc, 4);
+    R.textAligned(w - 16, 0, 14, h, "v", skin.textDim, 5);
+};
+
+// ----------------------------------------------------------------------
+// ListView -- columns + selectable rows.
+// ----------------------------------------------------------------------
+VAR ROW_H = 18;
+VAR ListView = CLASS ListView (self) {
+    Panel.__constructor(self);
+    self.w = 240; self.h = 160;
+    self.bgColor = skin.entryBg;
+    self.columns = [];
+    self.lines = [];
+    self.selected = -1;
+    self.headerH = 20;
+};
+ListView.__index = Panel;
+
+ListView.AddColumn = FUNCTION(self, name, ...rest) {
+    array.push(self.columns, { name: toString(name), w: (#rest > 0 ? rest[0] : 80) });
+    RETURN self;
+};
+ListView.AddLine = FUNCTION(self, ...vals) {
+    array.push(self.lines, { cols: vals });
+    RETURN #self.lines - 1;
+};
+ListView.Clear = FUNCTION(self) { self.lines = []; self.selected = -1; RETURN self; };
+ListView.GetSelectedLine = FUNCTION(self) { RETURN self.selected; };
+
+ListView._press = FUNCTION(self, lx, ly) {
+    IF (ly < self.headerH) { RETURN; }
+    VAR row = math.floor((ly - self.headerH) / ROW_H);
+    IF (row >= 0 && row < #self.lines) {
+        self.selected = row;
+        IF (self.OnRowSelected != NULL) { self:OnRowSelected(row, self.lines[row]); }
+    }
+};
+ListView.Paint = FUNCTION(self, w, h) {
+    R.rect(0, 0, w, h, self.bgColor);
+    R.rect(0, 0, w, self.headerH, skin.titleBar);
+    VAR cx = 0;
+    FOR col OF self.columns {
+        R.textAligned(cx + 4, 0, col.w - 6, self.headerH, col.name, skin.titleText, 4);
+        cx = cx + col.w;
+    }
+    VAR ri = 0;
+    FOR ln OF self.lines {
+        VAR ry = self.headerH + ri * ROW_H;
+        IF (ry + ROW_H > h) { BREAK; }
+        IF (ri == self.selected) { R.rect(0, ry, w, ROW_H, skin.selected); }
+        VAR cxx = 0; VAR ci = 0;
+        FOR col OF self.columns {
+            VAR v = ln.cols[ci];
+            R.textAligned(cxx + 4, ry, col.w - 6, ROW_H, (v == NULL ? "" : toString(v)), skin.text, 4);
+            cxx = cxx + col.w; ci = ci + 1;
+        }
+        ri = ri + 1;
+    }
+    R.outline(0, 0, w, h, skin.border, 1);
+};
+
+// ----------------------------------------------------------------------
+// PropertySheet -- tabbed container.
+// ----------------------------------------------------------------------
+VAR TAB_H = 24;
+VAR PropertySheet = CLASS PropertySheet (self) {
+    Panel.__constructor(self);
+    self.w = 320; self.h = 220;
+    self.paintBackground = FALSE;
+    self.sheets = [];
+    self.active = 0;
+};
+PropertySheet.__index = Panel;
+
+PropertySheet.AddSheet = FUNCTION(self, label, panel) {
+    panel:SetParent(self);
+    array.push(self.sheets, { label: toString(label), panel: panel });
+    self:_refresh();
+    RETURN panel;
+};
+PropertySheet.SetActiveTab = FUNCTION(self, idx) {
+    IF (idx >= 0 && idx < #self.sheets) { self.active = idx; self:_refresh(); }
+};
+PropertySheet._refresh = FUNCTION(self) {
+    VAR i = 0;
+    FOR s OF self.sheets {
+        s.panel:SetVisible(i == self.active);
+        s.panel:SetPos(2, TAB_H + 2);
+        s.panel:SetSize(self.w - 4, self.h - TAB_H - 4);
+        i = i + 1;
+    }
+};
+PropertySheet._press = FUNCTION(self, lx, ly) {
+    IF (ly < TAB_H) {
+        VAR tx = 0; VAR i = 0;
+        FOR s OF self.sheets {
+            VAR tw = #s.label * FONT_W + 16;
+            IF (lx >= tx && lx < tx + tw) { self:SetActiveTab(i); RETURN; }
+            tx = tx + tw; i = i + 1;
+        }
+    }
+};
+PropertySheet.Paint = FUNCTION(self, w, h) {
+    R.rect(0, TAB_H, w, h - TAB_H, skin.panelBg);
+    R.outline(0, TAB_H, w, h - TAB_H, skin.border, 1);
+    VAR tx = 0; VAR i = 0;
+    FOR s OF self.sheets {
+        VAR tw = #s.label * FONT_W + 16;
+        VAR on = i == self.active;
+        R.rect(tx, 0, tw, TAB_H, on ? skin.panelBg : skin.titleBar);
+        R.textAligned(tx, 0, tw, TAB_H, s.label, on ? skin.text : skin.textDim, 5);
+        tx = tx + tw; i = i + 1;
+    }
+};
+
+// ----------------------------------------------------------------------
+// ColorMixer -- three RGB sliders + a preview swatch.
+// ----------------------------------------------------------------------
+// Sliders are built inline (the constructor sits at IIFE scope, so it can
+// reach GUI/skin directly). The change callback only touches its slider
+// argument -- sl.parent is the mixer -- so it captures nothing.
+VAR _mixerOnChange = FUNCTION(sl, v) { sl.parent:_recompute(); };
+VAR ColorMixer = CLASS ColorMixer (self) {
+    Panel.__constructor(self);
+    self.w = 240; self.h = 110;
+    self.bgColor = skin.panelBg;
+    self.color = Color(255, 255, 255);
+    self.padL = 6; self.padT = 6; self.padR = 70; self.padB = 6;
+    self._r = GUI.Create("NumSlider", self);
+    self._r:Dock(GUI.TOP); self._r:DockMargin(0, 0, 0, 4);
+    self._r:SetText("R"); self._r:SetMinMax(0, 255); self._r:SetDecimals(0); self._r:SetValue(255);
+    self._r.OnValueChanged = _mixerOnChange;
+    self._g = GUI.Create("NumSlider", self);
+    self._g:Dock(GUI.TOP); self._g:DockMargin(0, 0, 0, 4);
+    self._g:SetText("G"); self._g:SetMinMax(0, 255); self._g:SetDecimals(0); self._g:SetValue(255);
+    self._g.OnValueChanged = _mixerOnChange;
+    self._b = GUI.Create("NumSlider", self);
+    self._b:Dock(GUI.TOP); self._b:DockMargin(0, 0, 0, 4);
+    self._b:SetText("B"); self._b:SetMinMax(0, 255); self._b:SetDecimals(0); self._b:SetValue(255);
+    self._b.OnValueChanged = _mixerOnChange;
+};
+ColorMixer.__index = Panel;
+
+ColorMixer._recompute = FUNCTION(self) {
+    self.color = Color(math.round(self._r:GetValue()),
+                       math.round(self._g:GetValue()),
+                       math.round(self._b:GetValue()));
+    IF (self.OnChange != NULL) { self:OnChange(self.color); }
+};
+ColorMixer.SetColor = FUNCTION(self, c) {
+    self.color = Color(c.r, c.g, c.b, c.a);
+    self._r:SetValue(c.r); self._g:SetValue(c.g); self._b:SetValue(c.b);
+    RETURN self;
+};
+ColorMixer.GetColor = FUNCTION(self) { RETURN self.color; };
+ColorMixer.Paint = FUNCTION(self, w, h) {
+    R.rect(0, 0, w, h, self.bgColor);
+    R.outline(0, 0, w, h, skin.border, 1);
+    R.rect(w - 62, 6, 56, h - 12, self.color);
+    R.outline(w - 62, 6, 56, h - 12, skin.border, 1);
+};
+
+// ----------------------------------------------------------------------
+// Registry + factory.
+// ----------------------------------------------------------------------
+VAR registry = {};
+GUI.register = FUNCTION(name, cls) { registry[name] = cls; RETURN cls; };
+GUI.isRegistered = FUNCTION(name) { RETURN registry[name] != NULL; };
+
+GUI.register("Panel", Panel);
+GUI.register("Label", Label);
+GUI.register("Button", Button);
+GUI.register("CheckBox", CheckBox);
+GUI.register("CheckBoxLabel", CheckBoxLabel);
+GUI.register("TextEntry", TextEntry);
+GUI.register("TextBox", TextBox);
+GUI.register("NumberEntry", NumberEntry);
+GUI.register("Progress", Progress);
+GUI.register("Slider", Slider);
+GUI.register("NumSlider", NumSlider);
+GUI.register("Frame", Frame);
+GUI.register("ScrollPanel", ScrollPanel);
+GUI.register("Menu", Menu);
+GUI.register("MenuOption", MenuOption);
+GUI.register("ComboBox", ComboBox);
+GUI.register("ListView", ListView);
+GUI.register("PropertySheet", PropertySheet);
+GUI.register("ColorMixer", ColorMixer);
+
+GUI._ensureRoot = FUNCTION() {
+    IF (GUI._root == NULL) {
+        VAR r = Panel();
+        r.paintBackground = FALSE;
+        r.mouseInput = TRUE;
+        r.w = 640; r.h = 480;
+        r._isRoot = TRUE;
+        GUI._root = r;
+    }
+    RETURN GUI._root;
+};
+GUI.getRoot = FUNCTION() { RETURN GUI._ensureRoot(); };
+
+GUI._adopt = FUNCTION(p, parent) {
+    VAR par = parent != NULL ? parent : GUI._ensureRoot();
+    p:SetParent(par);
+};
+
+GUI.Create = FUNCTION(name, ...rest) {
+    VAR cls = registry[name];
+    IF (cls == NULL) { THROW "GUI: unknown panel class '" + toString(name) + "'"; }
+    VAR p = cls();
+    GUI._adopt(p, (#rest > 0 ? rest[0] : NULL));
+    RETURN p;
+};
+// GMod alias.
+GUI.vguiCreate = GUI.Create;
+
+// ----------------------------------------------------------------------
+// Layout (docking), think, hit-test, paint.
+// ----------------------------------------------------------------------
+GUI._layoutPanel = FUNCTION(p) {
+    IF (!p.visible) { RETURN; }
+    VAR cl = p.padL; VAR ct = p.padT;
+    VAR cr = p.w - p.padR; VAR cb = p.h - p.padB;
+    FOR c OF p.children {
+        IF (!c.visible || c.dock == 0) { CONTINUE; }
+        VAR ml = c.dockML; VAR mt = c.dockMT; VAR mr = c.dockMR; VAR mb = c.dockMB;
+        IF (c.dock == GUI.TOP) {
+            c:SetPos(cl + ml, ct + mt); c:SetSize(cr - cl - ml - mr, c.h);
+            ct = ct + c.h + mt + mb;
+        } ELSE IF (c.dock == GUI.BOTTOM) {
+            c:SetSize(cr - cl - ml - mr, c.h); c:SetPos(cl + ml, cb - c.h - mb);
+            cb = cb - c.h - mt - mb;
+        } ELSE IF (c.dock == GUI.LEFT) {
+            c:SetPos(cl + ml, ct + mt); c:SetSize(c.w, cb - ct - mt - mb);
+            cl = cl + c.w + ml + mr;
+        } ELSE IF (c.dock == GUI.RIGHT) {
+            c:SetSize(c.w, cb - ct - mt - mb); c:SetPos(cr - c.w - mr, ct + mt);
+            cr = cr - c.w - ml - mr;
+        } ELSE IF (c.dock == GUI.FILL) {
+            c:SetPos(cl + ml, ct + mt); c:SetSize(cr - cl - ml - mr, cb - ct - mt - mb);
+        }
+    }
+    IF (p.PerformLayout != NULL) { p:PerformLayout(p.w, p.h); }
+    FOR c OF array.copy(p.children) { GUI._layoutPanel(c); }
+};
+
+GUI._thinkTree = FUNCTION(p) {
+    IF (p._tick != NULL) { p:_tick(); }
+    IF (p.Think != NULL) { p:Think(); }
+    FOR c OF array.copy(p.children) { GUI._thinkTree(c); }
+};
+
+// Per-panel child origin: scroll panels shift their children up by scroll.
+GUI._childOriginY = FUNCTION(p) {
+    IF (p.scroll != NULL) { RETURN -p.scroll; }
+    RETURN 0;
+};
+
+GUI._hitTest = FUNCTION(p, px, py, x, y) {
+    IF (!p.visible) { RETURN NULL; }
+    VAR ax = px + p.x; VAR ay = py + p.y;
+    IF (x < ax || y < ay || x >= ax + p.w || y >= ay + p.h) { RETURN NULL; }
+    VAR oy = GUI._childOriginY(p);
+    VAR kids = p:_sortedKids();
+    IF (#kids > 0) {
+        FOR i IN (#kids - 1) <- 0 {
+            VAR hit = GUI._hitTest(kids[i], ax, ay + oy, x, y);
+            IF (hit != NULL) { RETURN hit; }
+        }
+    }
+    IF (p.mouseInput && p.enabled) { RETURN p; }
+    RETURN NULL;
+};
+
+GUI._paintTree = FUNCTION(p, px, py, clx, cly, clw, clh) {
+    IF (!p.visible) { RETURN; }
+    VAR ax = px + p.x; VAR ay = py + p.y;
+    VAR nlx = math.max(clx, ax);          VAR nly = math.max(cly, ay);
+    VAR nrx = math.min(clx + clw, ax + p.w); VAR nry = math.min(cly + clh, ay + p.h);
+    VAR ncw = nrx - nlx; VAR nch = nry - nly;
+    IF (ncw <= 0 || nch <= 0) { RETURN; }
+    R.ox = ax; R.oy = ay; R.cx = nlx; R.cy = nly; R.cw = ncw; R.ch = nch;
+    IF (p.paintBackground) { R.rect(0, 0, p.w, p.h, p.bgColor); }
+    IF (p.Paint != NULL) { p:Paint(p.w, p.h); }
+    VAR oy = GUI._childOriginY(p);
+    VAR kids = p:_sortedKids();
+    FOR c OF kids { GUI._paintTree(c, ax, ay + oy, nlx, nly, ncw, nch); }
+    R.ox = ax; R.oy = ay; R.cx = nlx; R.cy = nly; R.cw = ncw; R.ch = nch;
+    IF (p.PaintOver != NULL) { p:PaintOver(p.w, p.h); }
+};
+
+// ----------------------------------------------------------------------
+// Focus, capture, cursor, event routing.
+// ----------------------------------------------------------------------
+GUI._setFocus = FUNCTION(w) {
+    IF (GUI._focus == w) { RETURN; }
+    VAR old = GUI._focus;
+    IF (old != NULL) {
+        old.focused = FALSE;
+        IF (old.OnFocusChanged != NULL) { old:OnFocusChanged(FALSE); }
+    }
+    GUI._focus = w;
+    IF (w != NULL) {
+        w.focused = TRUE;
+        IF (w.OnFocusChanged != NULL) { w:OnFocusChanged(TRUE); }
+    }
+};
+
+GUI._setCapture = FUNCTION(p, mode) { GUI._capture = p; GUI._capMode = mode; };
+GUI._releaseCapture = FUNCTION() { GUI._capture = NULL; GUI._capMode = NULL; };
+
+GUI._collectFocusable = FUNCTION(p, out) {
+    FOR c OF p:_sortedKids() {
+        IF (c.visible && c.enabled && c.keyInput) { array.push(out, c); }
+        IF (c.visible) { GUI._collectFocusable(c, out); }
+    }
+};
+GUI._focusNext = FUNCTION() {
+    VAR list = [];
+    GUI._collectFocusable(GUI._ensureRoot(), list);
+    IF (#list == 0) { RETURN; }
+    VAR idx = array.indexOf(list, GUI._focus);
+    VAR nxt = list[(idx + 1) % #list];
+    GUI._setFocus(nxt);
+    VAR sx, sy = nxt:LocalToScreen(math.floor(nxt.w / 2), math.floor(nxt.h / 2));
+    GUI._cx = sx; GUI._cy = sy;
+};
+
+GUI._clampCursor = FUNCTION() {
+    VAR r = GUI._ensureRoot();
+    GUI._cx = math.clamp(GUI._cx, 0, r.w - 1);
+    GUI._cy = math.clamp(GUI._cy, 0, r.h - 1);
+};
+
+// Public: drive the cursor / clicks from any source (incl. a real mouse).
+GUI.feedCursor = FUNCTION(x, y) { GUI._cx = x; GUI._cy = y; GUI._clampCursor(); };
+GUI.moveCursor = FUNCTION(dx, dy) { GUI._cx = GUI._cx + dx; GUI._cy = GUI._cy + dy; GUI._clampCursor(); };
+
+GUI.feedClick = FUNCTION(x, y) {
+    GUI._cx = x; GUI._cy = y; GUI._clampCursor();
+    VAR target = GUI._hitTest(GUI._ensureRoot(), 0, 0, GUI._cx, GUI._cy);
+    // Clicking outside an open menu closes it.
+    IF (GUI._menu != NULL) {
+        VAR inMenu = target != NULL && GUI._isDescendant(target, GUI._menu);
+        IF (!inMenu) { GUI._menu:Remove(); GUI._menu = NULL; }
+    }
+    IF (target == NULL) { GUI._setFocus(NULL); RETURN; }
+    GUI._setFocus(target.keyInput ? target : NULL);
+    VAR lx, ly = target:ScreenToLocal(GUI._cx, GUI._cy);
+    IF (target._press != NULL) { target:_press(lx, ly); }
+    IF (target.OnMousePressed != NULL) { target:OnMousePressed(MOUSE_LEFT, lx, ly); }
+    IF (target._release != NULL) { target:_release(lx, ly); }
+    IF (target.OnMouseReleased != NULL) { target:OnMouseReleased(MOUSE_LEFT, lx, ly); }
+    IF (target.enabled && target.DoClick != NULL) { target:DoClick(); }
+};
+
+GUI._isDescendant = FUNCTION(node, ancestor) {
+    VAR p = node;
+    WHILE (p != NULL) { IF (p == ancestor) { RETURN TRUE; } p = p.parent; }
+    RETURN FALSE;
+};
+
+// --- Real pointer events. feedClick above is the atomic keyboard "click";
+// these three model a true press / move / release so the mouse can drag.
+GUI.mouseMove = FUNCTION(x, y) {
+    VAR dx = GUI._lastmx < 0 ? 0 : x - GUI._lastmx;
+    VAR dy = GUI._lastmy < 0 ? 0 : y - GUI._lastmy;
+    GUI._lastmx = x; GUI._lastmy = y;
+    GUI._cx = x; GUI._cy = y; GUI._clampCursor();
+    GUI._updateHover();
+    IF (GUI._mdown && GUI._capture != NULL && GUI._capture._mdrag != NULL) {
+        VAR lx, ly = GUI._capture:ScreenToLocal(GUI._cx, GUI._cy);
+        GUI._capture:_mdrag(lx, ly, dx, dy);
+    }
+};
+
+GUI.mouseDown = FUNCTION(x, y) {
+    GUI._cx = x; GUI._cy = y; GUI._clampCursor();
+    GUI._lastmx = x; GUI._lastmy = y;
+    GUI._mdown = TRUE;
+    VAR target = GUI._hitTest(GUI._ensureRoot(), 0, 0, GUI._cx, GUI._cy);
+    IF (GUI._menu != NULL) {
+        VAR inMenu = target != NULL && GUI._isDescendant(target, GUI._menu);
+        IF (!inMenu) { GUI._menu:_dismiss(); }
+    }
+    GUI._pressTarget = target;
+    IF (target == NULL) { GUI._setFocus(NULL); RETURN; }
+    GUI._setFocus(target.keyInput ? target : NULL);
+    VAR lx, ly = target:ScreenToLocal(GUI._cx, GUI._cy);
+    IF (target._press != NULL) { target:_press(lx, ly); }
+    IF (target.OnMousePressed != NULL) { target:OnMousePressed(MOUSE_LEFT, lx, ly); }
+};
+
+GUI.mouseUp = FUNCTION(x, y) {
+    GUI._cx = x; GUI._cy = y; GUI._clampCursor();
+    GUI._lastmx = x; GUI._lastmy = y;
+    GUI._mdown = FALSE;
+    VAR target = GUI._hitTest(GUI._ensureRoot(), 0, 0, GUI._cx, GUI._cy);
+    VAR pt = GUI._pressTarget;
+    IF (pt != NULL && !pt._removed) {
+        VAR lx, ly = pt:ScreenToLocal(GUI._cx, GUI._cy);
+        IF (pt._release != NULL) { pt:_release(lx, ly); }
+        IF (pt.OnMouseReleased != NULL) { pt:OnMouseReleased(MOUSE_LEFT, lx, ly); }
+        IF (target == pt && pt.enabled && pt.DoClick != NULL) { pt:DoClick(); }
+    }
+    GUI._pressTarget = NULL;
+    GUI._releaseCapture();
+};
+
+GUI.mouseWheel = FUNCTION(x, y, delta) {
+    VAR t = GUI._hitTest(GUI._ensureRoot(), 0, 0, x, y);
+    WHILE (t != NULL) {
+        IF (t.scroll != NULL && t.ScrollBy != NULL) { t:ScrollBy(0 - delta * 16); RETURN; }
+        t = t.parent;
+    }
+};
+
+GUI._updateHover = FUNCTION() {
+    VAR t = GUI._hitTest(GUI._ensureRoot(), 0, 0, GUI._cx, GUI._cy);
+    IF (t != GUI._hover) {
+        IF (GUI._hover != NULL) {
+            GUI._hover.hovered = FALSE;
+            IF (GUI._hover.OnCursorExited != NULL) { GUI._hover:OnCursorExited(); }
+        }
+        GUI._hover = t;
+        IF (t != NULL) {
+            t.hovered = TRUE;
+            IF (t.OnCursorEntered != NULL) { t:OnCursorEntered(); }
+        }
+    }
+};
+
+GUI._escape = FUNCTION() {
+    IF (GUI._menu != NULL) { GUI._menu:Remove(); GUI._menu = NULL; RETURN; }
+    IF (GUI._focus != NULL && GUI._focus.value != NULL) { GUI._setFocus(NULL); RETURN; }
+    // close the top-most closeable frame
+    VAR r = GUI._ensureRoot();
+    VAR best = NULL;
+    FOR c OF r.children {
+        IF (c.visible && c.closeOnEscape == TRUE) {
+            IF (best == NULL || c.zpos >= best.zpos) { best = c; }
+        }
+    }
+    IF (best != NULL) { best:Close(); }
+};
+
+// Translate one key code into an action.
+GUI._key = FUNCTION(code) {
+    IF (GUI._capture != NULL) {
+        IF (code == KEY_ENTER || code == KEY_ESC) { GUI._releaseCapture(); RETURN; }
+        IF (code == KEY_LEFT)  { GUI._capture:_drag("l", GUI.dragStep); RETURN; }
+        IF (code == KEY_RIGHT) { GUI._capture:_drag("r", GUI.dragStep); RETURN; }
+        IF (code == KEY_UP)    { GUI._capture:_drag("u", GUI.dragStep); RETURN; }
+        IF (code == KEY_DOWN)  { GUI._capture:_drag("d", GUI.dragStep); RETURN; }
+        RETURN;
+    }
+    VAR fw = GUI._focus;
+    IF (fw != NULL && fw.OnKeyCode != NULL && !fw._removed) {
+        IF (fw:OnKeyCode(code)) { RETURN; }
+    }
+    IF (code == KEY_LEFT)  { GUI.moveCursor(0 - GUI.cursorStep, 0); }
+    ELSE IF (code == KEY_RIGHT) { GUI.moveCursor(GUI.cursorStep, 0); }
+    ELSE IF (code == KEY_UP)    { GUI.moveCursor(0, 0 - GUI.cursorStep); }
+    ELSE IF (code == KEY_DOWN)  { GUI.moveCursor(0, GUI.cursorStep); }
+    ELSE IF (code == KEY_ENTER) { GUI.feedClick(GUI._cx, GUI._cy); }
+    ELSE IF (code == KEY_TAB)   { GUI._focusNext(); }
+    ELSE IF (code == KEY_ESC)   { GUI._escape(); }
+};
+GUI.handleKey = FUNCTION(code) { GUI._key(code); };
+
+// ----------------------------------------------------------------------
+// Cursor glyph.
+// ----------------------------------------------------------------------
+GUI._drawCursor = FUNCTION() {
+    IF (!GUI.showCursor) { RETURN; }
+    VAR x = math.floor(GUI._cx); VAR y = math.floor(GUI._cy);
+    VAR blk = _pk(Color(0, 0, 0)); VAR wht = _pk(Color(255, 255, 255));
+    // black outline then white fill, arrow pointing up-left
+    B.d.line(x, y, x, y + 14, blk);
+    B.d.line(x, y, x + 10, y + 10, blk);
+    B.d.line(x, y + 14, x + 10, y + 10, blk);
+    B.d.line(x + 1, y + 1, x + 1, y + 11, wht);
+    B.d.line(x + 1, y + 1, x + 7, y + 7, wht);
+    B.d.line(x + 2, y + 3, x + 2, y + 9, wht);
+};
+
+// ----------------------------------------------------------------------
+// Frame: one full think + paint cycle.
+// ----------------------------------------------------------------------
+GUI.frame = FUNCTION() {
+    VAR r = GUI._ensureRoot();
+    IF (B.d != NULL) { r.w = B.d.width(); r.h = B.d.height(); }
+    GUI._clampCursor();
+    GUI._layoutPanel(r);
+    GUI._thinkTree(r);
+    GUI._updateHover();
+    IF (B.d != NULL) {
+        B.d.clear(_pk(skin.desktop));
+        GUI._paintTree(r, 0, 0, 0, 0, r.w, r.h);
+        GUI._drawCursor();
+        IF (B.fb != NULL) { B.fb.flush(); }
+    }
+};
+
+GUI.quit = FUNCTION() { GUI._running = FALSE; };
+
+// Read the pointing device (if the input backend exposes one) and turn its
+// state into move / press / release / wheel events. Edge-detects the left
+// button so a held button becomes a drag rather than repeated clicks.
+GUI.pollMouse = FUNCTION() {
+    IF (!GUI.mouseEnabled || B.inp == NULL || B.inp.mouse == NULL) { RETURN; }
+    VAR m = B.inp.mouse();
+    IF (m == NULL || m.present == 0) { RETURN; }
+    IF (m.x != GUI._lastmx || m.y != GUI._lastmy) { GUI.mouseMove(m.x, m.y); }
+    VAR ld = m.left != 0;
+    IF (ld && !GUI._mdown) { GUI.mouseDown(m.x, m.y); }
+    ELSE IF (!ld && GUI._mdown) { GUI.mouseUp(m.x, m.y); }
+    IF (m.wheel != 0) { GUI.mouseWheel(m.x, m.y, m.wheel); }
+};
+
+GUI.run = FUNCTION() {
+    GUI._ensureRoot();
+    GUI._running = TRUE;
+    GUI.frame();
+    WHILE (GUI._running) {
+        VAR k = NULL;
+        IF (B.inp != NULL && B.inp.waitKey != NULL) { k = B.inp.waitKey(GUI.tickMs); }
+        IF (k != NULL) {
+            GUI._key(k);
+            VAR k2 = B.inp.poll();
+            WHILE (k2 != NULL) { GUI._key(k2); k2 = B.inp.poll(); }
+        }
+        GUI.pollMouse();
+        GUI.frame();
+    }
+};
+
+// Pump any queued input without blocking (for callers driving their own loop).
+GUI.pump = FUNCTION() {
+    IF (B.inp == NULL) { RETURN; }
+    VAR k = B.inp.poll();
+    WHILE (k != NULL) { GUI._key(k); k = B.inp.poll(); }
+    GUI.pollMouse();
+};
+
+RETURN GUI;
+
+})();
