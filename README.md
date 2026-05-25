@@ -110,8 +110,11 @@ GPT/MBR partition tables.
 
 **Runtime** — picolibc 1.8.11 as the C library, a preemptive-capable
 thread scheduler (`rt/sched`) with a full register context switch behind
-the POSIX pthread surface, a 4 MiB static heap. Timer-driven preemption
-and SMP are staged on top of this core (see `rt/sched/include/sched/sched.h`).
+the POSIX pthread surface, a 4 MiB static heap. The x86_64 LAPIC timer
+(preemption timebase) and SMP bring-up (ACPI MADT discovery + an AP
+trampoline, global-run-queue scheduler) are wired but gated/dormant
+pending the reentrancy hardening of the I/O stack; see
+`rt/sched/include/sched/sched.h` and `arch/x86_64/smp.h`.
 
 **Network + TLS** — lwIP 2.2.1 in NO_SYS mode over virtio-net (DHCP /
 UDP / TCP / HTTP); Mbed TLS 3.6.x LTS with hardware entropy

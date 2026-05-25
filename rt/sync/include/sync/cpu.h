@@ -74,9 +74,12 @@ static inline void canboot_cpu_relax(void) {
 #endif
 }
 
-/* Logical CPU index in [0, CANBOOT_NR_CPUS). Always 0 until SMP (M3). */
+/* Logical CPU index in [0, CANBOOT_NR_CPUS). Backed by an arch hook so
+ * the SMP layer (x86 APIC-ID map) can override it; the weak default
+ * returns 0, which is correct for single-CPU and pre-SMP boot. */
+unsigned canboot_arch_cpu_id(void);
 static inline unsigned canboot_cpu_id(void) {
-    return 0u;
+    return canboot_arch_cpu_id();
 }
 
 #endif /* CANBOOT_SYNC_CPU_H */

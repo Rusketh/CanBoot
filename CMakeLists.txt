@@ -41,6 +41,11 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
         arch/x86_64/bios_entry.c
         arch/x86_64/mb2_parse.c
         boot/multiboot2/header.S
+        # SMP bring-up (M3): BIOS-kernel only. Kept out of CANBOOT_KERNEL_COMMON
+        # so the UEFI PIC/shared-object link is not exposed to the trampoline's
+        # absolute (movabs) relocations. Dormant until kmain opts in.
+        arch/x86_64/smp.c
+        arch/x86_64/ap_trampoline.S
         ${CANBOOT_KERNEL_COMMON}
         ${CANBOOT_LWIP_SOURCES}
         ${CANBOOT_CANDO_SOURCES}
@@ -139,6 +144,7 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
     set_source_files_properties(
         arch/x86_64/bootstrap.S
         arch/x86_64/idt_stubs.S
+        arch/x86_64/ap_trampoline.S
         rt/sched/arch/ctx_x86_64.S
         boot/multiboot2/header.S
         PROPERTIES LANGUAGE ASM
@@ -177,6 +183,11 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
         -Wall
         -Wextra
     )
+
+    # SMP bring-up (arch/x86_64/smp.c) is compiled into the BIOS kernel
+    # only; this gates the dormant activation hook in kmain so the shared
+    # kmain.c does not create an undefined symbol in the UEFI link.
+    target_compile_definitions(${KERNEL_NAME} PRIVATE CANBOOT_HAVE_SMP)
 
     target_compile_options(${KERNEL_NAME} PRIVATE
         -D_GNU_SOURCE

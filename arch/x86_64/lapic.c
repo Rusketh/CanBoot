@@ -50,10 +50,19 @@ static inline void wrmsr(uint32_t msr, uint64_t v) {
 #define LAPIC_REG_EOI         0x0B0u
 #define LAPIC_REG_SVR         0x0F0u
 #define LAPIC_REG_TPR         0x080u
+#define LAPIC_REG_ICR_LO      0x300u
+#define LAPIC_REG_ICR_HI      0x310u
 #define LAPIC_REG_LVT_TIMER   0x320u
 #define LAPIC_REG_TIMER_INIT  0x380u
 #define LAPIC_REG_TIMER_CUR   0x390u
 #define LAPIC_REG_TIMER_DIV   0x3E0u
+
+/* ICR delivery modes / flags. */
+#define ICR_DELIVERY_FIXED    0x00000u
+#define ICR_DELIVERY_INIT     0x00500u
+#define ICR_DELIVERY_STARTUP  0x00600u
+#define ICR_LEVEL_ASSERT      0x04000u
+#define ICR_DELIVERY_PENDING  0x01000u
 
 #define LVT_MASKED        (1u << 16)
 #define LVT_TIMER_PERIODIC (1u << 17)
@@ -73,6 +82,10 @@ void canboot_lapic_eoi(void) {
     lapic_write(LAPIC_REG_EOI, 0);
 }
 
+uint32_t canboot_lapic_id(void) {
+    return lapic_read(LAPIC_REG_ID) >> 24;
+}
+
 /* asm stubs in idt_stubs.S */
 extern void canboot_irq_timer_stub(void);
 extern void canboot_irq_spurious_stub(void);
@@ -88,6 +101,45 @@ static void pic_mask_all(void) {
      * once we set IF; the LAPIC is the only interrupt source we want. */
     outb(0x21, 0xFFu); /* master PIC data */
     outb(0xA1, 0xFFu); /* slave  PIC data */
+}
+
+/* Periodic-timer reload count, calibrated once on the BSP and reused by
+ * every CPU (all LAPICs on one package run at the same frequency). */
+static uint32_t g_lapic_timer_count = 1;
+
+void canboot_lapic_enable_this_cpu(void) {
+    wrmsr(IA32_APIC_BASE, rdmsr(IA32_APIC_BASE) | APIC_BASE_ENABLE);
+    lapic_write(LAPIC_REG_TPR, 0);
+    lapic_write(LAPIC_REG_SVR, 0x100u | SPURIOUS_VECTOR); /* bit 8 = enable */
+}
+
+void canboot_lapic_timer_start_this_cpu(void) {
+    lapic_write(LAPIC_REG_TIMER_DIV,  TIMER_DIV_16);
+    lapic_write(LAPIC_REG_TIMER_INIT, g_lapic_timer_count);
+    lapic_write(LAPIC_REG_LVT_TIMER,  LVT_TIMER_PERIODIC | TIMER_VECTOR);
+}
+
+/* ---- Inter-processor interrupts (xAPIC ICR) -------------------------- */
+
+static void icr_wait_idle(void) {
+    while (lapic_read(LAPIC_REG_ICR_LO) & ICR_DELIVERY_PENDING)
+        __asm__ volatile ("pause");
+}
+
+static void icr_send(uint32_t dest, uint32_t low) {
+    lapic_write(LAPIC_REG_ICR_HI, dest << 24);
+    lapic_write(LAPIC_REG_ICR_LO, low);
+    icr_wait_idle();
+}
+
+void canboot_lapic_send_init(uint32_t dest) {
+    icr_send(dest, ICR_DELIVERY_INIT | ICR_LEVEL_ASSERT);
+}
+void canboot_lapic_send_sipi(uint32_t dest, uint8_t vector) {
+    icr_send(dest, ICR_DELIVERY_STARTUP | ICR_LEVEL_ASSERT | vector);
+}
+void canboot_lapic_send_ipi(uint32_t dest, uint8_t vector) {
+    icr_send(dest, ICR_DELIVERY_FIXED | ICR_LEVEL_ASSERT | vector);
 }
 
 static uint32_t calibrate_lapic_hz(void) {
@@ -116,15 +168,8 @@ void canboot_lapic_timer_setup(unsigned hz) {
     if (hz == 0)
         hz = 100u;
 
-    pic_mask_all();
-
-    /* Ensure the LAPIC is globally enabled in the APIC base MSR. */
-    wrmsr(IA32_APIC_BASE, rdmsr(IA32_APIC_BASE) | APIC_BASE_ENABLE);
-
-    /* Accept all interrupt priorities, and software-enable the LAPIC
-     * with a spurious vector. */
-    lapic_write(LAPIC_REG_TPR, 0);
-    lapic_write(LAPIC_REG_SVR, 0x100u | SPURIOUS_VECTOR); /* bit 8 = enable */
+    pic_mask_all();             /* global: legacy PIC off, once */
+    canboot_lapic_enable_this_cpu();
 
     canboot_idt_set_gate(TIMER_VECTOR,    canboot_irq_timer_stub);
     canboot_idt_set_gate(SPURIOUS_VECTOR, canboot_irq_spurious_stub);
@@ -133,10 +178,9 @@ void canboot_lapic_timer_setup(unsigned hz) {
     uint32_t count    = lapic_hz / hz;
     if (count == 0)
         count = 1;
+    g_lapic_timer_count = count; /* reused by every CPU's timer */
 
-    lapic_write(LAPIC_REG_TIMER_DIV,  TIMER_DIV_16);
-    lapic_write(LAPIC_REG_TIMER_INIT, count);
-    lapic_write(LAPIC_REG_LVT_TIMER,  LVT_TIMER_PERIODIC | TIMER_VECTOR);
+    canboot_lapic_timer_start_this_cpu();
 
     printf("canboot: lapic timer %u Hz (lapic_hz=%u count=%u)\n",
            hz, (unsigned)lapic_hz, (unsigned)count);

@@ -2,10 +2,11 @@
 #define CANBOOT_SCHED_PERCPU_H
 
 /*
- * Per-CPU scheduler state. M1 only ever touches index 0; the array is
- * sized for SMP so M3 can populate secondary CPUs without a layout
- * change. Each CPU owns a run queue; the single g_sched lock in sched.c
- * still serialises access in M1 (per-CPU rq locks arrive with M3).
+ * Per-CPU scheduler state. Each online CPU has a current + idle thread.
+ * The run queue itself is global (shared, in sched.c) and protected by
+ * the global scheduler lock: the simplest correct SMP design — every
+ * CPU pulls runnable threads from the one queue. Per-CPU run queues with
+ * sharded locks + work stealing are the M3b scalability follow-up.
  */
 
 #include "sync/spinlock.h"
@@ -18,8 +19,6 @@
 struct canboot_cpu {
     struct canboot_thread *current;     /* thread running on this CPU   */
     struct canboot_thread *idle;        /* per-CPU idle thread          */
-    struct canboot_thread *rq_head;     /* run queue (FIFO) head        */
-    struct canboot_thread *rq_tail;     /* run queue tail               */
     unsigned               preempt_count; /* >0 => preemption deferred  */
     volatile int           need_resched;  /* tick wanted a switch        */
     int                    id;

@@ -16,6 +16,23 @@
  * every IRQ handler before returning (never for the spurious vector). */
 void canboot_lapic_eoi(void);
 
+/* This CPU's LAPIC ID (physical APIC ID, bits 24-31 of the ID reg). */
+uint32_t canboot_lapic_id(void);
+
+/* Per-CPU LAPIC bring-up, callable from the BSP and every AP:
+ *   _enable_this_cpu  software-enables the LAPIC (APIC base MSR, TPR,
+ *                     spurious vector). Does NOT touch the 8259 PIC.
+ *   _timer_start_this_cpu  programs this CPU's periodic timer using the
+ *                     count calibrated once by canboot_lapic_timer_setup. */
+void canboot_lapic_enable_this_cpu(void);
+void canboot_lapic_timer_start_this_cpu(void);
+
+/* AP bring-up IPIs (xAPIC ICR). dest = target physical APIC ID. */
+void canboot_lapic_send_init(uint32_t dest);
+void canboot_lapic_send_sipi(uint32_t dest, uint8_t vector);
+/* Fixed inter-processor interrupt (e.g. reschedule). */
+void canboot_lapic_send_ipi(uint32_t dest, uint8_t vector);
+
 /*
  * One-shot bring-up of the LAPIC periodic timer:
  *   - masks the legacy 8259 PIC so only LAPIC IRQs reach the CPU,

@@ -112,6 +112,7 @@ gdt64_ptr:
 
 .section .bss
 .align 4096
+.global pml4               /* APs load this as CR3 (smp.c, M3) */
 pml4:
     .skip 4096
 pdpt:

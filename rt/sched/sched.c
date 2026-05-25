@@ -48,6 +48,20 @@ static volatile int   g_preempt_enabled; /* timer may force a switch    */
 static volatile int   g_irqs_armed;       /* arch IRQ path configured    */
 static unsigned long  g_ticks;            /* monotonic timer ticks        */
 
+/* Global run queue (FIFO) of runnable threads, shared by all CPUs and
+ * protected by g_sched. Idle threads are never enqueued here. */
+static struct {
+    struct canboot_thread *head;
+    struct canboot_thread *tail;
+} g_runq;
+
+/* Weak default: single logical CPU. The x86 SMP layer (arch/x86_64/
+ * smp.c) provides a strong override that maps the LAPIC ID to a logical
+ * index once APs are up. */
+__attribute__((weak)) unsigned canboot_arch_cpu_id(void) {
+    return 0u;
+}
+
 /* Thread pool. Slot 0 is the adopted boot/main thread (no owned stack).
  * Remaining slots back pthread_create. Per-CPU idle threads live in
  * their own array so the pool stays available for user threads. */
@@ -95,21 +109,21 @@ static void arch_ctx_init(struct canboot_arch_ctx *ctx,
 /* Run-queue + wait-queue primitives. All callers hold g_sched.         */
 /* ------------------------------------------------------------------ */
 
-static void rq_push(struct canboot_cpu *cpu, struct canboot_thread *t) {
+static void rq_push(struct canboot_thread *t) {
     t->q_next = NULL;
-    if (cpu->rq_tail)
-        cpu->rq_tail->q_next = t;
+    if (g_runq.tail)
+        g_runq.tail->q_next = t;
     else
-        cpu->rq_head = t;
-    cpu->rq_tail = t;
+        g_runq.head = t;
+    g_runq.tail = t;
 }
 
-static struct canboot_thread *rq_pop(struct canboot_cpu *cpu) {
-    struct canboot_thread *t = cpu->rq_head;
+static struct canboot_thread *rq_pop(void) {
+    struct canboot_thread *t = g_runq.head;
     if (t) {
-        cpu->rq_head = t->q_next;
-        if (!cpu->rq_head)
-            cpu->rq_tail = NULL;
+        g_runq.head = t->q_next;
+        if (!g_runq.head)
+            g_runq.tail = NULL;
         t->q_next = NULL;
     }
     return t;
@@ -144,7 +158,7 @@ static struct canboot_thread *wq_pop(struct canboot_wait_queue *wq) {
 static void reschedule(void) {
     struct canboot_cpu *cpu = this_cpu();
     struct canboot_thread *prev = cpu->current;
-    struct canboot_thread *next = rq_pop(cpu);
+    struct canboot_thread *next = rq_pop();
 
     if (!next)
         next = cpu->idle;
@@ -206,7 +220,7 @@ void canboot_sched_wake_one(struct canboot_wait_queue *wq) {
     struct canboot_thread *t = wq_pop(wq);
     if (t) {
         t->state = CANBOOT_TH_RUNNABLE;
-        rq_push(this_cpu(), t);
+        rq_push(t);
     }
 }
 
@@ -214,7 +228,7 @@ void canboot_sched_wake_all(struct canboot_wait_queue *wq) {
     struct canboot_thread *t;
     while ((t = wq_pop(wq)) != NULL) {
         t->state = CANBOOT_TH_RUNNABLE;
-        rq_push(this_cpu(), t);
+        rq_push(t);
     }
 }
 
@@ -224,7 +238,7 @@ void canboot_sched_yield(void) {
     struct canboot_thread *self = this_cpu()->current;
     if (self->state == CANBOOT_TH_RUNNING) {
         self->state = CANBOOT_TH_RUNNABLE;
-        rq_push(this_cpu(), self);
+        rq_push(self);
     }
     reschedule();
     canboot_sched_unlock(f);
@@ -293,6 +307,34 @@ void canboot_sched_init(void) {
     cpu->idle = idle;
 }
 
+/* Called by each Application Processor once the arch SMP layer has
+ * brought it into long mode with its per-CPU LAPIC enabled and the
+ * APIC-ID -> logical-index map populated (so canboot_cpu_id() resolves
+ * to `cpu_index` here). The AP adopts its startup stack as its idle
+ * thread and joins the scheduler; this never returns. Real threads are
+ * pulled from the shared global run queue, giving true parallelism. */
+__attribute__((noreturn)) void canboot_sched_ap_online(unsigned cpu_index) {
+    canboot_irqflags_t f;
+    canboot_sched_lock(&f);
+
+    struct canboot_cpu *cpu = &canboot_cpus[cpu_index];
+    cpu->id     = (int)cpu_index;
+    cpu->online = 1;
+
+    struct canboot_thread *idle = &g_idle[cpu_index];
+    idle->id    = -1 - (int)cpu_index; /* unique, never a valid pool id */
+    idle->state = CANBOOT_TH_RUNNING;
+    idle->cpu   = cpu;
+    idle->stack = NULL;                /* adopt the AP's startup stack  */
+    cpu->idle    = idle;
+    cpu->current = idle;
+
+    canboot_sched_unlock(f);
+
+    idle_entry(NULL); /* becomes this CPU's idle loop; never returns */
+    __builtin_unreachable();
+}
+
 struct canboot_thread *canboot_thread_create(void *(*fn)(void *), void *arg) {
     canboot_irqflags_t f;
     canboot_sched_lock(&f);
@@ -319,7 +361,7 @@ struct canboot_thread *canboot_thread_create(void *(*fn)(void *), void *arg) {
     t->stack_size = CANBOOT_THREAD_STACK;
     arch_ctx_init(&t->ctx, g_stacks[id] + CANBOOT_THREAD_STACK);
 
-    rq_push(this_cpu(), t);
+    rq_push(t);
 
     canboot_sched_unlock(f);
     return t;
@@ -425,9 +467,9 @@ void canboot_sched_preempt(void) {
     struct canboot_cpu *c = this_cpu();
     struct canboot_thread *self = c->current;
     c->need_resched = 0;
-    if (self->state == CANBOOT_TH_RUNNING && c->rq_head != NULL) {
+    if (self->state == CANBOOT_TH_RUNNING && g_runq.head != NULL) {
         self->state = CANBOOT_TH_RUNNABLE;
-        rq_push(c, self);
+        rq_push(self);
         reschedule();
     }
     canboot_sched_unlock(f);

@@ -75,6 +75,15 @@ struct canboot_thread {
  * run queue + idle thread. Call once, early, on the boot CPU. */
 void canboot_sched_init(void);
 
+/* Entry point for a secondary CPU (M3). The arch SMP layer calls this on
+ * each AP after long-mode + per-CPU LAPIC bring-up; the AP joins the
+ * scheduler as an idle CPU and never returns. */
+__attribute__((noreturn)) void canboot_sched_ap_online(unsigned cpu_index);
+
+/* Backs canboot_cpu_id(); weak default returns 0, overridden by the SMP
+ * layer once APs are running. Declared here for callers that need it. */
+unsigned canboot_arch_cpu_id(void);
+
 struct canboot_thread *canboot_thread_create(void *(*fn)(void *), void *arg);
 struct canboot_thread *canboot_thread_current(void);
 struct canboot_thread *canboot_thread_by_id(int id);

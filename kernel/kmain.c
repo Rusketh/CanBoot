@@ -338,6 +338,16 @@ static void kmain_body(struct boot_info *bi) {
     canboot_sched_arm_irqs();
     canboot_irq_enable();
 
+#ifdef CANBOOT_HAVE_SMP
+    /* M3 (SMP): bring up Application Processors. DISABLED by default —
+     * the AP trampoline (arch/x86_64/ap_trampoline.S) is unverified and a
+     * fault during bring-up would wedge the whole boot. Change `if (0)`
+     * to `if (1)` to enable it for multi-core boot-debugging. */
+    extern void canboot_smp_boot_aps(uint64_t acpi_rsdp);
+    if (0)
+        canboot_smp_boot_aps(bi->acpi_rsdp);
+#endif
+
     runtime_selftest();
 
     /* Milestone 6: lwIP + virtio-net + DHCP + UDP echo + HTTP GET. */
