@@ -4,6 +4,11 @@
 # its polling loop, run sidecar UDP echo + HTTP servers reachable via
 # the SLIRP host gateway (10.0.2.2), and assert the boot
 # checkpoints before "ok".
+#
+# POINTER=ps2     (default) inject a relative PS/2 mouse over HMP.
+# POINTER=tablet  bind a virtio-tablet and inject absolute coords over QMP
+#                 (exercises the EV_ABS path); drops the virtio keyboard so
+#                 the single virtio-input driver binds the tablet.
 
 set -euo pipefail
 
@@ -19,8 +24,23 @@ fi
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$(mktemp -d)"
 MON_SOCK="$WORK/mon.sock"
+QMP_SOCK="$WORK/qmp.sock"
 UDP_PORT="${UDP_PORT:-7777}"
 HTTP_PORT="${HTTP_PORT:-8080}"
+
+# Pointer device under test: "ps2" (relative i8042 mouse, injected over the
+# HMP monitor) or "tablet" (virtio-tablet, absolute, injected over QMP). The
+# virtio-input driver binds a single device, so tablet mode drops the virtio
+# keyboard (the PS/2 keyboard still serves sendkey) to bind the tablet.
+POINTER="${POINTER:-ps2}"
+KBD_DEV="-device virtio-keyboard-pci"
+PTR_DEV=""
+QMP_DEV=""
+if [ "$POINTER" = "tablet" ]; then
+    KBD_DEV=""
+    PTR_DEV="-device virtio-tablet-pci"
+    QMP_DEV="-qmp unix:$QMP_SOCK,server,nowait"
+fi
 
 mkdir -p "$(dirname "$LOG")"
 : > "$LOG"
@@ -48,7 +68,7 @@ qemu-system-x86_64 \
     -cdrom "$ISO" \
     -drive "if=none,id=blk0,file=$DISK_IMG,format=raw" \
     -device virtio-blk-pci,drive=blk0 \
-    -device virtio-keyboard-pci \
+    $KBD_DEV $PTR_DEV $QMP_DEV \
     -netdev user,id=n0 \
     -device virtio-net-pci,netdev=n0 \
     -audiodev "wav,id=snd,path=$AUDIO_WAV" \
@@ -109,16 +129,49 @@ for k in ("x", "y", "z"):
 sock.close()
 PY
 
-    # Third wave: drive the PS/2 mouse for the cando input.mouse() probe.
-    # Relative motion then a left click; best-effort (HMP mouse_* commands
-    # vary across QEMU versions), so failures here are non-fatal below.
+    # Third wave: drive the pointer for the cando input.mouse() probe.
+    # Best-effort (injection support varies across QEMU versions), so the
+    # click is asserted non-fatally below.
     for _ in $(seq 1 200); do
         if grep -q 'cando mouse probe begin' "$LOG" 2>/dev/null; then
             break
         fi
         sleep 0.2
     done
-    python3 - "$MON_SOCK" <<'PY' 2>/dev/null || true
+    if [ "$POINTER" = "tablet" ]; then
+        # Absolute pointer over QMP: move to two points (axis range
+        # 0..32767, scaled to the framebuffer by the virtio-input driver)
+        # then a left click.
+        python3 - "$QMP_SOCK" <<'PY' 2>/dev/null || true
+import socket, sys, time, json
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+try:
+    s.connect(sys.argv[1])
+except Exception:
+    sys.exit(0)
+s.settimeout(2)
+def send(obj):
+    s.sendall((json.dumps(obj) + "\r\n").encode()); time.sleep(0.2)
+    try: s.recv(65536)
+    except Exception: pass
+try: s.recv(65536)          # QMP greeting
+except Exception: pass
+send({"execute": "qmp_capabilities"})
+def absmove(x, y):
+    send({"execute": "input-send-event", "arguments": {"events": [
+        {"type": "abs", "data": {"axis": "x", "value": x}},
+        {"type": "abs", "data": {"axis": "y", "value": y}}]}})
+absmove(6000, 6000)
+absmove(20000, 14000)
+send({"execute": "input-send-event", "arguments": {"events": [
+    {"type": "btn", "data": {"button": "left", "down": True}}]}})
+send({"execute": "input-send-event", "arguments": {"events": [
+    {"type": "btn", "data": {"button": "left", "down": False}}]}})
+s.close()
+PY
+    else
+        # Relative PS/2 mouse over the HMP monitor.
+        python3 - "$MON_SOCK" <<'PY' 2>/dev/null || true
 import socket, sys, time
 sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 try:
@@ -134,6 +187,7 @@ cmd("mouse_button 1")
 cmd("mouse_button 0")
 sock.close()
 PY
+    fi
 ) &
 INJECTOR_PID=$!
 

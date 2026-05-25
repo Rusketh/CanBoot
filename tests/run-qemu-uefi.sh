@@ -140,6 +140,31 @@ for k in ("x", "y", "z"):
     time.sleep(0.4)
 sock.close()
 PY
+
+    # Third wave: drive the PS/2 mouse for the cando input.mouse() probe.
+    # Relative motion then a left click; best-effort, asserted non-fatally.
+    for _ in $(seq 1 200); do
+        if grep -q 'cando mouse probe begin' "$LOG" 2>/dev/null; then
+            break
+        fi
+        sleep 0.2
+    done
+    python3 - "$MON_SOCK" <<'PY' 2>/dev/null || true
+import socket, sys, time
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+try:
+    sock.connect(sys.argv[1])
+except Exception:
+    sys.exit(0)
+time.sleep(0.2)
+def cmd(c):
+    sock.sendall((c + "\n").encode()); time.sleep(0.2)
+for _ in range(6):
+    cmd("mouse_move 30 20")
+cmd("mouse_button 1")
+cmd("mouse_button 0")
+sock.close()
+PY
 ) &
 INJECTOR_PID=$!
 
@@ -262,6 +287,18 @@ PY
         check 'cando ext libs end'
         check 'selftest: partition+fs libs registered'
         check 'cando part libs end'
+
+        # Pointer probe (see run-qemu-bios.sh). Reaching the probe is the
+        # gated assertion; the injected click is reported non-fatally.
+        check 'cando mouse probe begin'
+        check 'cando mouse probe end'
+        if grep -q 'cando mouse button = true' <<<"$stripped"; then
+            echo "selftest: mouse click registered"
+        elif grep -q 'cando mouse moved = true' <<<"$stripped"; then
+            echo "selftest: mouse motion registered, click not seen (non-fatal)"
+        else
+            echo "selftest: mouse not observed (non-fatal; host QEMU PS/2 dependent)"
+        fi
 
         # Milestone 11 screenshot hash compare. The OVMF firmware
         # paints variable content (boot logo, brand strings, font
