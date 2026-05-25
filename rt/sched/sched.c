@@ -273,6 +273,7 @@ static void *idle_entry(void *arg) {
         canboot_sched_unlock(f);
         canboot_cpu_relax();
     }
+    return NULL; /* unreachable; silences -Wreturn-type at -O0 */
 }
 
 void canboot_sched_init(void) {

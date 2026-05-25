@@ -199,6 +199,9 @@ foreach(src ${EFI_AARCH64_SOURCES})
             -D_Thread_local= -D__thread=
             -ffreestanding -fpic -fno-stack-protector -fno-stack-check
             -fno-strict-aliasing -fshort-wchar
+            # See CMakeLists.txt: keep libgcc's outline-atomics / LSE
+            # runtime-detect (__getauxval) out of the freestanding link.
+            -mno-outline-atomics
             -Wno-implicit-function-declaration
             -Wno-int-conversion
             -Wall -Wextra

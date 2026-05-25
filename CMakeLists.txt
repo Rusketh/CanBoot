@@ -245,6 +245,12 @@ elseif(CANBOOT_ARCH STREQUAL "aarch64")
         $<$<COMPILE_LANGUAGE:C>:-fno-pic>
         $<$<COMPILE_LANGUAGE:C>:-fno-pie>
         $<$<COMPILE_LANGUAGE:C>:-mgeneral-regs-only>
+        # Emit self-contained LL/SC atomics instead of libgcc's outline
+        # atomics, whose LSE runtime-detect (lse-init.o) calls glibc's
+        # __getauxval — unresolvable in this -static -nostdlib link. The
+        # scheduler's __atomic_* builtins (rt/sched) would otherwise drag
+        # it in. See PR #43 (aarch64 direct link failure).
+        $<$<COMPILE_LANGUAGE:C>:-mno-outline-atomics>
         -Wall
         -Wextra
     )
