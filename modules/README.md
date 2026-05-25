@@ -4,11 +4,11 @@ Drop-in `.cdo` libraries that are **not** part of the bootable image by
 default. CanBoot only bakes `/init.cdo` (plus the smoke-test probe
 assets) onto the boot media. If you want one of these modules, copy it
 onto your image and `include()` it from your init script — see each
-module's README for the exact steps.
+module's doc for the exact steps.
 
 | Module | What it is |
 |--------|------------|
-| [gui](gui/README.md) | Retained-mode widget toolkit over `display` + `input` (mouse + keyboard) |
+| [gui](gui/gui.md) | Retained-mode widget toolkit over `display` + `input` (mouse + keyboard) |
 
 ## Shipping a module onto a boot image
 

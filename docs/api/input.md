@@ -47,7 +47,7 @@ print(m.x, m.y, m.left, m.wheel);
 Motion may arrive relative (PS/2, virtio `EV_REL`) or absolute (virtio
 tablet `EV_ABS`); both accumulate into the same clamped position. There
 is no separate button-event queue — poll this each frame and edge-detect
-button changes yourself (the [`gui`](gui.md) module does exactly this).
+button changes yourself (the [`gui`](../../modules/gui/gui.md) module does exactly this).
 
 **Platform support.** The PS/2 mouse rides the x86 i8042 (`hal/input/ps2.c`,
 folded into the keyboard driver) and is x86-only. virtio-input pointer

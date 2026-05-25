@@ -1,12 +1,12 @@
 # gui — retained-mode widget toolkit
 
 A widget toolkit written entirely in CanDo on top of
-[`display`](display.md) and [`input`](input.md). Unlike the other
+[`display`](../../docs/api/display.md) and [`input`](../../docs/api/input.md). Unlike the other
 entries here it is **not** a built-in namespace, and it is **not** baked
 into the boot image — it is an optional module that lives at
 `modules/gui/gui.cdo` in the source tree. Copy it onto your boot media
-(see [`modules/gui/README.md`](../../modules/gui/README.md)) and load it
-with `include`:
+(see [Shipping onto a boot image](#shipping-onto-a-boot-image) below) and
+load it with `include`:
 
 ```cdo
 VAR GUI = include("/gui.cdo");
@@ -30,10 +30,31 @@ only thing it adds to scope (nothing leaks into globals, and the widget
 classes themselves are private — you reach them by name through
 `GUI.Create`).
 
+## Files
+
+- `gui.cdo` — the library (include this).
+- `gui_demo.cdo` — a showcase; co-locate it with `gui.cdo` and run it as
+  `/init.cdo`, or `include("./gui_demo.cdo")` from your own init.
+- `gui.md` — this document.
+
+## Shipping onto a boot image
+
+The build scripts don't ship it. Stage it next to `init.cdo` yourself,
+then `include` it from your init script:
+
+```bash
+mcopy -i build/canboot-fat32.img modules/gui/gui.cdo ::/gui.cdo   # FAT32
+cp modules/gui/gui.cdo "$ISO_ROOT/gui.cdo"                        # ISO root
+```
+
+```cdo
+VAR GUI = include("/gui.cdo");
+```
+
 ## Input model
 
 The toolkit drives an on-screen cursor from a pointing device when one is
-present (PS/2 or virtio, surfaced by [`input.mouse()`](input.md)), and
+present (PS/2 or virtio, surfaced by [`input.mouse()`](../../docs/api/input.md)), and
 falls back to the keyboard otherwise. `GUI.run()` reads the mouse each
 frame via `GUI.pollMouse`; the underlying model is a real mouse pipeline
 (hit-testing, hover, press/move/release, drag capture).
@@ -174,6 +195,6 @@ supplied by the `:` call):
 
 ## See also
 
-- [`display`](display.md) — the framebuffer painter it draws through
-- [`input`](input.md) — the key codes it reads (incl. arrows + Esc)
-- [`image`](image.md) — decode + draw images into panels
+- [`display`](../../docs/api/display.md) — the framebuffer painter it draws through
+- [`input`](../../docs/api/input.md) — the key codes it reads (incl. arrows + Esc)
+- [`image`](../../docs/api/image.md) — decode + draw images into panels
