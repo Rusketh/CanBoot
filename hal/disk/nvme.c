@@ -21,6 +21,7 @@
 
 #include "hal/disk.h"
 #include "hal/pci.h"
+#include "sync/cpu.h"
 
 #define NVME_CLASS     0x01u
 #define NVME_SUBCLASS  0x08u
@@ -129,7 +130,7 @@ static uint16_t submit(struct nvme_sqe *sq, uint32_t depth, uint32_t *tail,
             mmio_wr32(cq_dbl(qid), *head);
             return status;
         }
-        __asm__ volatile ("pause");
+        canboot_cpu_relax();
     }
     return 0xFFFFu;
 }
@@ -226,7 +227,7 @@ bool canboot_nvme_init(void) {
     mmio_wr32(REG_CC, 0);
     for (uint64_t s = 0; s < 100000000ull; s++) {
         if ((mmio_rd32(REG_CSTS) & CSTS_RDY) == 0) break;
-        __asm__ volatile ("pause");
+        canboot_cpu_relax();
     }
 
     memset(g_asq, 0, sizeof(g_asq));
@@ -244,7 +245,7 @@ bool canboot_nvme_init(void) {
         uint32_t csts = mmio_rd32(REG_CSTS);
         if (csts & CSTS_CFS) return false;
         if (csts & CSTS_RDY) break;
-        __asm__ volatile ("pause");
+        canboot_cpu_relax();
     }
     if ((mmio_rd32(REG_CSTS) & CSTS_RDY) == 0) return false;
 
