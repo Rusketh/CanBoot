@@ -123,6 +123,7 @@ set(CANBOOT_KERNEL_COMMON
     # x86_64-specific kernel.
     arch/x86_64/idt.c
     arch/x86_64/idt_stubs.S
+    arch/x86_64/lapic.c
     rt/sched/arch/ctx_x86_64.S
     kernel/kmain.c
 

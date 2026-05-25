@@ -43,6 +43,11 @@ struct canboot_cpu canboot_cpus[CANBOOT_NR_CPUS];
  * resume-side spin_unlock in reschedule() / the trampoline). */
 static spinlock_t g_sched = SPINLOCK_INITIALIZER;
 
+/* Preemption gates (see canboot_sched_on_tick docs in sched.h). */
+static volatile int   g_preempt_enabled; /* timer may force a switch    */
+static volatile int   g_irqs_armed;       /* arch IRQ path configured    */
+static unsigned long  g_ticks;            /* monotonic timer ticks        */
+
 /* Thread pool. Slot 0 is the adopted boot/main thread (no owned stack).
  * Remaining slots back pthread_create. Per-CPU idle threads live in
  * their own array so the pool stays available for user threads. */
@@ -162,9 +167,11 @@ static void thread_trampoline(void) {
      * that landed us here was performed with g_sched held; release it
      * before running user code (mirrors reschedule()'s resume side). */
     spin_unlock(&g_sched);
-    /* NOTE (M2): new threads should run with IRQs enabled. M1 leaves
-     * them masked — there is no timer/IRQ source yet, so this is inert,
-     * and it keeps the cooperative I/O paths race-free until M5. */
+    /* Once the arch IRQ path is armed (LAPIC timer up on x86_64), new
+     * threads start with interrupts enabled so the timer can preempt
+     * them. Before that they run masked, exactly as in M1. */
+    if (g_irqs_armed)
+        canboot_irq_enable();
 
     struct canboot_thread *self = canboot_thread_current();
     void *ret = self->entry(self->arg);
@@ -372,4 +379,71 @@ int canboot_thread_join(struct canboot_thread *t, void **retval) {
 
     canboot_sched_unlock(f);
     return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Preemption (M2)                                                      */
+/* ------------------------------------------------------------------ */
+
+void canboot_sched_arm_irqs(void) {
+    g_irqs_armed = 1;
+}
+
+void canboot_sched_set_preemption(int enabled) {
+    g_preempt_enabled = enabled ? 1 : 0;
+}
+
+unsigned long canboot_sched_ticks(void) {
+    return __atomic_load_n(&g_ticks, __ATOMIC_RELAXED);
+}
+
+void canboot_preempt_disable(void) {
+    canboot_irqflags_t f = canboot_irq_save();
+    this_cpu()->preempt_count++;
+    canboot_irq_restore(f);
+}
+
+void canboot_preempt_enable(void) {
+    canboot_irqflags_t f = canboot_irq_save();
+    struct canboot_cpu *c = this_cpu();
+    int resched = 0;
+    if (c->preempt_count)
+        c->preempt_count--;
+    if (c->preempt_count == 0 && c->need_resched)
+        resched = 1;
+    canboot_irq_restore(f);
+    if (resched)
+        canboot_sched_yield();
+}
+
+/* Force a round-robin switch away from the current thread if another is
+ * runnable. Called from the timer IRQ (canboot_sched_on_tick); the
+ * context switch parks the interrupted thread mid-ISR. */
+void canboot_sched_preempt(void) {
+    canboot_irqflags_t f;
+    canboot_sched_lock(&f);
+    struct canboot_cpu *c = this_cpu();
+    struct canboot_thread *self = c->current;
+    c->need_resched = 0;
+    if (self->state == CANBOOT_TH_RUNNING && c->rq_head != NULL) {
+        self->state = CANBOOT_TH_RUNNABLE;
+        rq_push(c, self);
+        reschedule();
+    }
+    canboot_sched_unlock(f);
+}
+
+/* Timer-tick entry point. Runs in IRQ context with interrupts masked. */
+void canboot_sched_on_tick(void) {
+    __atomic_add_fetch(&g_ticks, 1, __ATOMIC_RELAXED);
+
+    if (!g_preempt_enabled)
+        return;
+
+    struct canboot_cpu *c = this_cpu();
+    if (c->preempt_count) {
+        c->need_resched = 1; /* honoured by canboot_preempt_enable() */
+        return;
+    }
+    canboot_sched_preempt();
 }

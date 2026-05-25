@@ -86,6 +86,37 @@ void canboot_thread_detach(struct canboot_thread *t);
 /* Voluntarily yield the CPU to another runnable thread. */
 void canboot_sched_yield(void);
 
+/* ---- Preemption (M2) ------------------------------------------------- */
+/*
+ * canboot_sched_on_tick() is called from the timer IRQ handler (IRQs
+ * already masked by the gate). It advances the tick counter and, when
+ * preemption is enabled and not deferred, forces a round-robin switch
+ * via canboot_sched_preempt(). The preempt is performed by parking the
+ * interrupted thread mid-ISR using the ordinary context switch; it
+ * resumes (and the ISR iret's back to the interrupted instruction) once
+ * it is rescheduled.
+ *
+ * Preemption is GATED OFF by default: the non-reentrant runtime (the
+ * picolibc allocator, lwIP, the HAL drivers, the mbedTLS BIO) is not yet
+ * safe to interrupt at an arbitrary point — that hardening is M5. Until
+ * then the timer still ticks (a live timebase) but does not switch.
+ * canboot_sched_set_preemption(1) flips it on once M5 lands (or for a
+ * controlled, allocation-free test).
+ *
+ * canboot_sched_arm_irqs() tells the thread trampoline that the arch IRQ
+ * path is configured, so newly created threads should start with
+ * interrupts enabled (and therefore be preemptible).
+ */
+void          canboot_sched_on_tick(void);
+void          canboot_sched_preempt(void);
+void          canboot_sched_set_preemption(int enabled);
+void          canboot_sched_arm_irqs(void);
+unsigned long canboot_sched_ticks(void);
+
+/* Defer / allow preemption on the current CPU. Nest freely. */
+void canboot_preempt_disable(void);
+void canboot_preempt_enable(void);
+
 /* ---- Locking + blocking primitives (for mutex / cond shims) ---------- */
 /*
  * Usage contract:

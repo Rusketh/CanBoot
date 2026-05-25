@@ -34,6 +34,24 @@ static inline canboot_irqflags_t canboot_irq_save(void) {
     return flags;
 }
 
+/* Unconditionally enable local interrupts. */
+static inline void canboot_irq_enable(void) {
+#if defined(__x86_64__)
+    __asm__ volatile ("sti" : : : "memory");
+#elif defined(__aarch64__)
+    __asm__ volatile ("msr daifclr, #2" : : : "memory");
+#endif
+}
+
+/* Unconditionally disable local interrupts. */
+static inline void canboot_irq_disable(void) {
+#if defined(__x86_64__)
+    __asm__ volatile ("cli" : : : "memory");
+#elif defined(__aarch64__)
+    __asm__ volatile ("msr daifset, #2" : : : "memory");
+#endif
+}
+
 /* Restore a previously saved interrupt-enable state. */
 static inline void canboot_irq_restore(canboot_irqflags_t flags) {
 #if defined(__x86_64__)

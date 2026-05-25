@@ -16,6 +16,7 @@
 #include "hal/console.h"
 #include "hal/input.h"
 #include "hal/pci.h"
+#include "sync/cpu.h"
 
 void fb_clear(const struct canboot_fb *fb, uint32_t pixel);
 void fb_fill_rect(const struct canboot_fb *fb,
@@ -316,11 +317,27 @@ static void kmain_body(struct boot_info *bi) {
     put_dec(canboot_input_dropped_events());
     hal_console_write("\n");
 
-    /* Milestone 5: stand up the cooperative scheduler and run the
-     * picolibc + pthread self-test. */
+    /* Milestone 5: stand up the thread scheduler and run the picolibc +
+     * pthread self-test. */
     extern void canboot_pthread_init(void);
     extern void runtime_selftest(void);
     canboot_pthread_init();
+
+    /* M2: bring up the LAPIC periodic timer (100 Hz) as the preemption
+     * timebase, arm the IRQ path so newly created threads start with
+     * interrupts enabled, and enable interrupts on this (main) thread.
+     *
+     * Preemption itself is intentionally left OFF: the timer ticks and
+     * the IRQ + context-switch-from-interrupt path is exercised, but no
+     * forced thread switches happen until the runtime (picolibc malloc,
+     * lwIP, HAL, mbedTLS BIO) is made reentrant-safe in M5. Flip it on
+     * with canboot_sched_set_preemption(1) once that lands. */
+    extern void canboot_lapic_timer_setup(unsigned hz);
+    extern void canboot_sched_arm_irqs(void);
+    canboot_lapic_timer_setup(100);
+    canboot_sched_arm_irqs();
+    canboot_irq_enable();
+
     runtime_selftest();
 
     /* Milestone 6: lwIP + virtio-net + DHCP + UDP echo + HTTP GET. */

@@ -20,6 +20,8 @@ struct canboot_cpu {
     struct canboot_thread *idle;        /* per-CPU idle thread          */
     struct canboot_thread *rq_head;     /* run queue (FIFO) head        */
     struct canboot_thread *rq_tail;     /* run queue tail               */
+    unsigned               preempt_count; /* >0 => preemption deferred  */
+    volatile int           need_resched;  /* tick wanted a switch        */
     int                    id;
     int                    online;
 };

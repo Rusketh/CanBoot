@@ -14,6 +14,11 @@
 
 void canboot_idt_install(void);
 
+/* Install an interrupt gate for `vec` pointing at an asm stub. Used by
+ * the LAPIC timer bring-up (M2) to wire vectors 32+ after the base IDT
+ * is loaded. Present, ring 0, 64-bit interrupt gate. */
+void canboot_idt_set_gate(int vec, void (*handler)(void));
+
 /* Trap frame pushed by our exception stubs. */
 struct canboot_trap_frame {
     /* Pushed by stubs (saved general-purpose registers in
