@@ -98,7 +98,11 @@ set(CANBOOT_PORTABLE_SOURCES
     hal/display/display.c
     hal/input/input_queue.c
     hal/input/virtio_input.c
+    hal/net/net.c
     hal/net/virtio_net.c
+    hal/net/e1000.c
+    hal/net/rtl8139.c
+    hal/net/pcnet.c
     hal/virtio/virtio_pci.c
 
     # Networking + TLS port shims.

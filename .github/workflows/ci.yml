@@ -102,6 +102,59 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # Exercise each pluggable NIC driver by booting the BIOS smoke image with
+  # a different QEMU NIC model. The kernel's net layer probes virtio/e1000/
+  # rtl8139/pcnet and binds whichever the VM presents; the net markers
+  # (dhcp lease / udp echo / http get / net test ok) verify the driver.
+  nic-x86_64:
+    name: x86_64 nic ${{ matrix.nic }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        nic: [e1000, rtl8139, pcnet]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build gcc binutils \
+            meson python3 \
+            grub-pc-bin grub-common \
+            gnu-efi ovmf \
+            xorriso mtools dosfstools \
+            qemu-system-x86
+
+      - name: Configure
+        run: cmake -B build -G Ninja -DCANBOOT_ARCH=x86_64
+
+      - name: Build kernel ELF
+        run: cmake --build build --target canboot-x86_64 --verbose
+
+      - name: Build BIOS ISO
+        run: bash scripts/mkiso/bios.sh
+              build/canboot-x86_64.elf
+              build/canboot-x86_64-bios.iso
+
+      - name: QEMU smoke test (${{ matrix.nic }})
+        env:
+          NIC_MODEL: ${{ matrix.nic }}
+        run: bash tests/run-qemu-bios.sh build/canboot-x86_64-bios.iso
+
+      - name: Upload serial log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-nic-${{ matrix.nic }}-log
+          path: build/qemu-bios.log
+          if-no-files-found: ignore
+          retention-days: 7
+
   build-aarch64:
     name: aarch64 ${{ matrix.firmware }}
     runs-on: ubuntu-latest

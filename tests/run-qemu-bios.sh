@@ -70,7 +70,7 @@ qemu-system-x86_64 \
     -device virtio-blk-pci,drive=blk0 \
     $KBD_DEV $PTR_DEV $QMP_DEV \
     -netdev user,id=n0 \
-    -device virtio-net-pci,netdev=n0 \
+    -device "${NIC_MODEL:-virtio-net-pci},netdev=n0" \
     -audiodev "wav,id=snd,path=$AUDIO_WAV" \
     -device intel-hda \
     -device hda-duplex,audiodev=snd \
