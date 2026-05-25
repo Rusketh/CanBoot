@@ -12,6 +12,7 @@
 #include "hal/disk.h"
 #include "fs/fat32.h"
 #include "fs/iso9660.h"
+#include "canboot/env.h"
 
 /* Forward-declared rather than including <cando.h>; the public header
  * transitively pulls in cando's lib/sockutil.h which expects glibc's
@@ -52,6 +53,20 @@ void        canboot_cando_open_audiolib(CandoVM *vm);
 #include "hal/input.h"
 
 static int load_init_cdo(char *out, uint32_t out_size, uint32_t *out_len) {
+    /* Loader-provided boot file first: the UEFI loader reads /init.cdo off
+     * the boot volume into boot_info, so the runtime finds it even when the
+     * boot medium isn't enumerable by the HAL disk layer (ATAPI CD-ROM
+     * under VirtualBox UEFI). Falls through to disk scanning otherwise. */
+    const void *bf = NULL;
+    uint32_t bflen = 0;
+    if (canboot_bootfile_get("init.cdo", &bf, &bflen) && bflen > 0) {
+        uint32_t n = bflen < out_size ? bflen : out_size - 1;
+        memcpy(out, bf, n);
+        out[n] = '\0';
+        *out_len = n;
+        return 0;
+    }
+
     uint32_t nd = hal_disk_count();
     /* Prefer FAT32 on writable disk. */
     for (uint32_t i = 0; i < nd; i++) {

@@ -142,6 +142,82 @@ static void populate_mmap(EFI_MEMORY_DESCRIPTOR *map, UINTN map_size,
     bi->mmap_count = out_n;
 }
 
+/*
+ * Best-effort: read a small file off the boot volume into freshly
+ * AllocatePages'd memory and record it in boot_info. Any failure simply
+ * skips the file (the kernel then falls back to scanning real disks), so
+ * a problem here can never break the boot.
+ */
+static void load_one_boot_file(EFI_FILE_HANDLE root, CHAR16 *wname,
+                               const char *aname, struct boot_info *bi) {
+    if (bi->file_count >= CANBOOT_BOOT_FILE_MAX) return;
+
+    EFI_FILE_HANDLE fh = NULL;
+    EFI_STATUS s = uefi_call_wrapper(root->Open, 5, root, &fh, wname,
+                                     EFI_FILE_MODE_READ, 0);
+    if (EFI_ERROR(s) || fh == NULL) return;
+
+    UINT64 size = 0;
+    s = uefi_call_wrapper(fh->SetPosition, 2, fh, 0xFFFFFFFFFFFFFFFFULL);
+    if (!EFI_ERROR(s))
+        s = uefi_call_wrapper(fh->GetPosition, 2, fh, &size);
+    if (EFI_ERROR(s) || size == 0 || size > (16ull * 1024 * 1024)) {
+        uefi_call_wrapper(fh->Close, 1, fh);
+        return;
+    }
+    (void)uefi_call_wrapper(fh->SetPosition, 2, fh, 0);
+
+    UINTN pages = (UINTN)((size + 4095ull) / 4096ull);
+    EFI_PHYSICAL_ADDRESS addr = 0;
+    s = uefi_call_wrapper(BS->AllocatePages, 4,
+                          AllocateAnyPages, EfiLoaderData, pages, &addr);
+    if (EFI_ERROR(s) || addr == 0) {
+        uefi_call_wrapper(fh->Close, 1, fh);
+        return;
+    }
+
+    UINTN rd = (UINTN)size;
+    s = uefi_call_wrapper(fh->Read, 3, fh, &rd, (void *)(uintptr_t)addr);
+    uefi_call_wrapper(fh->Close, 1, fh);
+    if (EFI_ERROR(s) || rd == 0) {
+        uefi_call_wrapper(BS->FreePages, 2, addr, pages);
+        return;
+    }
+
+    struct canboot_boot_file *f = &bi->files[bi->file_count];
+    int i = 0;
+    for (; aname[i] && i < (int)CANBOOT_BOOT_FILE_NAME - 1; i++)
+        f->name[i] = aname[i];
+    f->name[i] = '\0';
+    f->addr = (uint64_t)addr;
+    f->size = (uint64_t)rd;
+    bi->file_count++;
+
+    serial_write_early("canboot: boot file loaded: ");
+    serial_write_early(aname);
+    serial_write_early("\n");
+}
+
+static void load_boot_files(EFI_HANDLE image, EFI_SYSTEM_TABLE *st,
+                            struct boot_info *bi) {
+    bi->file_count = 0;
+
+    EFI_GUID li_guid = LOADED_IMAGE_PROTOCOL;
+    EFI_LOADED_IMAGE *li = NULL;
+    EFI_STATUS s = uefi_call_wrapper(st->BootServices->HandleProtocol, 3,
+                                     image, &li_guid, (void **)&li);
+    if (EFI_ERROR(s) || li == NULL || li->DeviceHandle == NULL) return;
+
+    EFI_FILE_HANDLE root = LibOpenRoot(li->DeviceHandle);
+    if (root == NULL) return;
+
+    load_one_boot_file(root, L"init.cdo",  "init.cdo",  bi);
+    load_one_boot_file(root, L"probe.png", "probe.png", bi);
+    load_one_boot_file(root, L"gui.cdo",   "gui.cdo",   bi);
+
+    uefi_call_wrapper(root->Close, 1, root);
+}
+
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st) {
     InitializeLib(image, st);
 
@@ -156,6 +232,13 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st) {
 
     populate_fb(st, &g_boot_info);
     populate_acpi(st, &g_boot_info);
+
+    /* Read /init.cdo (+ probe.png, gui.cdo) off the boot volume now, while
+     * BootServices + the firmware filesystem are still available. Done
+     * before the memory map is fetched so the AllocatePages it does are
+     * reflected in map_key. Best-effort: failures just leave file_count
+     * at 0 and the kernel falls back to scanning real disks. */
+    load_boot_files(image, st, &g_boot_info);
 
     /* Acquire memory map: probe, allocate, fetch. */
     UINTN map_size = 0, map_key = 0, desc_size = 0;
