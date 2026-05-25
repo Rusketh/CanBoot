@@ -268,6 +268,8 @@ PY
         check 'selftest: session resumption ok'
         check 'selftest: tls test ok'
         check 'selftest: init.cdo marker ok'
+        check 'selftest: fat32 subdir tree ok'
+
         check 'selftest: disk test ok'
         check 'selftest: cando_open ok'
         check 'selftest: cando_openlibs ok'

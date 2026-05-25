@@ -34,6 +34,96 @@ static void hex_dump_first(const char *what, const uint8_t *buf, size_t n) {
     printf("'\n");
 }
 
+struct subdir_acc { int saw_deep; int saw_hello; int count; };
+static bool subdir_list_cb(const char *name, uint32_t size, bool is_dir,
+                           void *user) {
+    (void)size;
+    struct subdir_acc *a = user;
+    a->count++;
+    if (is_dir && strcmp(name, "DEEP") == 0) a->saw_deep = 1;
+    if (!is_dir && strcmp(name, "HELLO.TXT") == 0) a->saw_hello = 1;
+    return true;
+}
+
+/* Exercise the FAT32 subdirectory engine end to end on a writable
+ * volume: build a tree, write/read a file inside it, list it, rename
+ * and delete, then tear the tree back down. */
+static void fat32_subdir_test(struct canboot_fat32 *fs) {
+    static const char payload[] = "subdir-payload-2026";
+    char buf[64];
+    uint32_t got = 0;
+
+    /* Clean up any leftovers from a previous boot of the same image. */
+    canboot_fat32_unlink_path(fs, "/sub/deep/renamed.txt");
+    canboot_fat32_unlink_path(fs, "/sub/deep/hello.txt");
+    canboot_fat32_rmdir(fs, "/sub/deep");
+    canboot_fat32_rmdir(fs, "/sub");
+
+    if (canboot_fat32_mkdir(fs, "/sub") != 0) {
+        printf("selftest: FAIL fat32 mkdir /sub\n"); return;
+    }
+    if (canboot_fat32_mkdir(fs, "/sub/deep") != 0) {
+        printf("selftest: FAIL fat32 mkdir /sub/deep\n"); return;
+    }
+    if (canboot_fat32_write_path(fs, "/sub/deep/hello.txt",
+                                 payload, sizeof(payload) - 1) != 0) {
+        printf("selftest: FAIL fat32 write /sub/deep/hello.txt\n"); return;
+    }
+    got = 0;
+    if (canboot_fat32_read_path(fs, "/sub/deep/hello.txt",
+                                buf, sizeof(buf) - 1, &got) <= 0 ||
+        got != sizeof(payload) - 1 ||
+        memcmp(buf, payload, sizeof(payload) - 1) != 0) {
+        printf("selftest: FAIL fat32 read-back /sub/deep/hello.txt got=%u\n", got);
+        return;
+    }
+
+    struct subdir_acc a1 = {0};
+    canboot_fat32_list_path(fs, "/sub", subdir_list_cb, &a1);
+    struct subdir_acc a2 = {0};
+    canboot_fat32_list_path(fs, "/sub/deep", subdir_list_cb, &a2);
+    if (!a1.saw_deep || !a2.saw_hello) {
+        printf("selftest: FAIL fat32 list (deep=%d hello=%d)\n",
+               a1.saw_deep, a2.saw_hello);
+        return;
+    }
+
+    if (canboot_fat32_rename(fs, "/sub/deep/hello.txt",
+                             "/sub/deep/renamed.txt") != 0) {
+        printf("selftest: FAIL fat32 rename\n"); return;
+    }
+    got = 0;
+    if (canboot_fat32_read_path(fs, "/sub/deep/renamed.txt",
+                                buf, sizeof(buf) - 1, &got) <= 0 ||
+        memcmp(buf, payload, sizeof(payload) - 1) != 0) {
+        printf("selftest: FAIL fat32 read renamed\n"); return;
+    }
+    if (canboot_fat32_read_path(fs, "/sub/deep/hello.txt", buf, sizeof(buf), &got) > 0) {
+        printf("selftest: FAIL fat32 old name still present after rename\n"); return;
+    }
+
+    if (canboot_fat32_unlink_path(fs, "/sub/deep/renamed.txt") != 0) {
+        printf("selftest: FAIL fat32 unlink renamed\n"); return;
+    }
+    if (canboot_fat32_rmdir(fs, "/sub/deep") != 0) {
+        printf("selftest: FAIL fat32 rmdir /sub/deep\n"); return;
+    }
+    if (canboot_fat32_rmdir(fs, "/sub") != 0) {
+        printf("selftest: FAIL fat32 rmdir /sub\n"); return;
+    }
+    /* rmdir must refuse a non-empty directory: rebuild one level and check. */
+    canboot_fat32_mkdir(fs, "/sub");
+    canboot_fat32_write_path(fs, "/sub/x.txt", "x", 1);
+    if (canboot_fat32_rmdir(fs, "/sub") == 0) {
+        printf("selftest: FAIL fat32 rmdir removed a non-empty dir\n"); return;
+    }
+    canboot_fat32_unlink_path(fs, "/sub/x.txt");
+    canboot_fat32_rmdir(fs, "/sub");
+
+    printf("selftest: fat32 subdir tree ok (list entries: sub=%d deep=%d)\n",
+           a1.count, a2.count);
+}
+
 static bool try_fat32(struct canboot_disk *d, char *out, uint32_t *out_size,
                       bool *out_writable, const char **out_disk) {
     struct canboot_fat32 fs;
@@ -71,6 +161,8 @@ static bool try_fat32(struct canboot_disk *d, char *out, uint32_t *out_size,
         } else {
             printf("selftest: FAIL fat32 write-probe\n");
         }
+
+        fat32_subdir_test(&fs);
     }
     return true;
 }
