@@ -324,3 +324,150 @@ print("cando audio.isPlaying after stop =", audio.isPlaying(src));
 print("cando audio.activeCount after stop =", audio.activeCount());
 audio.release(src);
 print("cando audio libs end");
+
+// ---- Test suite: deterministic assertions with a pass/fail tally -----
+// Re-checks values the libraries above already produced, but as real
+// asserts so the boot doubles as a self-test you can read off the serial
+// log. Wrapped in TRY so a single bad call can never abort init.cdo.
+// Network/disk results are intentionally excluded — they depend on the
+// host's sidecars/attached disks; only deterministic, host-independent
+// results are asserted here.
+print("cando test suite begin");
+VAR TS_pass = 0;
+VAR TS_fail = 0;
+VAR ts_eq = FUNCTION(name, got, want) {
+    IF (got == want) {
+        TS_pass = TS_pass + 1;
+    } ELSE {
+        TS_fail = TS_fail + 1;
+        print("cando test FAIL:", name, "got", got, "want", want);
+    }
+};
+VAR ts_true = FUNCTION(name, cond) {
+    IF (cond) {
+        TS_pass = TS_pass + 1;
+    } ELSE {
+        TS_fail = TS_fail + 1;
+        print("cando test FAIL:", name, "(false)");
+    }
+};
+TRY {
+    // crypto: known vectors
+    ts_eq("sha256(empty)", crypto.sha256Hex(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    ts_eq("hmacSha256", crypto.hmacSha256Hex("key", "The quick brown fox jumps over the lazy dog"), "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8");
+    // codecs: round-trips
+    ts_eq("hex roundtrip", hex.decode(hex.encode("canboot")), "canboot");
+    ts_eq("base64 roundtrip", base64.decode(base64.encode("canboot")), "canboot");
+    ts_eq("hex.encode", hex.encode("canboot"), "63616e626f6f74");
+    // fmt + arithmetic + strings
+    ts_eq("fmt.sprintf", fmt.sprintf("hex=%x dec=%d str=%s", 4660, 42, "hi"), "hex=1234 dec=42 str=hi");
+    ts_eq("arithmetic", 6 * 7, 42);
+    ts_eq("string concat", "ab" + "cd", "abcd");
+    // url parsing
+    ts_eq("url.scheme", url.scheme("https://10.0.2.2:8443/health"), "https");
+    ts_eq("url.host", url.host("https://10.0.2.2:8443/health"), "10.0.2.2");
+    // environment sanity
+    ts_true("fb width > 0", env.fbWidth() > 0);
+    ts_true("fb height > 0", env.fbHeight() > 0);
+    ts_true("disk present", disk.count() >= 1);
+    // random in range
+    VAR ts_r = random.int(1, 100);
+    ts_true("random.int range", ts_r >= 1 && ts_r <= 100);
+    // clock is monotonic
+    VAR ts_t1 = time.ms();
+    VAR ts_t2 = time.ms();
+    ts_true("time monotonic", ts_t2 >= ts_t1);
+} CATCH (e) {
+    TS_fail = TS_fail + 1;
+    print("cando test suite threw:", e);
+}
+print("cando test suite:", TS_pass, "passed", TS_fail, "failed");
+IF (TS_fail == 0) {
+    print("cando test suite ok");
+} ELSE {
+    print("cando test suite FAILED");
+}
+print("cando test suite end");
+
+// ---- GUI showcase: include the toolkit and paint a real window -------
+// modules/gui/gui.cdo is staged next to init.cdo on the boot media. We
+// load it with include() (now backed by the HAL filesystem), build a
+// small tabbed window summarising the run, and render a bounded animated
+// loop. We deliberately do NOT call GUI.run() (it blocks forever); the
+// whole block is guarded so a missing module just logs and moves on.
+print("cando gui showcase begin");
+TRY {
+    VAR GUI = include("/gui.cdo");
+    print("cando gui include ok");
+
+    VAR win = GUI.Create("Frame");
+    win:SetSize(460, 300);
+    win:Center();
+    win:SetTitle("CanBoot Self-Test");
+    win:MakePopup();
+
+    VAR sheet = GUI.Create("PropertySheet", win);
+    sheet:Dock(GUI.FILL);
+
+    // Page 1: run summary + an interactive button.
+    VAR page1 = GUI.Create("Panel");
+    page1:DockPadding(8, 8, 8, 8);
+    sheet:AddSheet("Status", page1);
+
+    VAR title = GUI.Create("Label", page1);
+    title:Dock(GUI.TOP);
+    title:SetText("CanBoot is alive. All libraries exercised.");
+
+    VAR result = GUI.Create("Label", page1);
+    result:Dock(GUI.TOP);
+    result:DockMargin(0, 4, 0, 0);
+    result:SetText("Tests: " + toString(TS_pass) + " passed, " + toString(TS_fail) + " failed");
+
+    VAR prog = GUI.Create("Progress", page1);
+    prog:Dock(GUI.TOP);
+    prog:DockMargin(0, 8, 0, 0);
+    prog:SetFraction(0);
+
+    VAR clicks = GUI.Create("Label", page1);
+    clicks:Dock(GUI.BOTTOM);
+    clicks:SetText("Press Enter / click the button.");
+
+    VAR btn = GUI.Create("Button", page1);
+    btn:Dock(GUI.BOTTOM);
+    btn:DockMargin(0, 0, 0, 6);
+    btn:SetText("Click me");
+    btn._n = 0;
+    btn.DoClick = FUNCTION(self) {
+        self._n = self._n + 1;
+        clicks:SetText("Clicked " + toString(self._n) + " time(s)");
+    };
+
+    // Page 2: a live list of the attached block devices.
+    VAR page2 = GUI.Create("Panel");
+    page2:DockPadding(8, 8, 8, 8);
+    sheet:AddSheet("Disks", page2);
+    VAR list = GUI.Create("ListView", page2);
+    list:Dock(GUI.FILL);
+    list:AddColumn("Disk", 200);
+    list:AddColumn("Blocks", 140);
+    VAR di = 0;
+    WHILE (di < disk.count()) {
+        list:AddLine(disk.name(di), toString(disk.blocks(di)));
+        di = di + 1;
+    }
+
+    // Bounded, animated render loop (never GUI.run() — it blocks).
+    VAR gframes = 0;
+    VAR gdeadline = time.ms() + 2500;
+    WHILE (time.ms() < gdeadline) {
+        gframes = gframes + 1;
+        prog:SetFraction((gframes % 100) * 0.01);
+        GUI.pump();
+        GUI.frame();
+    }
+    print("cando gui frames =", gframes);
+    print("cando gui showcase ok");
+} CATCH (e) {
+    print("cando gui showcase skipped:", e);
+}
+print("cando gui showcase end");

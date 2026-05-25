@@ -27,6 +27,11 @@ INIT_CDO="$ROOT_DIR/initramfs/init.cdo"
 if [ -f "$INIT_CDO" ]; then
     cp "$INIT_CDO" "$WORKDIR/init.cdo"
 fi
+# GUI toolkit module: init.cdo include()s it for the on-screen showcase.
+GUI_CDO="$ROOT_DIR/modules/gui/gui.cdo"
+if [ -f "$GUI_CDO" ]; then
+    cp "$GUI_CDO" "$WORKDIR/gui.cdo"
+fi
 PROBE_PNG="$ROOT_DIR/initramfs/probe.png"
 if [ -f "$PROBE_PNG" ]; then
     cp "$PROBE_PNG" "$WORKDIR/probe.png"

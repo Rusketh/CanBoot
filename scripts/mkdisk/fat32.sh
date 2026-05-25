@@ -20,6 +20,12 @@ truncate -s "${SIZE_MB}M" "$OUT"
 mkfs.vfat -F 32 -n CANBOOT "$OUT" >/dev/null
 mcopy -i "$OUT" "$INIT_CDO" ::/init.cdo
 
+# GUI toolkit module: init.cdo include()s it for the on-screen showcase.
+GUI_CDO="$ROOT/modules/gui/gui.cdo"
+if [ -f "$GUI_CDO" ]; then
+    mcopy -i "$OUT" "$GUI_CDO" ::/gui.cdo
+fi
+
 PROBE_PNG="$ROOT/initramfs/probe.png"
 if [ -f "$PROBE_PNG" ]; then
     mcopy -i "$OUT" "$PROBE_PNG" ::/probe.png

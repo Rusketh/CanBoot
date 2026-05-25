@@ -62,6 +62,11 @@ INIT_CDO="$RAMFS_DIR/init.cdo"
 if [ -f "$INIT_CDO" ]; then
     mcopy -i "$ESP_IMG" "$INIT_CDO" ::/init.cdo
 fi
+# GUI toolkit module: init.cdo include()s it for the on-screen showcase.
+GUI_CDO="$RAMFS_DIR/../modules/gui/gui.cdo"
+if [ -f "$GUI_CDO" ]; then
+    mcopy -i "$ESP_IMG" "$GUI_CDO" ::/gui.cdo
+fi
 
 # --- Build the NTFS image ---
 NTFS_IMG="$WORK/ntfs.img"
