@@ -57,8 +57,8 @@ HTTPS_PID=$!
 # 10.0.2.2:53. Answers canboot.test -> 10.0.2.2 for the DNS smoke check.
 # Port 53 is privileged; CI runs the sidecar as a non-root user, so
 # lower the unprivileged-port floor (no-op as root, sudo in CI).
-sysctl -w net.ipv4.ip_unprivileged_port_start=53 >/dev/null 2>&1 \
-    || sudo sysctl -w net.ipv4.ip_unprivileged_port_start=53 >/dev/null 2>&1 || true
+sudo -n sysctl -w net.ipv4.ip_unprivileged_port_start=53 >/dev/null 2>&1 \
+    || sysctl -w net.ipv4.ip_unprivileged_port_start=53 >/dev/null 2>&1 || true
 python3 "$ROOT/tests/sidecars/dns_fixed.py" 127.0.0.1 53 canboot.test 10.0.2.2 >"$WORK/dns.log" 2>&1 &
 DNS_PID=$!
 sleep 0.5
