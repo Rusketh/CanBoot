@@ -98,6 +98,20 @@ Remove the file at `path`. Returns `true` if a file was removed or
 
 Doesn't recurse into directories.
 
+### `fs.list(disk, part) -> string`
+
+Newline-separated names of every entry in the partition's root
+directory. Empty string if the partition is empty or the FS type
+isn't listable.
+
+Currently lists FAT32 (whole-disk) and NTFS roots. ext4 + ISO9660
+directory listing isn't wired into this call yet — they return an
+empty string.
+
+```cdo
+print(fs.list(1, 0));
+```
+
 ## Format
 
 ### `fs.mkfs(disk, part, type, label) -> bool`

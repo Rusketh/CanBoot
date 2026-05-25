@@ -33,6 +33,19 @@ Uniform random integer in `[min, max]` (both inclusive).
 random.int(1, 100);
 ```
 
+### `random.float() -> number`
+
+Uniform random float in `[0.0, 1.0)`. Built from the high 53 bits of
+a 64-bit draw, so it's full double precision.
+
+```cdo
+random.float();   // e.g. 0.41372...
+```
+
+(Note: printing a float directly shows `*float*` because picolibc is
+built with `format-default=integer`. The value is real — multiply
+into an integer range, or use `random.int`, when you need to log it.)
+
 ### `random.uuid() -> string`
 
 RFC 4122 v4 UUID with hyphens, 36 characters.

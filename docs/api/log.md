@@ -24,13 +24,12 @@ Log at the given level. Output format:
 
 The `[NNNNN]` is `time.ms()` at log time, padded to 10 columns.
 
-### `log.getLevel() -> string`
-
-Currently active level name.
-
 ## Behaviour
 
 - Default level is `"debug"` — everything is logged.
 - Levels are case-insensitive on `setLevel`.
 - The full `time.ms()` value is stamped, so logs can be cross-referenced
   against other prints / kernel output without separate sequencing.
+- There's no `getLevel` — set it and forget it. If you need to track
+  the active level, keep it in a script variable alongside the
+  `setLevel` call.
