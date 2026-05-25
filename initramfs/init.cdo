@@ -437,52 +437,58 @@ IF (TS_fail == 0) {
 }
 print("cando test suite end");
 
-// ---- Display showcase: a results dashboard painted via display.* -----
-// NOTE: the modules/gui/gui.cdo widget toolkit currently faults the
-// cando VM when include()d on this build (a #GP from the VM executing the
-// module — a hardware fault TRY/CATCH cannot trap). Until that VM issue is
-// resolved we paint the showcase directly through the display lib, which
-// is the same proven path the milestone-11 block above uses. The HAL-
-// backed include()/fopen support added in this branch stays in place so
-// the toolkit drops straight in once the VM bug is fixed.
-// IMPORTANT: do NOT display.clear() here. The kernel samples the
-// milestone-11 rects (painted near the top of the screen, y < 210) AFTER
-// init.cdo returns to assert "display test ok". We paint the dashboard in
-// the lower region only (y >= DY) so those probe pixels survive.
+// ---- Display showcase: a results dashboard painted via the gui.cdo
+// widget toolkit, include()d off the boot volume. The realpath stack
+// overflow that used to fault the VM on include() is fixed, so the
+// toolkit drops straight in: GUI.frame() lays out + paints the
+// retained-mode widget tree through the display lib.
 print("cando display showcase begin");
-VAR SW = env.fbWidth();
-VAR SH = env.fbHeight();
-VAR DY = 240;
-display.fillRect(0, DY, SW, SH - DY, 1052688);                // 0x101020 panel bg
-display.fillRect(0, DY, SW, 30, 3158064);                     // 0x303030 header
-display.text(16, DY + 8, "CanBoot - booted straight into CanDo", 16777215, 3158064);
-display.text(16, DY + 48, fmt.sprintf("self-test suite: %d passed, %d failed", TS_pass, TS_fail), 65280, 1052688);
-display.text(16, DY + 68, fmt.sprintf("disks: %d    framebuffer: %dx%d", disk.count(), SW, SH), 16777215, 1052688);
-display.text(16, DY + 94, "libraries exercised:", 16777215, 1052688);
-display.text(16, DY + 110, "display input time file net tls crypto", 11184810, 1052688);
-display.text(16, DY + 126, "hex base64 random url http https disk pci", 11184810, 1052688);
-display.text(16, DY + 142, "fb fmt partition fs image audio log env", 11184810, 1052688);
+VAR GUI = include("/gui.cdo");
+print("cando gui included ok ver", GUI.version);
 
-// A row of colour swatches.
-display.fillRect(16,  DY + 170, 44, 44, 16711680);            // red
-display.fillRect(68,  DY + 170, 44, 44, 16753920);            // orange
-display.fillRect(120, DY + 170, 44, 44, 16776960);            // yellow
-display.fillRect(172, DY + 170, 44, 44, 65280);               // green
-display.fillRect(224, DY + 170, 44, 44, 65535);               // cyan
-display.fillRect(276, DY + 170, 44, 44, 255);                 // blue
-display.fillRect(328, DY + 170, 44, 44, 8388863);             // violet
-display.fillRect(380, DY + 170, 44, 44, 16711935);            // magenta
+VAR frame = GUI.Create("Frame");
+frame:SetSize(560, 320);
+frame:Center();
+frame:SetTitle("CanBoot - booted straight into CanDo");
+frame:MakePopup();
 
-// A short animated progress sweep, then a final frame.
-VAR f0 = 0;
-VAR dl = time.ms() + 1500;
-WHILE (time.ms() < dl) {
-    f0 = f0 + 1;
-    VAR pw = (f0 % 100) * 5;
-    display.fillRect(16, DY + 230, 500, 24, 3158064);         // track
-    display.fillRect(16, DY + 230, pw, 24, 5635925);          // fill
-    fb.flush();
-}
-display.text(16, DY + 264, "self-test complete - full detail on the serial log", 16777215, 1052688);
+VAR panel = GUI.Create("Panel", frame);
+panel:Dock(GUI.FILL);
+panel:DockPadding(12, 12, 12, 12);
+
+VAR l1 = GUI.Create("Label", panel);
+l1:Dock(GUI.TOP);
+l1:SetText(fmt.sprintf("self-test suite: %d passed, %d failed", TS_pass, TS_fail));
+VAR l2 = GUI.Create("Label", panel);
+l2:Dock(GUI.TOP);
+l2:SetText(fmt.sprintf("disks: %d   framebuffer: %dx%d",
+           disk.count(), env.fbWidth(), env.fbHeight()));
+VAR l3 = GUI.Create("Label", panel);
+l3:Dock(GUI.TOP);
+l3:SetText("libraries: display input time file net tls crypto");
+VAR l4 = GUI.Create("Label", panel);
+l4:Dock(GUI.TOP);
+l4:SetText("hex base64 random url http https disk pci fb fmt fs image audio");
+
+VAR prog = GUI.Create("Progress", panel);
+prog:Dock(GUI.BOTTOM);
+prog:SetFraction(1.0);
+
+VAR ok = GUI.Create("Button", panel);
+ok:Dock(GUI.BOTTOM);
+ok:DockMargin(0, 8, 0, 8);
+ok:SetText("self-test complete");
+
+// One layout + paint pass through the toolkit (non-blocking; GUI.run()
+// would enter the interactive event loop).
+GUI.frame();
+
+// GUI.frame() clears the whole framebuffer to the desktop colour, so
+// re-stamp the milestone-11 probe rects the kernel samples (at y < 210)
+// after init.cdo returns to assert "display test ok".
+display.fillRect(0,   0,   100, 100, 16711680);   // 0xFF0000 red
+display.fillRect(150, 50,  100, 100, 65280);      // 0x00FF00 green
+display.fillRect(300, 100, 100, 100, 255);        // 0x0000FF blue
 fb.flush();
+print("cando gui dashboard painted");
 print("cando display showcase end");
