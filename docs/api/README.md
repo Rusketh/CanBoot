@@ -23,7 +23,7 @@ underlying HAL / runtime they sit on top of is documented in
 
 | Library | What it does |
 |---------|--------------|
-| [derma](derma.md) | Garry's Mod Derma-style retained-mode widget toolkit (`include("/derma.cdo")`) over `display` + `input` |
+| [gui](gui.md) | Retained-mode widget toolkit (`include("/gui.cdo")`) over `display` + `input` |
 
 ## Storage
 

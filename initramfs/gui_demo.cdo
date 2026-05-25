@@ -1,0 +1,122 @@
+// gui_demo.cdo -- a showcase for the gui.cdo widget toolkit.
+//
+// On a booted CanBoot image, make this your /init.cdo (or `include` it from
+// one). It draws a window with tabbed pages exercising most of the widget
+// set, then enters the event loop.
+//
+//   Cursor : arrow keys        Click  : Enter
+//   Focus  : Tab               Cancel : Esc
+//   Typing goes to the focused text field; drag a window by clicking its
+//   title bar (then move with arrows, Enter/Esc to drop).
+
+VAR GUI = include("./gui.cdo");
+
+VAR frame = GUI.Create("Frame");
+frame:SetSize(440, 300);
+frame:Center();
+frame:SetTitle("CanBoot GUI Demo");
+frame:MakePopup();
+
+VAR sheet = GUI.Create("PropertySheet", frame);
+sheet:Dock(GUI.FILL);
+
+// ---- Page 1: basic controls ------------------------------------------
+VAR page1 = GUI.Create("Panel");
+page1:DockPadding(8, 8, 8, 8);
+sheet:AddSheet("Controls", page1);
+
+VAR status = GUI.Create("Label", page1);
+status:Dock(GUI.BOTTOM);
+status:SetText("Ready.");
+
+VAR btn = GUI.Create("Button", page1);
+btn:Dock(GUI.TOP);
+btn:DockMargin(0, 0, 0, 6);
+btn:SetText("Click me");
+btn._n = 0;
+btn.DoClick = FUNCTION(self) {
+    self._n = self._n + 1;
+    status:SetText("Button clicked " + toString(self._n) + " time(s)");
+};
+
+VAR chk = GUI.Create("CheckBoxLabel", page1);
+chk:Dock(GUI.TOP);
+chk:DockMargin(0, 0, 0, 6);
+chk:SetText("Enable feature");
+chk.OnChange = FUNCTION(self, on) {
+    status:SetText(on ? "Feature enabled" : "Feature disabled");
+};
+
+VAR entry = GUI.Create("TextEntry", page1);
+entry:Dock(GUI.TOP);
+entry:DockMargin(0, 0, 0, 6);
+entry:SetValue("single line");
+entry.OnEnter = FUNCTION(self, val) { status:SetText("You entered: " + val); };
+
+VAR combo = GUI.Create("ComboBox", page1);
+combo:Dock(GUI.TOP);
+combo:DockMargin(0, 0, 0, 6);
+combo:AddChoice("Red", 1);
+combo:AddChoice("Green", 2);
+combo:AddChoice("Blue", 3);
+combo.OnSelect = FUNCTION(self, idx, text, data) { status:SetText("Picked " + text); };
+
+// ---- Page 2: multi-line textbox --------------------------------------
+VAR page2 = GUI.Create("Panel");
+page2:DockPadding(8, 8, 8, 8);
+sheet:AddSheet("Notes", page2);
+
+VAR hint = GUI.Create("Label", page2);
+hint:Dock(GUI.TOP);
+hint:SetText("Multi-line textbox (Enter inserts a newline):");
+
+VAR box = GUI.Create("TextBox", page2);
+box:Dock(GUI.FILL);
+box:SetValue("Type here." + GUI.newline() + "Enter makes new lines." + GUI.newline() + "Arrows move the caret.");
+
+// ---- Page 3: sliders + progress --------------------------------------
+VAR page3 = GUI.Create("Panel");
+page3:DockPadding(8, 8, 8, 8);
+sheet:AddSheet("Sliders", page3);
+
+VAR prog = GUI.Create("Progress", page3);
+prog:Dock(GUI.BOTTOM);
+prog:SetFraction(0.25);
+
+VAR ns = GUI.Create("NumSlider", page3);
+ns:Dock(GUI.TOP);
+ns:DockMargin(0, 0, 0, 8);
+ns:SetText("Amount");
+ns:SetMinMax(0, 100);
+ns:SetDecimals(0);
+ns:SetValue(25);
+ns.OnValueChanged = FUNCTION(self, v) { prog:SetFraction(v / 100); };
+
+VAR gain = GUI.Create("NumSlider", page3);
+gain:Dock(GUI.TOP);
+gain:SetText("Gain");
+gain:SetMinMax(0, 10);
+gain:SetDecimals(2);
+gain:SetValue(5);
+
+// ---- Page 4: list + colour -------------------------------------------
+VAR page4 = GUI.Create("Panel");
+page4:DockPadding(8, 8, 8, 8);
+sheet:AddSheet("Data", page4);
+
+VAR mixer = GUI.Create("ColorMixer", page4);
+mixer:Dock(GUI.BOTTOM);
+mixer:DockMargin(0, 8, 0, 0);
+
+VAR list = GUI.Create("ListView", page4);
+list:Dock(GUI.FILL);
+list:AddColumn("Disk", 90);
+list:AddColumn("Size", 70);
+list:AddLine("disk0", "32G");
+list:AddLine("disk1", "1T");
+list:AddLine("disk2", "500G");
+list.OnRowSelected = FUNCTION(self, row, line) {
+    status:SetText("Selected " + toString(line.cols[0]));
+};
+
+GUI.run();

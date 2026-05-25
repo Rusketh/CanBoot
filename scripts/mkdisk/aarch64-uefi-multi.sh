@@ -62,8 +62,8 @@ INIT_CDO="$RAMFS_DIR/init.cdo"
 if [ -f "$INIT_CDO" ]; then
     mcopy -i "$ESP_IMG" "$INIT_CDO" ::/init.cdo
 fi
-# Derma GUI library + demo so booted scripts can include("/derma.cdo").
-for f in derma.cdo derma_demo.cdo; do
+# GUI toolkit + demo so booted scripts can include("/gui.cdo").
+for f in gui.cdo gui_demo.cdo; do
     if [ -f "$RAMFS_DIR/$f" ]; then
         mcopy -i "$ESP_IMG" "$RAMFS_DIR/$f" "::/$f"
     fi

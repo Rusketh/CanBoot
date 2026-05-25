@@ -31,8 +31,8 @@ PROBE_PNG="$ROOT_DIR/initramfs/probe.png"
 if [ -f "$PROBE_PNG" ]; then
     cp "$PROBE_PNG" "$WORKDIR/probe.png"
 fi
-# Derma GUI library + demo so booted scripts can include("/derma.cdo").
-for f in derma.cdo derma_demo.cdo; do
+# GUI toolkit + demo so booted scripts can include("/gui.cdo").
+for f in gui.cdo gui_demo.cdo; do
     if [ -f "$ROOT_DIR/initramfs/$f" ]; then
         cp "$ROOT_DIR/initramfs/$f" "$WORKDIR/$f"
     fi
