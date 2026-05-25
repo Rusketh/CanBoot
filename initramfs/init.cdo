@@ -397,28 +397,33 @@ print("cando test suite end");
 // is the same proven path the milestone-11 block above uses. The HAL-
 // backed include()/fopen support added in this branch stays in place so
 // the toolkit drops straight in once the VM bug is fixed.
+// IMPORTANT: do NOT display.clear() here. The kernel samples the
+// milestone-11 rects (painted near the top of the screen, y < 210) AFTER
+// init.cdo returns to assert "display test ok". We paint the dashboard in
+// the lower region only (y >= DY) so those probe pixels survive.
 print("cando display showcase begin");
 VAR SW = env.fbWidth();
 VAR SH = env.fbHeight();
-display.clear(1052688);                                       // 0x101020 bg
-display.fillRect(0, 0, SW, 44, 3158064);                      // 0x303030 header
-display.text(16, 16, "CanBoot - boot straight into CanDo", 16777215, 3158064);
-display.text(16, 70, fmt.sprintf("self-test suite: %d passed, %d failed", TS_pass, TS_fail), 65280, 1052688);
-display.text(16, 90, fmt.sprintf("disks: %d    framebuffer: %dx%d", disk.count(), SW, SH), 16777215, 1052688);
-display.text(16, 116, "libraries exercised:", 16777215, 1052688);
-display.text(16, 132, "display input time file net tls crypto", 11184810, 1052688);
-display.text(16, 148, "hex base64 random url http https disk pci", 11184810, 1052688);
-display.text(16, 164, "fb fmt partition fs image audio log env", 11184810, 1052688);
+VAR DY = 240;
+display.fillRect(0, DY, SW, SH - DY, 1052688);                // 0x101020 panel bg
+display.fillRect(0, DY, SW, 30, 3158064);                     // 0x303030 header
+display.text(16, DY + 8, "CanBoot - booted straight into CanDo", 16777215, 3158064);
+display.text(16, DY + 48, fmt.sprintf("self-test suite: %d passed, %d failed", TS_pass, TS_fail), 65280, 1052688);
+display.text(16, DY + 68, fmt.sprintf("disks: %d    framebuffer: %dx%d", disk.count(), SW, SH), 16777215, 1052688);
+display.text(16, DY + 94, "libraries exercised:", 16777215, 1052688);
+display.text(16, DY + 110, "display input time file net tls crypto", 11184810, 1052688);
+display.text(16, DY + 126, "hex base64 random url http https disk pci", 11184810, 1052688);
+display.text(16, DY + 142, "fb fmt partition fs image audio log env", 11184810, 1052688);
 
-// A row of colour swatches (proves arbitrary fills land on the BAR).
-display.fillRect(16,  196, 44, 44, 16711680);                 // red
-display.fillRect(68,  196, 44, 44, 16753920);                 // orange
-display.fillRect(120, 196, 44, 44, 16776960);                 // yellow
-display.fillRect(172, 196, 44, 44, 65280);                    // green
-display.fillRect(224, 196, 44, 44, 65535);                    // cyan
-display.fillRect(276, 196, 44, 44, 255);                      // blue
-display.fillRect(328, 196, 44, 44, 8388863);                  // violet
-display.fillRect(380, 196, 44, 44, 16711935);                 // magenta
+// A row of colour swatches.
+display.fillRect(16,  DY + 170, 44, 44, 16711680);            // red
+display.fillRect(68,  DY + 170, 44, 44, 16753920);            // orange
+display.fillRect(120, DY + 170, 44, 44, 16776960);            // yellow
+display.fillRect(172, DY + 170, 44, 44, 65280);               // green
+display.fillRect(224, DY + 170, 44, 44, 65535);               // cyan
+display.fillRect(276, DY + 170, 44, 44, 255);                 // blue
+display.fillRect(328, DY + 170, 44, 44, 8388863);             // violet
+display.fillRect(380, DY + 170, 44, 44, 16711935);            // magenta
 
 // A short animated progress sweep, then a final frame.
 VAR f0 = 0;
@@ -426,10 +431,10 @@ VAR dl = time.ms() + 1500;
 WHILE (time.ms() < dl) {
     f0 = f0 + 1;
     VAR pw = (f0 % 100) * 5;
-    display.fillRect(16, 260, 500, 24, 3158064);              // track
-    display.fillRect(16, 260, pw, 24, 5635925);               // fill
+    display.fillRect(16, DY + 230, 500, 24, 3158064);         // track
+    display.fillRect(16, DY + 230, pw, 24, 5635925);          // fill
     fb.flush();
 }
-display.text(16, 300, "self-test complete - full detail on the serial log", 16777215, 1052688);
+display.text(16, DY + 264, "self-test complete - full detail on the serial log", 16777215, 1052688);
 fb.flush();
 print("cando display showcase end");
