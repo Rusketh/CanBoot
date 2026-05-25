@@ -74,11 +74,6 @@ static uint32_t g_stat_tx_kicked;
 static uint32_t g_stat_rx_done;
 static uint32_t g_stat_tx_done;
 
-uint32_t canboot_virtio_net_stat_tx_calls(void)  { return g_stat_tx_calls; }
-uint32_t canboot_virtio_net_stat_tx_kicked(void) { return g_stat_tx_kicked; }
-uint32_t canboot_virtio_net_stat_rx_done(void)   { return g_stat_rx_done; }
-uint32_t canboot_virtio_net_stat_tx_done(void)   { return g_stat_tx_done; }
-
 static err_t virtio_net_linkout(struct netif *nif, struct pbuf *p) {
     (void)nif;
     if (p == NULL) return ERR_VAL;
@@ -129,7 +124,7 @@ static void dispatch_rx(uint32_t id, uint32_t len) {
     }
 }
 
-void hal_net_pump(void) {
+static void virtio_net_pump(void) {
     if (!g_present) return;
 
     uint16_t rx_completed = canboot_virtq_used_advance(&g_rxq);
@@ -158,11 +153,10 @@ void hal_net_pump(void) {
     }
 }
 
-bool canboot_virtio_net_present(void) { return g_present; }
-const uint8_t *hal_net_mac(void) { return g_mac; }
-struct netif *canboot_virtio_net_netif(void) { return &g_netif; }
+static const uint8_t *virtio_net_mac(void) { return g_mac; }
+static struct netif *virtio_net_netif(void) { return &g_netif; }
 
-bool canboot_virtio_net_init(void) {
+static bool virtio_net_init(void) {
     if (!canboot_virtio_find(VIRTIO_NET_PCI_ID_MODERN, &g_dev)) {
         if (!canboot_virtio_find(VIRTIO_NET_PCI_ID_TRANSITIONAL, &g_dev)) {
             return false;
@@ -208,3 +202,11 @@ bool canboot_virtio_net_init(void) {
     g_present = true;
     return true;
 }
+
+const struct canboot_nic canboot_nic_virtio = {
+    .name  = "virtio-net",
+    .init  = virtio_net_init,
+    .pump  = virtio_net_pump,
+    .mac   = virtio_net_mac,
+    .netif = virtio_net_netif,
+};

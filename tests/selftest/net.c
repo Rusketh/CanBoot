@@ -22,8 +22,6 @@
 
 #include "hal/net.h"
 
-bool canboot_virtio_net_init(void);
-struct netif *canboot_virtio_net_netif(void);
 uint64_t canboot_tsc_hz(void);
 
 static inline uint64_t arch_now(void) {
@@ -246,15 +244,16 @@ void net_selftest(void) {
 
     lwip_init();
 
-    if (!canboot_virtio_net_init()) {
-        printf("selftest: virtio-net absent, skipping\n");
+    if (!canboot_net_init()) {
+        printf("selftest: no NIC found, skipping\n");
         return;
     }
-    printf("selftest: virtio-net mac=%02x:%02x:%02x:%02x:%02x:%02x\n",
+    printf("selftest: nic=%s mac=%02x:%02x:%02x:%02x:%02x:%02x\n",
+           canboot_net_active_name(),
            hal_net_mac()[0], hal_net_mac()[1], hal_net_mac()[2],
            hal_net_mac()[3], hal_net_mac()[4], hal_net_mac()[5]);
 
-    struct netif *nif = canboot_virtio_net_netif();
+    struct netif *nif = canboot_net_netif();
     printf("selftest: netif flags=0x%02x mtu=%u link_up=%d up=%d\n",
            (unsigned)nif->flags, (unsigned)nif->mtu,
            netif_is_link_up(nif), netif_is_up(nif));
@@ -266,10 +265,6 @@ void net_selftest(void) {
     uint64_t dl = arch_now() + hz * 15ull;
     bool got_lease = false;
     uint32_t last_log = 0;
-    extern uint32_t canboot_virtio_net_stat_tx_calls(void);
-    extern uint32_t canboot_virtio_net_stat_tx_kicked(void);
-    extern uint32_t canboot_virtio_net_stat_rx_done(void);
-    extern uint32_t canboot_virtio_net_stat_tx_done(void);
 
     while (arch_now() < dl) {
         hal_net_pump();
@@ -279,14 +274,10 @@ void net_selftest(void) {
         if (now != last_log) {
             last_log = now;
             struct dhcp *d = netif_dhcp_data(nif);
-            printf("selftest: dhcp t=%us state=%d tries=%u tx_call=%u tx_kick=%u tx_done=%u rx_done=%u\n",
+            printf("selftest: dhcp t=%us state=%d tries=%u\n",
                    (unsigned)now,
                    d ? (int)d->state : -1,
-                   d ? (unsigned)d->tries : 0u,
-                   (unsigned)canboot_virtio_net_stat_tx_calls(),
-                   (unsigned)canboot_virtio_net_stat_tx_kicked(),
-                   (unsigned)canboot_virtio_net_stat_tx_done(),
-                   (unsigned)canboot_virtio_net_stat_rx_done());
+                   d ? (unsigned)d->tries : 0u);
         }
         arch_relax();
     }
