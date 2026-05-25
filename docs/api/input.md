@@ -49,6 +49,13 @@ tablet `EV_ABS`); both accumulate into the same clamped position. There
 is no separate button-event queue — poll this each frame and edge-detect
 button changes yourself (the [`gui`](gui.md) module does exactly this).
 
+**Platform support.** The PS/2 mouse rides the x86 i8042 (`hal/input/ps2.c`,
+folded into the keyboard driver) and is x86-only. virtio-input pointer
+devices (`hal/input/virtio_input.c`) work on any arch that compiles the
+portable HAL. The current aarch64 target is a minimal bring-up that stubs
+input entirely, so pointer support there lands once it compiles the
+portable input sources — there is no PS/2 path on aarch64 (no i8042).
+
 ## `input.flush() -> number`
 
 Drain any pending events. Returns the count drained. Useful for

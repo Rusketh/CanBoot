@@ -66,6 +66,13 @@ elseif(CANBOOT_ARCH STREQUAL "aarch64")
         rt/picolibc_port/syscalls.c
         rt/pthread_stub/pthread.c
     )
+    # Input note: this aarch64 target is a minimal bring-up that stubs the
+    # input surface (hal/input/input_stub_aarch64.c) instead of compiling
+    # the portable queue + drivers. The PS/2 mouse lives in hal/input/ps2.c
+    # and is x86-only (i8042); aarch64 has no i8042. When this target grows
+    # to run the full cando VM it should pull in CANBOOT_PORTABLE_SOURCES
+    # (input_queue.c + virtio_input.c), at which point pointer input arrives
+    # via virtio-input (EV_REL mouse / EV_ABS tablet) with no PS/2 path.
 endif()
 
 add_executable(${KERNEL_NAME} ${KERNEL_SOURCES})
