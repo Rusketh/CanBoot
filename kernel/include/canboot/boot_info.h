@@ -57,6 +57,23 @@ struct canboot_mmap_entry {
     uint32_t _pad;
 };
 
+/*
+ * Boot files: small payloads (init.cdo, probe.png, gui.cdo) the loader
+ * reads off the boot volume before handing control to the kernel. This
+ * lets the runtime find /init.cdo even when the boot medium is not
+ * enumerable by the HAL disk layer (e.g. an ATAPI CD-ROM under
+ * VirtualBox UEFI). Populated best-effort; an empty table is fine and the
+ * kernel falls back to scanning real disks.
+ */
+#define CANBOOT_BOOT_FILE_MAX   4u
+#define CANBOOT_BOOT_FILE_NAME  32u
+
+struct canboot_boot_file {
+    char     name[CANBOOT_BOOT_FILE_NAME];  /* basename, e.g. "init.cdo" */
+    uint64_t addr;                          /* physical address of bytes  */
+    uint64_t size;
+};
+
 struct boot_info {
     uint32_t magic;
     uint32_t version;
@@ -71,6 +88,10 @@ struct boot_info {
 
     uint64_t acpi_rsdp;
     uint64_t cmdline_phys;
+
+    uint32_t file_count;
+    uint32_t _pad1;
+    struct canboot_boot_file files[CANBOOT_BOOT_FILE_MAX];
 };
 
 #endif /* CANBOOT_BOOT_INFO_H */

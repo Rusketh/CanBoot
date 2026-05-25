@@ -11,4 +11,11 @@
 const struct boot_info *canboot_env_boot_info(void);
 void                    canboot_env_set_boot_info(const struct boot_info *bi);
 
+/* Look up a loader-provided boot file by basename (e.g. "init.cdo").
+ * Returns 1 and fills the out-params on hit, 0 on miss. These are the files
+ * the UEFI loader read off the boot volume into boot_info.files[] so the
+ * runtime can find /init.cdo even when the boot medium isn't enumerable
+ * by the HAL disk layer (ATAPI CD-ROM under VirtualBox, etc.). */
+int canboot_bootfile_get(const char *name, const void **ptr, uint32_t *len);
+
 #endif

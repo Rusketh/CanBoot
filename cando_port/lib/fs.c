@@ -34,6 +34,7 @@
 #include "fs/fat32.h"
 #include "fs/ntfs.h"
 #include "fs/iso9660.h"
+#include "canboot/env.h"
 
 /* libntfs-3g glue (cando_port/vendor_glue/ntfs3g/glue.c). Linked but not
  * yet exercised against a real NTFS volume - the next PR adds a CI
@@ -229,6 +230,19 @@ static int f_read(CandoVM *vm, int argc, CandoValue *args) {
     int di = (int)libutil_arg_num_at(args, argc, 0, 0);
     int pi = (int)libutil_arg_num_at(args, argc, 1, 0);
     const char *name = libutil_arg_cstr_at(args, argc, 2);
+    /* Loader-provided boot files (init.cdo / probe.png / gui.cdo, read off
+     * the boot volume by the UEFI loader) shadow the disk path so they
+     * resolve even when the boot medium isn't HAL-enumerable (ATAPI CD
+     * under VirtualBox). Disk-backed reads of other names are unaffected. */
+    if (name) {
+        const void *bf = NULL;
+        uint32_t bflen = 0;
+        if (canboot_bootfile_get(name, &bf, &bflen)) {
+            CandoString *s = cando_string_new((const char *)bf, bflen);
+            cando_vm_push(vm, cando_string_value(s));
+            return 1;
+        }
+    }
     struct canboot_disk *d; struct canboot_partition p;
     if (!get_part(di, pi, &d, &p) || !name) {
         cando_vm_push(vm, cando_null());
