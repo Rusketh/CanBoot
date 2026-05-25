@@ -23,6 +23,8 @@
 
 #include "hal/console.h"
 #include "hal/input.h"
+#include "sync/spinlock.h"
+#include "sched/sched.h"
 
 /* ---- Static heap for malloc -------------------------------------------- */
 
@@ -51,6 +53,90 @@ void *sbrk(intptr_t incr) {
 
 size_t canboot_heap_bytes_used(void)  { return canboot_heap_used; }
 size_t canboot_heap_bytes_total(void) { return CANBOOT_HEAP_SIZE; }
+
+/* ---- Allocator serialisation (M5) -------------------------------------- *
+ *
+ * picolibc is cross-built with -Dsingle-thread=true (see
+ * scripts/build-picolibc.sh), so its malloc/free emit no internal
+ * locking: every allocation shares one global free list plus the sbrk
+ * cursor above, with nothing guarding them. The moment preemption is
+ * enabled (kmain flips canboot_sched_set_preemption(1)), two threads can
+ * be inside the allocator at once and corrupt that state.
+ *
+ * We funnel the four public allocation entry points the runtime actually
+ * uses (lwIP: malloc/free; Mbed TLS: calloc/free; CanDo + picolibc
+ * internals: malloc/realloc/calloc/free) through one recursive guard,
+ * wired up with `-Wl,--wrap=<sym>` in the kernel + UEFI links:
+ *
+ *   - canboot_preempt_disable() defers this CPU's timer-driven context
+ *     switch for the short, bounded duration of the call, so no other
+ *     thread on this CPU can re-enter the allocator. Masking interrupts
+ *     is unnecessary: no IRQ handler allocates (only the LAPIC timer tick
+ *     runs, and it honours the preempt count — see arch/x86_64/lapic.c +
+ *     canboot_sched_on_tick).
+ *   - a recursive ticket spinlock provides cross-CPU exclusion for SMP
+ *     (M3). Recursion is required because --wrap redirects libc-internal
+ *     references too: __real_realloc / __real_calloc call back into
+ *     __wrap_malloc / __wrap_free.
+ *
+ * sbrk() needs no separate lock: it is only ever reached from inside a
+ * wrapped allocation, so it already runs under the guard.
+ */
+static spinlock_t   alloc_lock  = SPINLOCK_INITIALIZER;
+static volatile int alloc_owner = -1;   /* CPU holding the lock, -1 = free */
+static unsigned     alloc_depth;        /* re-entrancy depth               */
+
+static void alloc_guard_enter(void) {
+    canboot_preempt_disable();          /* pins us to this CPU + defers switch */
+    int cpu = (int)canboot_cpu_id();
+    if (__atomic_load_n(&alloc_owner, __ATOMIC_RELAXED) == cpu) {
+        alloc_depth++;                  /* re-entrant: realloc -> malloc/free */
+        return;
+    }
+    spin_lock(&alloc_lock);
+    __atomic_store_n(&alloc_owner, cpu, __ATOMIC_RELAXED);
+    alloc_depth = 1;
+}
+
+static void alloc_guard_leave(void) {
+    if (--alloc_depth == 0) {
+        __atomic_store_n(&alloc_owner, -1, __ATOMIC_RELAXED);
+        spin_unlock(&alloc_lock);
+    }
+    canboot_preempt_enable();           /* may yield once fully released */
+}
+
+extern void *__real_malloc(size_t size);
+extern void  __real_free(void *ptr);
+extern void *__real_calloc(size_t nmemb, size_t size);
+extern void *__real_realloc(void *ptr, size_t size);
+
+void *__wrap_malloc(size_t size) {
+    alloc_guard_enter();
+    void *p = __real_malloc(size);
+    alloc_guard_leave();
+    return p;
+}
+
+void __wrap_free(void *ptr) {
+    alloc_guard_enter();
+    __real_free(ptr);
+    alloc_guard_leave();
+}
+
+void *__wrap_calloc(size_t nmemb, size_t size) {
+    alloc_guard_enter();
+    void *p = __real_calloc(nmemb, size);
+    alloc_guard_leave();
+    return p;
+}
+
+void *__wrap_realloc(void *ptr, size_t size) {
+    alloc_guard_enter();
+    void *p = __real_realloc(ptr, size);
+    alloc_guard_leave();
+    return p;
+}
 
 /* ---- stdio backends ---------------------------------------------------- */
 

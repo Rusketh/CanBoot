@@ -209,6 +209,12 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
         -Wl,-T,${KERNEL_LINKER_SCRIPT}
         -Wl,-z,noexecstack
         -Wl,-z,max-page-size=0x1000
+        # M5: serialise the picolibc allocator under preemption / SMP.
+        # See rt/picolibc_port/syscalls.c (__wrap_* + alloc_guard_*).
+        -Wl,--wrap=malloc
+        -Wl,--wrap=free
+        -Wl,--wrap=calloc
+        -Wl,--wrap=realloc
     )
 
     target_link_libraries(${KERNEL_NAME} PRIVATE
@@ -263,6 +269,12 @@ elseif(CANBOOT_ARCH STREQUAL "aarch64")
         -Wl,-T,${KERNEL_LINKER_SCRIPT}
         -Wl,-z,noexecstack
         -Wl,-z,max-page-size=0x1000
+        # M5: serialise the picolibc allocator under preemption / SMP.
+        # See rt/picolibc_port/syscalls.c (__wrap_* + alloc_guard_*).
+        -Wl,--wrap=malloc
+        -Wl,--wrap=free
+        -Wl,--wrap=calloc
+        -Wl,--wrap=realloc
     )
 
     target_link_libraries(${KERNEL_NAME} PRIVATE

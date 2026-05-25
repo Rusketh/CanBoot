@@ -187,15 +187,26 @@ int pthread_once(pthread_once_t *once, void (*init)(void)) {
     if (!once || !init) return EINVAL;
     canboot_irqflags_t f;
     canboot_sched_lock(&f);
-    int run = 0;
-    if (!once->done) {
-        once->done = 1;
-        run = 1;
+
+    if (once->state == 2) {            /* already completed */
+        canboot_sched_unlock(f);
+        return 0;
     }
+    if (once->state == 1) {            /* another thread is running init() */
+        while (once->state != 2)
+            canboot_sched_block_on(&once->waiters);
+        canboot_sched_unlock(f);
+        return 0;
+    }
+
+    once->state = 1;                   /* we win the race; run init() */
     canboot_sched_unlock(f);
-    /* M1 is non-preemptive, so a racing caller cannot observe done==1
-     * before init() finishes. M2 promotes this to a 3-state wait. */
-    if (run)
-        init();
+
+    init();
+
+    canboot_sched_lock(&f);
+    once->state = 2;
+    canboot_sched_wake_all(&once->waiters);
+    canboot_sched_unlock(f);
     return 0;
 }
