@@ -17,6 +17,16 @@ audio + input keep working during network calls.
 
 Convenience socket-style helpers wrapping lwIP.
 
+### `net.lookup(host) -> array`
+
+Resolve `host` to its IP addresses via lwIP's DNS. Returns an array of
+dotted-quad strings (empty array if resolution fails or times out).
+
+```cdo
+VAR ips = net.lookup("example.com");
+print(ips);
+```
+
 ### `net.udpEcho(host, port, payload) -> string|null`
 
 Send a UDP datagram to `host:port` and wait for a reply. `host` is
@@ -65,6 +75,17 @@ body, or `null` on connection failure / non-2xx response / timeout.
 
 ```cdo
 http.get("http://10.0.2.2:8080/hello")   // -> "canboot-hello"
+```
+
+### `http.status(url) -> number`
+
+Issue the GET and return just the HTTP status code (e.g. `200`,
+`404`). Returns `0` on connection failure / timeout.
+
+```cdo
+IF (http.status("http://10.0.2.2:8080/health") == 200) {
+    print("service up");
+}
 ```
 
 For HTTPS, use [`https.get`](#https). For UDP echo, see
