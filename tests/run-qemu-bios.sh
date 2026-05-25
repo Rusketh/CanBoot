@@ -64,6 +64,16 @@ if [ ! -f "$DISK_IMG" ]; then
     "$ROOT/scripts/mkdisk/fat32.sh" "$DISK_IMG" >/dev/null
 fi
 
+# Optional NVMe device. When NVME_IMG is set the kernel's NVMe driver
+# binds it and the disk selftest does a raw read/write round-trip
+# ("selftest: nvme read/write ok"). Off by default so the standard BIOS
+# run is unchanged.
+NVME_ARGS=""
+if [ -n "${NVME_IMG:-}" ]; then
+    [ -f "$NVME_IMG" ] || truncate -s 32M "$NVME_IMG"
+    NVME_ARGS="-drive if=none,id=nvm0,file=$NVME_IMG,format=raw -device nvme,serial=canvme,drive=nvm0"
+fi
+
 AUDIO_WAV="${AUDIO_WAV:-build/canboot-bios-audio.wav}"
 rm -f "$AUDIO_WAV"
 qemu-system-x86_64 \
@@ -75,6 +85,7 @@ qemu-system-x86_64 \
     $KBD_DEV $PTR_DEV $QMP_DEV \
     -netdev user,id=n0 \
     -device "${NIC_MODEL:-virtio-net-pci},netdev=n0" \
+    $NVME_ARGS \
     -audiodev "wav,id=snd,path=$AUDIO_WAV" \
     -device intel-hda \
     -device hda-duplex,audiodev=snd \
@@ -288,6 +299,9 @@ PY
         check 'selftest: posix fs surface ok'
 
 
+        if [ -n "${NVME_IMG:-}" ]; then
+            check 'selftest: nvme read/write ok'
+        fi
         check 'selftest: disk test ok'
         check 'selftest: cando_open ok'
         check 'selftest: cando_openlibs ok'

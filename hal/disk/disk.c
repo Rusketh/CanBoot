@@ -46,5 +46,6 @@ bool hal_disk_init(void) {
     memset(g_disks, 0, sizeof(g_disks));
     canboot_virtio_blk_init();
     canboot_ahci_init();
+    canboot_nvme_init();
     return true;
 }

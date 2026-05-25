@@ -99,10 +99,10 @@ firmware paths populate the same `boot_info` (framebuffer, memory map,
 ACPI RSDP, command line) before dispatching the shared kernel.
 
 **HAL** — console (16550 / PL011), input (PS/2, virtio-input), disk
-(virtio-blk, AHCI), display (linear framebuffer with pixel / line /
-text / image primitives, virtio-gpu on aarch64), net (virtio-net),
-audio (Intel HDA on x86, virtio-snd on aarch64), PCI(e) enumeration,
-virtio-pci transport.
+(virtio-blk, AHCI, NVMe), display (linear framebuffer with pixel / line /
+text / image primitives, virtio-gpu on aarch64), net (virtio-net, e1000,
+rtl8139, pcnet), audio (Intel HDA on x86, virtio-snd on aarch64), PCI(e)
+enumeration, virtio-pci transport.
 
 **Filesystems** — read-only ISO9660 (boot path), read+write FAT32 (root
 directory), read+write ext4 (lwext4) and NTFS (libntfs-3g + mkntfs),

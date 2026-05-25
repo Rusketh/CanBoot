@@ -96,6 +96,7 @@ set(CANBOOT_PORTABLE_SOURCES
     hal/audio/audio_stub.c
     hal/disk/disk.c
     hal/disk/virtio_blk.c
+    hal/disk/nvme.c
     hal/display/display.c
     hal/input/input_queue.c
     hal/input/virtio_input.c
