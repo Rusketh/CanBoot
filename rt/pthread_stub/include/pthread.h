@@ -3,16 +3,18 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <setjmp.h>
+
+#include "sched/waitq.h"
 
 /*
- * Cooperative pthread stub. Single-CPU, no preemption: threads run
- * until they call pthread_yield(), block on a mutex/cond, or exit. The
- * surface mirrors POSIX so CanDo's existing pthread call sites compile
- * unchanged once we vendor it.
+ * POSIX pthread surface for CanBoot, layered over the CanBoot scheduler
+ * (rt/sched/). CanDo's thread runtime (vendor/cando source/core/
+ * thread_platform.c, source/lib/thread.c) calls these unchanged.
  *
- * Promoted to a preemptive scheduler later once the LAPIC
- * timer is wired and we have an IDT.
+ * As of M1 these are real preemptive-capable threads with a full
+ * register context switch — not the old setjmp/longjmp fibers — but
+ * preemption itself (a timer IRQ) lands in M2, so threads currently
+ * switch only at yield / blocking points.
  */
 
 #ifdef __cplusplus
@@ -24,14 +26,16 @@ typedef int pthread_t;
 typedef struct { int unused; } pthread_attr_t;
 
 typedef struct {
-    int      locked;
-    int      owner;   /* tid of holder, or -1 */
+    int                        locked;
+    int                        owner;    /* tid of holder, or -1 */
+    struct canboot_wait_queue  waiters;
 } pthread_mutex_t;
 
 typedef struct { int unused; } pthread_mutexattr_t;
 
 typedef struct {
-    int      generation;   /* incremented by every signal/broadcast */
+    struct canboot_wait_queue  waiters;
+    int                        generation;
 } pthread_cond_t;
 
 typedef struct { int unused; } pthread_condattr_t;
@@ -40,8 +44,8 @@ typedef struct {
     int      done;
 } pthread_once_t;
 
-#define PTHREAD_MUTEX_INITIALIZER  { 0, -1 }
-#define PTHREAD_COND_INITIALIZER   { 0 }
+#define PTHREAD_MUTEX_INITIALIZER  { 0, -1, CANBOOT_WAIT_QUEUE_INITIALIZER }
+#define PTHREAD_COND_INITIALIZER   { CANBOOT_WAIT_QUEUE_INITIALIZER, 0 }
 #define PTHREAD_ONCE_INIT          { 0 }
 
 /* Lifecycle ------------------------------------------------------------- */
@@ -51,6 +55,7 @@ void canboot_pthread_init(void);
 int       pthread_create(pthread_t *thread, const pthread_attr_t *attr,
                          void *(*start_routine)(void *), void *arg);
 int       pthread_join(pthread_t thread, void **retval);
+int       pthread_detach(pthread_t thread);
 __attribute__((noreturn)) void pthread_exit(void *retval);
 pthread_t pthread_self(void);
 int       pthread_yield(void);

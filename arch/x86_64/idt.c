@@ -107,6 +107,12 @@ void canboot_idt_install(void) {
     __asm__ volatile ("lidt %0" : : "m"(d));
 }
 
+void canboot_idt_set_gate(int vec, void (*handler)(void)) {
+    if (vec < 0 || vec >= IDT_ENTRIES)
+        return;
+    set_gate(vec, (uintptr_t)handler);
+}
+
 static const char *vec_name(uint64_t v) {
     switch (v) {
         case 0:  return "#DE divide-by-zero";

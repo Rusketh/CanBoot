@@ -91,3 +91,65 @@ canboot_isr_common:
 1:  cli
     hlt
     jmp     1b
+
+/*
+ * LAPIC timer IRQ stub (vector 0x20). Unlike the exception stubs this
+ * one returns: it saves every general-purpose register on the
+ * interrupted thread's stack, calls the C dispatcher, then restores and
+ * iretq's back to the interrupted instruction.
+ *
+ * The C dispatcher may context-switch away (preemption). That is safe:
+ * the cooperative switch (canboot_arch_ctx_switch) preserves the
+ * callee-saved registers across the switch, and the caller-saved
+ * registers live in the trap frame pushed here — restored by the pop
+ * sequence once this thread is rescheduled and the call returns. rbp is
+ * used as an alignment anchor and is itself callee-saved, so it survives
+ * the switch and lets us undo the call-alignment padding on return.
+ */
+.global canboot_irq_timer_stub
+canboot_irq_timer_stub:
+    pushq   %rax
+    pushq   %rcx
+    pushq   %rdx
+    pushq   %rbx
+    pushq   %rbp
+    pushq   %rsi
+    pushq   %rdi
+    pushq   %r8
+    pushq   %r9
+    pushq   %r10
+    pushq   %r11
+    pushq   %r12
+    pushq   %r13
+    pushq   %r14
+    pushq   %r15
+
+    movq    %rsp, %rbp          /* anchor (original rbp already saved) */
+    andq    $-16, %rsp          /* 16-byte align for the SysV call */
+    call    canboot_irq_timer
+    movq    %rbp, %rsp          /* undo alignment padding */
+
+    popq    %r15
+    popq    %r14
+    popq    %r13
+    popq    %r12
+    popq    %r11
+    popq    %r10
+    popq    %r9
+    popq    %r8
+    popq    %rdi
+    popq    %rsi
+    popq    %rbp
+    popq    %rbx
+    popq    %rdx
+    popq    %rcx
+    popq    %rax
+    iretq
+
+/*
+ * Spurious-interrupt vector (0xFF). Per the Intel SDM a spurious
+ * interrupt must NOT be acknowledged with an EOI, so this just returns.
+ */
+.global canboot_irq_spurious_stub
+canboot_irq_spurious_stub:
+    iretq

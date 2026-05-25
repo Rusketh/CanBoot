@@ -119,7 +119,7 @@ What's wired today, by layer:
 | PCI | x86_64 port-IO config space, aarch64 PCIe ECAM |
 | Filesystems | ISO9660 (RO), FAT32 (RW root), ext4 via lwext4 (RW + mkfs), NTFS via libntfs-3g (RW + mkntfs) |
 | Partition tables | MBR, GPT |
-| Runtime | picolibc 1.8.11, cooperative pthread fiber stub, 4 MiB static heap |
+| Runtime | picolibc 1.8.11, preemptive-capable thread scheduler (rt/sched) behind the pthread surface, 4 MiB static heap |
 | TLS | Mbed TLS 3.6.x LTS with RDSEED/RDRAND + TSC entropy and session tickets |
 | Image decode | stb_image (PNG/JPG/BMP) |
 | Audio decode | minimp3 (MP3), WAV |
