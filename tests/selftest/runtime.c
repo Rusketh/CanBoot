@@ -16,8 +16,16 @@
 #include <stdint.h>
 
 #include "pthread.h"
+#include "sched/sched.h"
 #include "hal/console.h"
 #include "sync/cpu.h"
+
+/* This is a scheduler/allocator stress test, not a cando-VM test, so it
+ * spawns raw scheduler threads (canboot_thread_create) rather than going
+ * through pthread_create's VM-GIL wrapper — the workers must run
+ * concurrently (preemption + SMP) to exercise the allocator's lock and
+ * forced preemption. The mutex below is a plain pthread mutex (not
+ * GIL-related) guarding the shared counter. */
 
 /* Bitmask of logical CPUs the workers were observed running on. With SMP
  * APs online and a shared run queue, work lands on more than one CPU. */
@@ -88,8 +96,8 @@ static void *spinner(void *arg) {
 static int preemption_test(void) {
     g_spin_stop = 0;
     g_spin_count = 0;
-    pthread_t st;
-    if (pthread_create(&st, 0, spinner, 0) != 0) {
+    struct canboot_thread *st = canboot_thread_create(spinner, 0);
+    if (!st) {
         printf("selftest: FAIL preemption spinner create\n");
         return 0;
     }
@@ -104,7 +112,7 @@ static int preemption_test(void) {
     }
     int ticked = (canboot_sched_ticks() - t0 >= 5);
     g_spin_stop = 1;
-    pthread_join(st, 0);
+    canboot_thread_join(st, 0);
 
     if (!ticked) {
         printf("selftest: FAIL preemption timer not ticking (guard=%lu)\n", guard);
@@ -248,19 +256,19 @@ void runtime_selftest(void) {
      * concurrently hammer the allocator under live preemption. */
     g_counter = 0;
     g_alloc_fail = 0;
-    pthread_t t[WORKERS];
+    struct canboot_thread *t[WORKERS];
     for (int i = 0; i < WORKERS; i++) {
-        int rc = pthread_create(&t[i], 0, worker, (void *)(intptr_t)i);
-        if (rc != 0) {
-            printf("selftest: FAIL pthread_create [%d] rc=%d\n", i, rc);
+        t[i] = canboot_thread_create(worker, (void *)(intptr_t)i);
+        if (!t[i]) {
+            printf("selftest: FAIL thread_create [%d]\n", i);
             return;
         }
     }
     for (int i = 0; i < WORKERS; i++) {
         void *ret = 0;
-        int rc = pthread_join(t[i], &ret);
+        int rc = canboot_thread_join(t[i], &ret);
         if (rc != 0) {
-            printf("selftest: FAIL pthread_join [%d] rc=%d\n", i, rc);
+            printf("selftest: FAIL thread_join [%d] rc=%d\n", i, rc);
             return;
         }
         if ((intptr_t)ret != i) {

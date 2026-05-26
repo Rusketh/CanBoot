@@ -82,13 +82,20 @@ static struct nsock *sock_of(int fd) {
 /* ---- millisecond clock (lwIP sys_now) --------------------------------- */
 extern uint32_t sys_now(void);
 
-/* Pump lwIP once under the lock, then yield so peers progress. */
+/* Pump lwIP once under the lock, then yield so peers progress. Socket
+ * I/O is a blocking point, so drop the VM GIL across the pump+yield: a
+ * thread waiting on the network must not keep other VM threads (e.g. a
+ * server's connection handlers, or the accept loop) from running. lwIP
+ * is serialised separately by the netcore lock, not the GIL. */
 static void pump_yield(void) {
+    int had_gil = canboot_gil_owned_by_current();
+    if (had_gil) canboot_gil_release();
     net_enter();
     hal_net_pump();
     sys_check_timeouts();
     net_leave();
     canboot_sched_yield();
+    if (had_gil) canboot_gil_acquire();
 }
 
 /* ---- lwIP raw callbacks ----------------------------------------------- */

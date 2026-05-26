@@ -254,6 +254,7 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'cando thread.join = 499500'
 
         check 'cando thread.state = done'
+        check 'cando concurrent workers = 12497500 4498500'
 
         check 'cando jit match = true'
 

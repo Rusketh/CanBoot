@@ -511,6 +511,15 @@ VAR worker = thread {
 VAR wr = thread.join(worker);
 print("cando thread.join =", wr);
 print("cando thread.state =", thread.state(worker));
+// Two workers running CONCURRENTLY (both spawned before either join).
+// The VM GIL (rt/sched + rt/pthread_stub) serialises their bytecode
+// execution against the shared heap/handle/GC, so they no longer corrupt
+// each other. sum(0..4999)=12497500, sum(0..2999)=4498500.
+VAR cw1 = thread { VAR s = 0; VAR i = 0; WHILE (i < 5000) { s = s + i; i = i + 1; } RETURN s; };
+VAR cw2 = thread { VAR s = 0; VAR i = 0; WHILE (i < 3000) { s = s + i; i = i + 1; } RETURN s; };
+VAR cr1 = thread.join(cw1);
+VAR cr2 = thread.join(cw2);
+print("cando concurrent workers =", cr1, cr2);
 print("cando stdlib end");
 
 // ---- JIT: profile a compute-heavy loop, compile it, verify parity ----

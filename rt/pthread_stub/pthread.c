@@ -16,9 +16,31 @@
 
 #include <errno.h>
 #include <stddef.h>
+#include <stdlib.h>
 
 #include "pthread.h"
 #include "sched/sched.h"
+
+/* Every cando thread runs VM bytecode against the shared (non-thread-safe)
+ * heap/handle/GC, so it must hold the VM GIL while it runs. We wrap the
+ * user entry to take the lock on entry and drop it on exit; the boot
+ * thread holds it from sched_init. The lock is dropped at blocking points
+ * (join / cond wait below, and the socket I/O pump) so peers progress. */
+struct gil_thunk {
+    void *(*fn)(void *);
+    void  *arg;
+};
+
+static void *gil_thread_entry(void *raw) {
+    struct gil_thunk *th = (struct gil_thunk *)raw;
+    void *(*fn)(void *) = th->fn;
+    void  *arg          = th->arg;
+    free(th);
+    canboot_gil_acquire();
+    void *ret = fn(arg);
+    canboot_gil_release();
+    return ret;
+}
 
 void canboot_pthread_init(void) {
     canboot_sched_init();
@@ -40,9 +62,16 @@ int pthread_create(pthread_t *out,
                    void *(*start_routine)(void *),
                    void *arg) {
     (void)attr;
-    struct canboot_thread *t = canboot_thread_create(start_routine, arg);
-    if (!t)
+    struct gil_thunk *th = (struct gil_thunk *)malloc(sizeof(*th));
+    if (!th)
         return EAGAIN;
+    th->fn  = start_routine;
+    th->arg = arg;
+    struct canboot_thread *t = canboot_thread_create(gil_thread_entry, th);
+    if (!t) {
+        free(th);
+        return EAGAIN;
+    }
     if (out)
         *out = (pthread_t)t->id;
     return 0;
@@ -61,7 +90,13 @@ int pthread_join(pthread_t tid, void **retval) {
     struct canboot_thread *t = canboot_thread_by_id((int)tid);
     if (!t)
         return ESRCH;
-    return canboot_thread_join(t, retval) == 0 ? 0 : ESRCH;
+    /* Drop the GIL while parked on the target so it (and other VM
+     * threads) can run; reacquire before returning to VM code. */
+    int had_gil = canboot_gil_owned_by_current();
+    if (had_gil) canboot_gil_release();
+    int rc = canboot_thread_join(t, retval);
+    if (had_gil) canboot_gil_acquire();
+    return rc == 0 ? 0 : ESRCH;
 }
 
 int pthread_detach(pthread_t tid) {
@@ -140,6 +175,12 @@ int pthread_cond_destroy(pthread_cond_t *c) { (void)c; return 0; }
 
 int pthread_cond_wait(pthread_cond_t *c, pthread_mutex_t *m) {
     if (!c || !m) return EINVAL;
+
+    /* Drop the GIL while parked so a peer (e.g. the thread that will
+     * signal us) can run VM code. */
+    int had_gil = canboot_gil_owned_by_current();
+    if (had_gil) canboot_gil_release();
+
     canboot_irqflags_t f;
     canboot_sched_lock(&f);
 
@@ -150,13 +191,18 @@ int pthread_cond_wait(pthread_cond_t *c, pthread_mutex_t *m) {
     canboot_sched_wake_one(&m->waiters);
 
     canboot_sched_block_on(&c->waiters);
+    canboot_sched_unlock(f);
+
+    /* Reacquire the GIL BEFORE the mutex so we never wait on the GIL
+     * while holding m (that would invert the global lock order). */
+    if (had_gil) canboot_gil_acquire();
 
     /* Reacquire the mutex before returning to the caller. */
+    canboot_sched_lock(&f);
     while (m->locked)
         canboot_sched_block_on(&m->waiters);
     m->locked = 1;
     m->owner  = pthread_self();
-
     canboot_sched_unlock(f);
     return 0;
 }

@@ -280,6 +280,40 @@ void canboot_sched_wake_all(struct canboot_wait_queue *wq) {
     }
 }
 
+/* ---- VM GIL ---------------------------------------------------------- */
+
+static struct canboot_wait_queue g_gil_wq;
+static struct canboot_thread    *g_gil_owner;   /* NULL == free */
+static int                       g_gil_locked;
+
+void canboot_gil_acquire(void) {
+    canboot_irqflags_t f;
+    canboot_sched_lock(&f);
+    struct canboot_thread *self = this_cpu()->current;
+    while (g_gil_locked && g_gil_owner != self)
+        canboot_sched_block_on(&g_gil_wq);
+    g_gil_locked = 1;
+    g_gil_owner  = self;
+    canboot_sched_unlock(f);
+}
+
+void canboot_gil_release(void) {
+    canboot_irqflags_t f;
+    canboot_sched_lock(&f);
+    g_gil_locked = 0;
+    g_gil_owner  = NULL;
+    canboot_sched_wake_one(&g_gil_wq);
+    canboot_sched_unlock(f);
+}
+
+int canboot_gil_owned_by_current(void) {
+    canboot_irqflags_t f;
+    canboot_sched_lock(&f);
+    int owned = (g_gil_locked && g_gil_owner == this_cpu()->current);
+    canboot_sched_unlock(f);
+    return owned;
+}
+
 void canboot_sched_yield(void) {
     canboot_irqflags_t f;
     canboot_sched_lock(&f);
@@ -360,6 +394,12 @@ void canboot_sched_init(void) {
     idle->tls_base   = main_th->tls_base;
     arch_ctx_init(&idle->ctx, g_idle_stacks[0] + CANBOOT_IDLE_STACK);
     cpu->idle = idle;
+
+    /* The boot thread owns the VM GIL from the start: it runs cando until
+     * it blocks (join / cond wait), at which point the lock is handed off
+     * to whatever worker is runnable. */
+    g_gil_locked = 1;
+    g_gil_owner  = main_th;
 }
 
 /* Called by each Application Processor once the arch SMP layer has
