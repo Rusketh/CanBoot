@@ -113,6 +113,55 @@ print("cando net.lookup(canboot.test) =", net.lookup("canboot.test"));
 print("cando tls via dns =", tls.httpsGet("canboot.test", 8443, "/"));
 print("cando tls.version =", tls.version());
 
+// socket.* - the real upstream CanDo socket library (vendor/cando/source/
+// lib/socket.c) running on the canboot BSD-socket-over-lwIP layer
+// (cando_port/net_posix/sockets.c). Raw TCP client against the same
+// http_hello sidecar net.httpGet hits; proves connect/sendAll/recvAll/
+// close end-to-end. socket.resolve drives getaddrinfo over the lwIP DNS
+// resolver (canboot.test -> 10.0.2.2 via the fixed-answer sidecar).
+// CanDo string literals do not process backslash escapes, so build the
+// CRLF bytes the HTTP request needs from their hex codes.
+VAR CRLF = hex.decode("0d0a");
+print("cando socket libs begin");
+TRY {
+    VAR sk = socket.connect("10.0.2.2", 8080);
+    sk:sendAll("GET / HTTP/1.0" + CRLF + "Host: 10.0.2.2" + CRLF
+             + "Connection: close" + CRLF + CRLF);
+    VAR sresp = sk:recvAll();
+    sk:close();
+    print("cando socket http ok =", string.contains(sresp, "canboot-hello"));
+    VAR saddrs = socket.resolve("canboot.test");
+    print("cando socket.resolve ok =", string.contains(saddrs[0], "10.0.2.2"));
+} CATCH (e) {
+    print("cando socket http ok = false");
+    print("cando socket error:", e);
+}
+print("cando socket libs end");
+
+// secure_socket.* - real upstream TLS client (vendor/cando/source/lib/
+// secure_socket.c) over the OpenSSL-on-Mbed-TLS shim
+// (cando_port/net_posix/openssl_mbedtls.c). verifyPeer:false skips the
+// trust-store check (bare metal has no system CA bundle); the TLS
+// handshake, encrypted send/recv and peer-cert/protocol introspection
+// against the https_secure sidecar are the proof points.
+print("cando secure_socket libs begin");
+TRY {
+    VAR ss = secure_socket.connect("10.0.2.2", 8443, { verifyPeer: false });
+    ss:sendAll("GET / HTTP/1.0" + CRLF + "Host: 10.0.2.2" + CRLF
+             + "Connection: close" + CRLF + CRLF);
+    VAR ssresp = ss:recvAll();
+    VAR ssproto = ss:protocol();
+    VAR sscert = ss:peerCertificate();
+    ss:close();
+    print("cando secure_socket https ok =", string.contains(ssresp, "canboot-secure"));
+    print("cando secure_socket proto =", ssproto);
+    print("cando secure_socket cert present =", sscert != NULL);
+} CATCH (e) {
+    print("cando secure_socket https ok = false");
+    print("cando secure_socket error:", e);
+}
+print("cando secure_socket libs end");
+
 print("cando sys libs end");
 
 // ---- Milestone 14: crypto libs (random / crypto / hex / base64) -----
@@ -449,8 +498,11 @@ print("cando datetime.year ok =", datetime.year(dt) >= 1970);
 VAR ms = stream.memory();
 ms:write("canboot-stream");
 print("cando stream.memory ok =", true);
-// Spawn a worker thread and join it (single worker; concurrent CanDo
-// child-VMs share one TLS area, so we keep to the spawn->join shape).
+// Spawn a worker thread and join it. Concurrent CanDo child-VMs still
+// share the parent's heap / handle table / GC state, which is not yet
+// thread-safe (two VMs executing at once corrupt it), so we keep to the
+// spawn->join shape. Per-thread TLS (rt/sched) removed the current-VM
+// aliasing, but full concurrent-VM safety needs VM-level locking.
 VAR worker = thread {
     VAR s = 0; VAR i = 0;
     WHILE (i < 1000) { s = s + i; i = i + 1; }
@@ -459,6 +511,15 @@ VAR worker = thread {
 VAR wr = thread.join(worker);
 print("cando thread.join =", wr);
 print("cando thread.state =", thread.state(worker));
+// Two workers running CONCURRENTLY (both spawned before either join).
+// The VM GIL (rt/sched + rt/pthread_stub) serialises their bytecode
+// execution against the shared heap/handle/GC, so they no longer corrupt
+// each other. sum(0..4999)=12497500, sum(0..2999)=4498500.
+VAR cw1 = thread { VAR s = 0; VAR i = 0; WHILE (i < 5000) { s = s + i; i = i + 1; } RETURN s; };
+VAR cw2 = thread { VAR s = 0; VAR i = 0; WHILE (i < 3000) { s = s + i; i = i + 1; } RETURN s; };
+VAR cr1 = thread.join(cw1);
+VAR cr2 = thread.join(cw2);
+print("cando concurrent workers =", cr1, cr2);
 print("cando stdlib end");
 
 // ---- JIT: profile a compute-heavy loop, compile it, verify parity ----
@@ -553,3 +614,27 @@ display.fillRect(300, 100, 100, 100, 255);        // 0x0000FF blue
 fb.flush();
 print("cando gui dashboard painted");
 print("cando display showcase end");
+
+// ---- HTTP server: the real upstream CanDo socket server -------------
+// socket.createServer (vendor/cando/source/lib/socket.c) spawns a
+// background accept thread; each accepted connection runs the callback in
+// its own child VM. That per-connection concurrency is what the VM GIL
+// (rt/sched) makes safe. The host-side runner connects through a SLIRP
+// hostfwd (127.0.0.1:18080 -> guest :9090) and sends a request; we serve
+// one HTTP response and app.quit() to stop the accept loop so init.cdo
+// can finish. Placed last so the main thread blocks on the server's
+// lifeline (dropping the GIL) right after listen, leaving the accept and
+// handler threads free to run.
+print("cando server libs begin");
+VAR httpsrv = socket.createServer(FUNCTION(conn) {
+    VAR reqline = conn:recvLine();
+    print("cando server got connection");
+    conn:sendAll("HTTP/1.0 200 OK" + CRLF + "Content-Type: text/plain" + CRLF
+               + "Content-Length: 13" + CRLF + "Connection: close" + CRLF + CRLF
+               + "canboot-serve");
+    print("cando server sent response");
+    conn:close();
+    app.quit();
+});
+httpsrv:listen(9090);
+print("cando server listening");

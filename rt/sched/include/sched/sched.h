@@ -71,6 +71,12 @@ struct canboot_thread {
 
     unsigned char              *stack;     /* owned stack base, or NULL  */
     size_t                      stack_size;
+
+    /* Per-thread TLS pointer (x86_64 FS_BASE). Each thread gets a private
+     * zeroed block so cando's _Thread_local current-VM pointer is not
+     * shared across concurrently-running threads. NULL on arches where
+     * _Thread_local is compiled to a plain global (aarch64). */
+    void                       *tls_base;
 };
 
 /* ---- Lifecycle ------------------------------------------------------- */
@@ -150,5 +156,24 @@ void canboot_sched_unlock(canboot_irqflags_t saved_flags);
 void canboot_sched_block_on(struct canboot_wait_queue *wq);
 void canboot_sched_wake_one(struct canboot_wait_queue *wq);
 void canboot_sched_wake_all(struct canboot_wait_queue *wq);
+
+/* ---- VM "GIL" -------------------------------------------------------- */
+/*
+ * A single global lock that serialises CanDo VM execution. CanDo child
+ * VMs (one per `thread {}` worker or per accepted server connection)
+ * share the parent's heap, handle table and GC, none of which is
+ * thread-safe, so only one thread may run VM bytecode at a time.
+ *
+ * The lock is held by whichever thread is executing VM code (taken when
+ * a cando thread starts, held by the boot thread from sched_init) and
+ * dropped at blocking points — thread join, condition waits, and socket
+ * I/O pumps — so other VM threads (and I/O) make progress while one
+ * blocks. acquire() is idempotent for the current owner. Held across the
+ * blocking-primitive's own park; the woken thread reacquires before it
+ * resumes VM work.
+ */
+void canboot_gil_acquire(void);
+void canboot_gil_release(void);
+int  canboot_gil_owned_by_current(void);
 
 #endif /* CANBOOT_SCHED_SCHED_H */

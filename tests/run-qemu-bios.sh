@@ -96,7 +96,7 @@ qemu-system-x86_64 \
     -drive "if=none,id=blk0,file=$DISK_IMG,format=raw" \
     -device virtio-blk-pci,drive=blk0 \
     $KBD_DEV $PTR_DEV $QMP_DEV \
-    -netdev user,id=n0 \
+    -netdev user,id=n0,hostfwd=tcp:127.0.0.1:18080-:9090 \
     -device "${NIC_MODEL:-virtio-net-pci},netdev=n0" \
     $NVME_ARGS \
     $USB_ARGS \
@@ -218,6 +218,25 @@ cmd("mouse_button 0")
 sock.close()
 PY
     fi
+
+    # Server probe: once the cando socket server is listening, connect to
+    # it through the SLIRP hostfwd (127.0.0.1:18080 -> guest :9090) and send
+    # an HTTP request so the connection handler runs (it serves a response
+    # and app.quit()s, releasing the server's lifeline so init.cdo finishes).
+    for _ in $(seq 1 300); do grep -q 'cando server listening' "$LOG" 2>/dev/null && break; sleep 0.2; done
+    python3 - <<'PY' 2>/dev/null || true
+import socket, time
+for _ in range(60):
+    try:
+        s = socket.create_connection(("127.0.0.1", 18080), timeout=2)
+    except Exception:
+        time.sleep(0.5); continue
+    try:
+        s.sendall(b"GET / HTTP/1.0\r\n\r\n"); s.recv(4096)
+    except Exception:
+        pass
+    s.close(); break
+PY
 ) &
 INJECTOR_PID=$!
 
@@ -341,6 +360,7 @@ PY
         check 'cando thread.join = 499500'
 
         check 'cando thread.state = done'
+        check 'cando concurrent workers = 12497500 4498500'
 
         check 'cando jit match = true'
 
@@ -349,6 +369,10 @@ PY
         check 'cando gui included ok ver 1.0.0'
 
         check 'cando gui dashboard painted'
+
+        check 'cando server listening'
+        check 'cando server got connection'
+        check 'cando server sent response'
 
         check 'selftest: display test ok'
         check 'selftest: input lib registered'
@@ -368,6 +392,11 @@ PY
 
         check 'cando tls.version = TLSv1.3'
 
+        check 'cando socket http ok = true'
+        check 'cando socket.resolve ok = true'
+        check 'cando secure_socket https ok = true'
+        check 'cando secure_socket proto = TLSv1.3'
+        check 'cando secure_socket cert present = true'
         check 'cando sys libs end'
         check 'selftest: crypto libs registered'
         check 'cando hex.encode(canboot) = 63616e626f6f74'
