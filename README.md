@@ -130,13 +130,15 @@ arena, and executed, producing results identical to the interpreter
 (`jit.stats().traces_compiled` reflects the compiled traces). x86_64 uses
 the vendored emitter (`vendor/cando/source/jit/codegen.c`); aarch64 now
 has its own native A64 emitter (`cando_port/jit/codegen_aarch64.c`) that
-compiles loop traces — integer/f64 arithmetic, comparisons, frame
-load/store, and guard side-exits — to real machine code (with I-cache
-maintenance and page-table fix-up so the JIT arena is executable under
-AAVMF). Ops it doesn't yet handle (function traces, globals,
-arrays/objects, fast-native calls) cleanly fall back to the interpreter.
-init.cdo and the C self-test exercise both on every boot and assert
-bit-identical results with the JIT on vs off.
+compiles loop traces — integer/f64 arithmetic (incl. modulo),
+comparisons, frame load/store, numeric globals, fast-native calls
+(e.g. `math.sqrt`), and guard side-exits — to real machine code (with
+I-cache maintenance and page-table fix-up so the JIT arena is executable
+under AAVMF). Ops it doesn't yet handle (function traces, object/array
+access) cleanly fall back to the interpreter. init.cdo and the C
+self-test exercise both on every boot and assert bit-identical results
+with the JIT on vs off (measured hot-loop speedup: x86_64 ~30x,
+aarch64 ~8x under QEMU).
 
 **Network + TLS** — lwIP 2.2.1 in NO_SYS mode over virtio-net (DHCP /
 UDP / TCP / HTTP); Mbed TLS 3.6.x LTS with hardware entropy
