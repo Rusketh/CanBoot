@@ -391,6 +391,7 @@ PY
         fi
         check 'selftest: disk test ok'
         check 'selftest: rtc ok year='
+        check 'selftest: acpi power ok'
         if [ -n "${RNG_DEV:-}" ]; then
             check 'selftest: virtio-rng ok'
         fi

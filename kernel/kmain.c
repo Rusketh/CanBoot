@@ -20,6 +20,7 @@
 #include "hal/pci.h"
 #include "hal/rtc.h"
 #include "hal/rng.h"
+#include "hal/power.h"
 #include "sync/cpu.h"
 
 void fb_clear(const struct canboot_fb *fb, uint32_t pixel);
@@ -444,6 +445,19 @@ static void kmain_body(struct boot_info *bi) {
         }
     } else {
         hal_console_write("selftest: virtio-rng absent\n");
+    }
+
+    /* ACPI power: parse the poweroff/reset registers (non-destructively) so
+     * os.poweroff()/os.reboot() have something to drive. */
+    struct canboot_power_info pwr;
+    if (canboot_power_probe(&pwr) && pwr.pm1a_cnt != 0) {
+        hal_console_write("selftest: acpi power ok pm1a=");
+        put_hex64(pwr.pm1a_cnt);
+        hal_console_write(" slp_typ=");
+        put_dec(pwr.slp_typa);
+        hal_console_write(pwr.reset_supported ? " reset=yes\n" : " reset=no\n");
+    } else {
+        hal_console_write("selftest: acpi power unavailable\n");
     }
 
     /* Milestone 18: Intel HDA audio probe. Best-effort; the cando

@@ -153,6 +153,7 @@ set(CANBOOT_KERNEL_COMMON
     hal/disk/ahci.c
     hal/pci/pci_x86.c
     arch/x86_64/rtc.c
+    arch/x86_64/power.c
 
     ${CANBOOT_PORTABLE_SOURCES}
 )

@@ -35,6 +35,7 @@
 #include "lwip/sys.h"      /* sys_now() — TSC-calibrated ms-since-boot */
 
 #include "canboot/env.h"
+#include "hal/power.h"
 
 #include "core/value.h"
 #include "vm/vm.h"
@@ -68,6 +69,11 @@ static void canboot_halt(void) {
         );
     }
 }
+
+/* Weak power fallbacks: arches without a power driver (e.g. aarch64 today)
+ * just halt. x86_64's arch/x86_64/power.c provides the strong ACPI path. */
+__attribute__((weak, noreturn)) void canboot_power_off(void) { canboot_halt(); }
+__attribute__((weak, noreturn)) void canboot_reboot(void)    { canboot_halt(); }
 
 static f64 seconds_since_boot(void) {
     return (f64)sys_now() / 1000.0;
@@ -117,6 +123,18 @@ static int os_exit(CandoVM *vm, int argc, CandoValue *args) {
      * to expose to firmware. Halt the kernel; firmware-level reset is
      * up to the operator. */
     canboot_halt();
+    return 0; /* unreachable */
+}
+
+static int os_poweroff(CandoVM *vm, int argc, CandoValue *args) {
+    (void)vm; (void)argc; (void)args;
+    canboot_power_off();
+    return 0; /* unreachable */
+}
+
+static int os_reboot(CandoVM *vm, int argc, CandoValue *args) {
+    (void)vm; (void)argc; (void)args;
+    canboot_reboot();
     return 0; /* unreachable */
 }
 
@@ -234,6 +252,8 @@ static const LibutilMethodEntry os_methods[] = {
     { "setenv",   os_setenv   },
     { "execute",  os_execute  },
     { "exit",     os_exit     },
+    { "poweroff", os_poweroff },
+    { "reboot",   os_reboot   },
     { "time",     os_time     },
     { "clock",    os_clock    },
     { "hostname", os_hostname },
