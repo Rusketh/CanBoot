@@ -104,7 +104,7 @@ jobs:
 
   # Exercise each pluggable NIC driver by booting the BIOS smoke image with
   # a different QEMU NIC model. The kernel's net layer probes virtio/e1000/
-  # rtl8139/pcnet and binds whichever the VM presents; the net markers
+  # e1000e/rtl8139/pcnet and binds whichever the VM presents; the net markers
   # (dhcp lease / udp echo / http get / net test ok) verify the driver.
   nic-x86_64:
     name: x86_64 nic ${{ matrix.nic }}
@@ -113,7 +113,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        nic: [e1000, rtl8139, pcnet]
+        nic: [e1000, e1000e, rtl8139, pcnet]
     steps:
       - uses: actions/checkout@v4
         with:

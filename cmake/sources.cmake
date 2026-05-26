@@ -105,6 +105,7 @@ set(CANBOOT_PORTABLE_SOURCES
     hal/net/net.c
     hal/net/virtio_net.c
     hal/net/e1000.c
+    hal/net/e1000e.c
     hal/net/rtl8139.c
     hal/net/pcnet.c
     hal/virtio/virtio_pci.c

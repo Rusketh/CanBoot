@@ -136,6 +136,10 @@ lwIP `netif`-shaped surface for `hal_net_pump` (run lwIP's input loop
 | File | Driver |
 |------|--------|
 | `hal/net/virtio_net.c` | virtio-net-pci |
+| `hal/net/e1000.c`      | Intel 8254x (e1000) |
+| `hal/net/e1000e.c`     | Intel 8257x PCIe (e1000e, incl. QEMU 82574L) |
+| `hal/net/rtl8139.c`    | Realtek RTL8139 (x86_64) |
+| `hal/net/pcnet.c`      | AMD PCnet (x86_64) |
 
 ## PCI — `hal/include/hal/pci.h`
 

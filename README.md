@@ -103,7 +103,7 @@ virtio-input, universal USB-HID keyboard **and** mouse/pointer over xHCI),
 disk (virtio-blk, AHCI, NVMe, USB mass storage), display (linear
 framebuffer with pixel / line /
 text / image primitives, virtio-gpu on aarch64), net (virtio-net, e1000,
-rtl8139, pcnet), audio (Intel HDA on x86, virtio-snd on aarch64), PCI(e)
+e1000e, rtl8139, pcnet), audio (Intel HDA on x86, virtio-snd on aarch64), PCI(e)
 enumeration, virtio-pci transport.
 
 **Filesystems** — read-only ISO9660 (boot path), read+write FAT32 (root
@@ -215,7 +215,7 @@ mouse/touchpad, virtio-input, universal USB-HID keyboard **and**
 mouse/pointer over xHCI — multiple devices bound at once), disk
 (virtio-blk, AHCI, NVMe, USB mass storage over xHCI), framebuffer (with
 pixel readback assertions in CI), virtio-gpu on
-aarch64, NICs (virtio-net, e1000, rtl8139, pcnet), and audio (Intel HDA +
+aarch64, NICs (virtio-net, e1000, e1000e, rtl8139, pcnet), and audio (Intel HDA +
 virtio-snd). The heap is carved from the usable `boot_info` memory map
 (hundreds of MiB). Filesystems cover ISO9660 / FAT32 / ext4 / NTFS
 read+write including mkfs and **nested directories** (mkdir/rmdir/rename/
