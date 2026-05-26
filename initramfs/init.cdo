@@ -138,6 +138,30 @@ TRY {
 }
 print("cando socket libs end");
 
+// secure_socket.* - real upstream TLS client (vendor/cando/source/lib/
+// secure_socket.c) over the OpenSSL-on-Mbed-TLS shim
+// (cando_port/net_posix/openssl_mbedtls.c). verifyPeer:false skips the
+// trust-store check (bare metal has no system CA bundle); the TLS
+// handshake, encrypted send/recv and peer-cert/protocol introspection
+// against the https_secure sidecar are the proof points.
+print("cando secure_socket libs begin");
+TRY {
+    VAR ss = secure_socket.connect("10.0.2.2", 8443, { verifyPeer: false });
+    ss:sendAll("GET / HTTP/1.0" + CRLF + "Host: 10.0.2.2" + CRLF
+             + "Connection: close" + CRLF + CRLF);
+    VAR ssresp = ss:recvAll();
+    VAR ssproto = ss:protocol();
+    VAR sscert = ss:peerCertificate();
+    ss:close();
+    print("cando secure_socket https ok =", string.contains(ssresp, "canboot-secure"));
+    print("cando secure_socket proto =", ssproto);
+    print("cando secure_socket cert present =", sscert != NULL);
+} CATCH (e) {
+    print("cando secure_socket https ok = false");
+    print("cando secure_socket error:", e);
+}
+print("cando secure_socket libs end");
+
 print("cando sys libs end");
 
 // ---- Milestone 14: crypto libs (random / crypto / hex / base64) -----

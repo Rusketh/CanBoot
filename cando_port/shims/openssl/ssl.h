@@ -62,4 +62,9 @@ int  SSL_read(SSL *ssl, void *buf, int num);
 int                SSL_set_tlsext_host_name(SSL *ssl, const char *name);
 X509_VERIFY_PARAM *SSL_get0_param(SSL *ssl);
 
+/* Post-handshake introspection (used by secure_socket.c). */
+const char *SSL_get_cipher_name(const SSL *ssl);
+const char *SSL_get_version(const SSL *ssl);
+X509       *SSL_get_peer_certificate(const SSL *ssl);
+
 #endif

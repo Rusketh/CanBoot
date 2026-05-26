@@ -38,9 +38,10 @@ void cando_lib_crypto_register(struct CandoVM *vm)         { (void)vm; }
  * cando_port/lib/os.c. CanDo's upstream os.c uses POSIX getenv,
  * system(), gethostname, sysinfo, etc. — none available on canboot. */
 void cando_lib_os_register(struct CandoVM *vm)             { (void)vm; }
-/* cando_lib_socket_register is the real vendored lib/socket.c now,
- * backed by the BSD-socket-over-lwIP layer in cando_port/net_posix. */
-void cando_lib_secure_socket_register(struct CandoVM *vm)  { (void)vm; }
+/* socket / secure_socket register hooks are the real vendored
+ * lib/socket.c + lib/secure_socket.c now, backed by the
+ * BSD-socket-over-lwIP + OpenSSL-over-Mbed-TLS layers in
+ * cando_port/net_posix. */
 void cando_lib_httputil_register(struct CandoVM *vm)       { (void)vm; }
 /* http / https built-ins replaced by canboot_cando_open_httplib /
  * canboot_cando_open_httpslib in cando_port/lib/http.c. */
