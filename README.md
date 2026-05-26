@@ -98,8 +98,9 @@ gnu-efi) loaders on x86_64; direct-kernel and AAVMF on aarch64. Both
 firmware paths populate the same `boot_info` (framebuffer, memory map,
 ACPI RSDP, command line) before dispatching the shared kernel.
 
-**HAL** — console (16550 / PL011), input (PS/2, virtio-input, USB-HID
-keyboard over xHCI), disk (virtio-blk, AHCI, NVMe), display (linear
+**HAL** — console (16550 / PL011), input (PS/2 keyboard + mouse/touchpad,
+virtio-input, universal USB-HID keyboard **and** mouse/pointer over xHCI),
+disk (virtio-blk, AHCI, NVMe), display (linear
 framebuffer with pixel / line /
 text / image primitives, virtio-gpu on aarch64), net (virtio-net, e1000,
 rtl8139, pcnet), audio (Intel HDA on x86, virtio-snd on aarch64), PCI(e)
@@ -209,8 +210,10 @@ Prebuilt nightly and stable images are on the
 ## Status
 
 CanBoot boots to a `/init.cdo` prompt on both firmware paths on x86_64
-and on aarch64. The HAL covers serial, input (PS/2, virtio-input, USB-HID
-keyboard over xHCI), disk (virtio-blk, AHCI, NVMe), framebuffer (with
+and on aarch64. The HAL covers serial, input (PS/2 keyboard +
+mouse/touchpad, virtio-input, universal USB-HID keyboard **and**
+mouse/pointer over xHCI — multiple devices bound at once), disk
+(virtio-blk, AHCI, NVMe), framebuffer (with
 pixel readback assertions in CI), virtio-gpu on
 aarch64, NICs (virtio-net, e1000, rtl8139, pcnet), and audio (Intel HDA +
 virtio-snd). The heap is carved from the usable `boot_info` memory map

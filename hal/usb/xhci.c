@@ -1,17 +1,28 @@
 /*
- * Minimal polled xHCI (USB 3) host-controller driver + USB-HID boot
- * keyboard, so non-virtio input works (QEMU `-device qemu-xhci -device
- * usb-kbd`).
+ * Polled xHCI (USB 3) host-controller driver + a universal USB-HID
+ * boot-protocol input driver, so non-virtio keyboards and pointing
+ * devices work (QEMU `-device qemu-xhci -device usb-kbd -device
+ * usb-mouse`).
  *
- * Scope is deliberately narrow: bring the controller up, enumerate the
- * single keyboard on a root-hub port (Enable Slot -> Address Device ->
- * Get/Set descriptors -> Configure Endpoint), then poll the interrupt-IN
- * endpoint for 8-byte HID boot reports and translate them into
- * canboot_event key-down/up events. No hubs, no hot-plug, one device.
+ * The HID layer follows the USB HID boot protocol - the same "works on
+ * anything" contract a firmware/OS basic HID driver relies on: force the
+ * device into its boot report (SET_PROTOCOL=0) and decode the fixed
+ * 8-byte keyboard / 3-4-byte mouse report. No report-descriptor parsing,
+ * so any boot-compliant keyboard, mouse, or touchpad binds with one code
+ * path regardless of vendor.
  *
- * No interrupts: the event ring is polled from the HAL input pump. All
- * rings / contexts / buffers live in this file's BSS, which the kernel
- * identity-maps in the first 4 GiB, so virtual == physical for DMA.
+ * The driver brings the controller up once, then enumerates *every*
+ * connected root-hub port (Enable Slot -> Address Device -> Get/Set
+ * descriptors -> Configure Endpoint), classifying each device as keyboard
+ * or pointer from its interface protocol. Up to MAX_HID devices bind
+ * simultaneously, so a laptop exposing both a keyboard and a touchpad over
+ * USB gets both. No hubs, no hot-plug.
+ *
+ * No interrupts: the single shared event ring is polled from the HAL input
+ * pump and each transfer completion is routed back to its device by the
+ * event's slot id. All rings / contexts / buffers live in this file's BSS,
+ * which the kernel identity-maps in the first 4 GiB, so virtual ==
+ * physical for DMA.
  */
 
 #include <stdbool.h>
@@ -96,21 +107,52 @@ struct __attribute__((packed)) trb {
 #define RING_SZ   16
 #define EVT_SZ    64
 #define MAX_SLOTS 16
+#define MAX_HID   4           /* concurrent HID devices we bind */
 
-/* DMA-resident structures (identity-mapped BSS). */
+/* Context buffers are sized for the 64-byte (CSZ=1) layout so a controller
+ * that advertises large contexts can't overrun them; ctx_entry() uses the
+ * runtime stride. */
+#define CTX_ENTRY_MAX 64
+
+enum hid_kind { HID_NONE = 0, HID_KEYBOARD, HID_MOUSE };
+
+/* Per-device state. The rings / device context / report buffers are
+ * DMA-resident, so they live in dedicated aligned arrays below indexed by
+ * the device's slot in g_hid[]; everything else is plain bookkeeping. */
+struct hid_dev {
+    bool     used;
+    uint8_t  kind;          /* enum hid_kind */
+    uint8_t  slot;          /* xHCI slot id (DCBAA index)        */
+    uint32_t port;          /* root-hub port                     */
+    uint8_t  int_epaddr;    /* HID interrupt IN endpoint address */
+    uint8_t  int_dci;       /* device context index of that EP   */
+    uint16_t int_mps;       /* interrupt EP max packet size      */
+    bool     int_pending;   /* a report TRB is queued            */
+    uint32_t ep0_idx, ep0_cycle;
+    uint32_t int_idx, int_cycle;
+    uint8_t  last[8];       /* last keyboard report, for make/break diffing */
+};
+
+/* Controller-global DMA-resident structures (identity-mapped BSS). */
 static __attribute__((aligned(64))) uint64_t   g_dcbaa[256];
 static __attribute__((aligned(64))) struct trb g_cmd_ring[RING_SZ];
 static __attribute__((aligned(64))) struct trb g_evt_ring[EVT_SZ];
 static __attribute__((aligned(64))) uint8_t    g_erst[64];
-static __attribute__((aligned(64))) struct trb g_ep0_ring[RING_SZ];
-static __attribute__((aligned(64))) struct trb g_int_ring[RING_SZ];
-static __attribute__((aligned(64))) uint8_t    g_input_ctx[33 * 32];
-static __attribute__((aligned(64))) uint8_t    g_dev_ctx[32 * 32];
 static __attribute__((aligned(4096))) uint64_t g_scratch_arr[64];
 static __attribute__((aligned(4096))) uint8_t  g_scratch_bufs[8][4096];
 static __attribute__((aligned(64))) uint8_t    g_descbuf[512];
-static __attribute__((aligned(64))) uint8_t    g_report[8];
+static __attribute__((aligned(64))) uint8_t    g_input_ctx[33 * CTX_ENTRY_MAX];
 static __attribute__((aligned(64))) uint8_t    g_setupbuf[8];
+
+/* Per-device DMA-resident structures. Each row is naturally aligned: a
+ * RING_SZ TRB ring is 256 bytes, a device context 2 KiB, both multiples of
+ * 64, so row i inherits the array's 64-byte alignment. */
+static __attribute__((aligned(64))) struct trb g_ep0_ring[MAX_HID][RING_SZ];
+static __attribute__((aligned(64))) struct trb g_int_ring[MAX_HID][RING_SZ];
+static __attribute__((aligned(64))) uint8_t    g_dev_ctx[MAX_HID][32 * CTX_ENTRY_MAX];
+static __attribute__((aligned(64))) uint8_t    g_report[MAX_HID][64];
+
+static struct hid_dev g_hid[MAX_HID];
 
 static volatile uint8_t *g_cap;
 static volatile uint8_t *g_op;
@@ -120,19 +162,8 @@ static uint32_t g_ctx_bytes = 32;
 
 static uint32_t g_cmd_idx, g_cmd_cycle = 1;
 static uint32_t g_evt_idx, g_evt_cycle = 1;
-static uint32_t g_ep0_idx, g_ep0_cycle = 1;
-static uint32_t g_int_idx, g_int_cycle = 1;
 
-static uint8_t  g_slot;
-static uint32_t g_int_port;          /* root-hub port of the keyboard      */
-static uint8_t  g_int_epaddr;        /* HID interrupt IN endpoint address  */
-static uint8_t  g_int_dci;           /* device context index of that EP    */
-static uint16_t g_int_mps = 8;       /* interrupt EP max packet size       */
-static bool     g_present;
-static bool     g_int_pending;       /* a report TRB is queued             */
-
-/* Last HID boot report, for key make/break diffing. */
-static uint8_t  g_last[8];
+static bool     g_present;           /* at least one HID device bound */
 
 /* ---- MMIO helpers ----------------------------------------------------- */
 static inline uint32_t rd32(volatile uint8_t *b, uint32_t o) {
@@ -185,7 +216,9 @@ static int poll_event(struct trb *out) {
 }
 
 /* Wait (bounded) for an event of `type`; returns completion code, or 0 on
- * timeout. Fills *out with the event TRB. */
+ * timeout. Fills *out with the event TRB. Other event types seen while
+ * waiting are discarded - safe during enumeration because no interrupt
+ * transfers are queued until every device is configured. */
 static uint32_t wait_event(uint32_t type, struct trb *out) {
     for (uint64_t spin = 0; spin < 50000000ull; spin++) {
         struct trb ev;
@@ -220,12 +253,15 @@ static uint32_t do_command(uint64_t param, uint32_t control, uint8_t *out_slot) 
 /* ---- Context accessors (32-byte entries; CSZ=1 -> 64 handled by stride) */
 static uint8_t *ctx_entry(uint8_t *base, int i) { return base + i * g_ctx_bytes; }
 
-/* ---- Control transfer on EP0 ------------------------------------------ *
+/* ---- Control transfer on a device's EP0 ------------------------------- *
  * Standard SETUP/DATA/STATUS sequence. `data` length up to 512. Returns
  * completion code of the status stage (1 = success). */
-static uint32_t control_xfer(uint8_t bmRequestType, uint8_t bRequest,
+static uint32_t control_xfer(struct hid_dev *d,
+                             uint8_t bmRequestType, uint8_t bRequest,
                              uint16_t wValue, uint16_t wIndex,
                              uint16_t wLength, void *data) {
+    int di = (int)(d - g_hid);
+    struct trb *ring = g_ep0_ring[di];
     uint64_t setup;
     uint8_t *s = g_setupbuf;
     s[0] = bmRequestType; s[1] = bRequest;
@@ -237,23 +273,23 @@ static uint32_t control_xfer(uint8_t bmRequestType, uint8_t bRequest,
     int in = (bmRequestType & 0x80) != 0;
     /* Setup stage (immediate data). TRT: 3=IN, 2=OUT, 0=no data. */
     uint32_t trt = wLength ? (in ? 3u : 2u) : 0u;
-    push_trb(g_ep0_ring, &g_ep0_idx, &g_ep0_cycle, setup, 8,
+    push_trb(ring, &d->ep0_idx, &d->ep0_cycle, setup, 8,
              TRB_TYPE(TRB_SETUP) | TRB_IDT | (trt << 16));
     if (wLength) {
-        push_trb(g_ep0_ring, &g_ep0_idx, &g_ep0_cycle,
+        push_trb(ring, &d->ep0_idx, &d->ep0_cycle,
                  (uint64_t)(uintptr_t)data, wLength,
                  TRB_TYPE(TRB_DATA) | (in ? (1u << 16) : 0));
     }
     /* Status stage: opposite direction, IOC. */
-    push_trb(g_ep0_ring, &g_ep0_idx, &g_ep0_cycle, 0, 0,
+    push_trb(ring, &d->ep0_idx, &d->ep0_cycle, 0, 0,
              TRB_TYPE(TRB_STATUS) | ((wLength && in) ? 0 : (1u << 16)) | TRB_IOC);
 
-    ring_slot_doorbell(g_slot, 1);    /* DCI 1 = EP0 */
+    ring_slot_doorbell(d->slot, 1);    /* DCI 1 = EP0 */
     struct trb ev;
     return wait_event(TRB_EV_TRANSFER, &ev);
 }
 
-/* ---- HID usage -> CanBoot key ----------------------------------------- */
+/* ---- HID keyboard usage -> CanBoot key -------------------------------- */
 static uint32_t hid_to_code(uint8_t usage, int shift) {
     if (usage >= 0x04 && usage <= 0x1D) {       /* a..z */
         char c = (char)('a' + (usage - 0x04));
@@ -287,13 +323,14 @@ static int report_has(const uint8_t *rep, uint8_t usage) {
     return 0;
 }
 
-static void emit_keys(const uint8_t *rep) {
+static void emit_keys(struct hid_dev *d) {
+    const uint8_t *rep = g_report[(int)(d - g_hid)];
     int shift = (rep[0] & 0x22) != 0;   /* L/R shift */
     /* Make: keys present now but not before. */
     for (int i = 2; i < 8; i++) {
         uint8_t u = rep[i];
         if (u == 0) continue;
-        if (report_has(g_last, u)) continue;
+        if (report_has(d->last, u)) continue;
         uint32_t code = hid_to_code(u, shift);
         if (!code) continue;
         struct canboot_event ev = {
@@ -304,7 +341,7 @@ static void emit_keys(const uint8_t *rep) {
     }
     /* Break: keys present before but not now. */
     for (int i = 2; i < 8; i++) {
-        uint8_t u = g_last[i];
+        uint8_t u = d->last[i];
         if (u == 0) continue;
         if (report_has(rep, u)) continue;
         uint32_t code = hid_to_code(u, shift);
@@ -315,16 +352,44 @@ static void emit_keys(const uint8_t *rep) {
         };
         canboot_input_push(&ev);
     }
-    memcpy(g_last, rep, 8);
+    memcpy(d->last, rep, 8);
 }
 
-/* Queue one interrupt-IN transfer for the next report. */
-static void queue_report(void) {
-    push_trb(g_int_ring, &g_int_idx, &g_int_cycle,
-             (uint64_t)(uintptr_t)g_report, g_int_mps,
+/* Decode a HID boot-protocol mouse report: byte0 = button bitmap (bit0
+ * left, bit1 right, bit2 middle), byte1 = dX, byte2 = dY (both 8-bit
+ * signed), optional byte3 = wheel. Unlike PS/2, HID Y grows downward, so
+ * the delta maps straight onto the framebuffer's top-left origin. */
+static void emit_mouse(struct hid_dev *d) {
+    const uint8_t *rep = g_report[(int)(d - g_hid)];
+    uint8_t buttons = rep[0];
+    int32_t dx = (int8_t)rep[1];
+    int32_t dy = (int8_t)rep[2];
+    int32_t wheel = (d->int_mps >= 4) ? (int8_t)rep[3] : 0;
+
+    if (dx || dy) canboot_input_mouse_move_rel(dx, dy);
+    canboot_input_mouse_button(CANBOOT_MOUSE_LEFT,   (buttons & 0x1) != 0);
+    canboot_input_mouse_button(CANBOOT_MOUSE_RIGHT,  (buttons & 0x2) != 0);
+    canboot_input_mouse_button(CANBOOT_MOUSE_MIDDLE, (buttons & 0x4) != 0);
+    if (wheel) canboot_input_mouse_wheel(wheel);
+}
+
+/* Queue one interrupt-IN transfer for the next report on device d. */
+static void queue_report(struct hid_dev *d) {
+    int di = (int)(d - g_hid);
+    /* Clear the report so a short packet (e.g. a 3-byte boot mouse) can't
+     * leave a stale trailing byte that fakes wheel motion. */
+    memset(g_report[di], 0, 8);
+    push_trb(g_int_ring[di], &d->int_idx, &d->int_cycle,
+             (uint64_t)(uintptr_t)g_report[di], d->int_mps,
              TRB_TYPE(TRB_NORMAL) | TRB_IOC);
-    ring_slot_doorbell(g_slot, g_int_dci);
-    g_int_pending = true;
+    ring_slot_doorbell(d->slot, d->int_dci);
+    d->int_pending = true;
+}
+
+static struct hid_dev *dev_by_slot(uint8_t slot) {
+    for (int i = 0; i < MAX_HID; i++)
+        if (g_hid[i].used && g_hid[i].slot == slot) return &g_hid[i];
+    return NULL;
 }
 
 /* ---- HAL input pump --------------------------------------------------- */
@@ -332,16 +397,19 @@ static void usb_hid_pump(void) {
     if (!g_present) return;
     struct trb ev;
     while (poll_event(&ev)) {
-        if (TRB_GET_TYPE(ev.control) == TRB_EV_TRANSFER) {
-            /* A queued interrupt report completed. */
-            uint32_t cc = (ev.status >> 24) & 0xFFu;
-            if (cc == CC_SUCCESS || cc == 13 /* short packet */) {
-                emit_keys(g_report);
-            }
-            g_int_pending = false;
+        if (TRB_GET_TYPE(ev.control) != TRB_EV_TRANSFER) continue;
+        /* A queued interrupt report completed; route it to its device. */
+        struct hid_dev *d = dev_by_slot((uint8_t)((ev.control >> 24) & 0xFFu));
+        if (!d) continue;
+        uint32_t cc = (ev.status >> 24) & 0xFFu;
+        if (cc == CC_SUCCESS || cc == 13 /* short packet */) {
+            if (d->kind == HID_MOUSE) emit_mouse(d);
+            else                      emit_keys(d);
         }
+        d->int_pending = false;
     }
-    if (!g_int_pending) queue_report();
+    for (int i = 0; i < MAX_HID; i++)
+        if (g_hid[i].used && !g_hid[i].int_pending) queue_report(&g_hid[i]);
 }
 
 /* ---- Enumeration ------------------------------------------------------ */
@@ -372,7 +440,11 @@ static uint16_t mps_for_speed(uint32_t speed) {
     }
 }
 
-static bool enumerate(uint32_t port) {
+/* Enumerate and configure the HID device on `port` into slot `d`. On
+ * success d->used/kind/slot/... are populated (but no report is queued
+ * yet). Returns false on any failure, leaving d unused. */
+static bool enumerate(struct hid_dev *d, uint32_t port) {
+    int di = (int)(d - g_hid);
     uint32_t speed = (rd32(g_op, OP_PORTSC(port)) >> PORTSC_SPEED_SHIFT)
                      & PORTSC_SPEED_MASK;
 
@@ -382,11 +454,11 @@ static bool enumerate(uint32_t port) {
         printf("canboot: xhci enable-slot failed\n");
         return false;
     }
-    g_slot = slot;
+    d->slot = slot;
 
     /* Device context + DCBAA entry. */
-    memset(g_dev_ctx, 0, sizeof(g_dev_ctx));
-    g_dcbaa[slot] = (uint64_t)(uintptr_t)g_dev_ctx;
+    memset(g_dev_ctx[di], 0, sizeof(g_dev_ctx[di]));
+    g_dcbaa[slot] = (uint64_t)(uintptr_t)g_dev_ctx[di];
 
     /* Input context: add slot + EP0. */
     memset(g_input_ctx, 0, sizeof(g_input_ctx));
@@ -400,10 +472,10 @@ static bool enumerate(uint32_t port) {
     uint16_t mps0 = mps_for_speed(speed);
     uint32_t *ep0 = (uint32_t *)ctx_entry(g_input_ctx, 2);
     ep0[1] = (4u << 3) | (mps0 << 16) | (3u << 1); /* EPtype=ctrl, MPS, CErr=3 */
-    g_ep0_idx = 0; g_ep0_cycle = 1;
-    ring_link(g_ep0_ring, 1);
-    ep0[2] = (uint32_t)(uintptr_t)g_ep0_ring | 1; /* TR dequeue ptr, DCS=1 */
-    ep0[3] = (uint32_t)((uint64_t)(uintptr_t)g_ep0_ring >> 32);
+    d->ep0_idx = 0; d->ep0_cycle = 1;
+    ring_link(g_ep0_ring[di], 1);
+    ep0[2] = (uint32_t)(uintptr_t)g_ep0_ring[di] | 1; /* TR dequeue ptr, DCS=1 */
+    ep0[3] = (uint32_t)((uint64_t)(uintptr_t)g_ep0_ring[di] >> 32);
 
     if (do_command((uint64_t)(uintptr_t)g_input_ctx,
                    TRB_TYPE(TRB_ADDRESS_DEV) | (slot << 24), NULL) != CC_SUCCESS) {
@@ -413,29 +485,36 @@ static bool enumerate(uint32_t port) {
 
     /* GET_DESCRIPTOR(configuration) - first 9 bytes for total length. */
     memset(g_descbuf, 0, sizeof(g_descbuf));
-    if (control_xfer(0x80, 0x06, 0x0200, 0, 9, g_descbuf) != CC_SUCCESS)
+    if (control_xfer(d, 0x80, 0x06, 0x0200, 0, 9, g_descbuf) != CC_SUCCESS)
         return false;
     uint16_t total = (uint16_t)(g_descbuf[2] | (g_descbuf[3] << 8));
     if (total > sizeof(g_descbuf)) total = sizeof(g_descbuf);
-    if (control_xfer(0x80, 0x06, 0x0200, 0, total, g_descbuf) != CC_SUCCESS)
+    if (control_xfer(d, 0x80, 0x06, 0x0200, 0, total, g_descbuf) != CC_SUCCESS)
         return false;
 
-    /* Walk descriptors: find HID interface + interrupt IN endpoint. */
+    /* Walk descriptors: find the HID interface, classify it from its boot
+     * protocol, and pick its interrupt IN endpoint. */
     uint8_t cfg_value = g_descbuf[5];
     uint8_t iface_no = 0;
+    uint8_t cur_class = 0, cur_proto = 0;   /* of the interface we're inside */
     int found = 0;
     for (int i = 0; i + 1 < total; ) {
         uint8_t len = g_descbuf[i], typ = g_descbuf[i + 1];
         if (len == 0) break;
         if (typ == 0x04) {                       /* INTERFACE */
-            iface_no = g_descbuf[i + 2];
+            iface_no  = g_descbuf[i + 2];
+            cur_class = g_descbuf[i + 5];        /* bInterfaceClass    */
+            cur_proto = g_descbuf[i + 7];        /* bInterfaceProtocol */
         } else if (typ == 0x05) {                /* ENDPOINT */
             uint8_t addr = g_descbuf[i + 2];
             uint8_t attr = g_descbuf[i + 3];
-            if ((addr & 0x80) && (attr & 0x3) == 0x3) {  /* IN interrupt */
-                g_int_epaddr = addr;
-                g_int_mps = (uint16_t)(g_descbuf[i + 4] | (g_descbuf[i + 5] << 8));
-                if (g_int_mps == 0 || g_int_mps > 8) g_int_mps = 8;
+            if (cur_class == 0x03 &&             /* HID interface         */
+                (addr & 0x80) && (attr & 0x3) == 0x3) {  /* IN interrupt  */
+                d->int_epaddr = addr;
+                d->int_mps = (uint16_t)(g_descbuf[i + 4] | (g_descbuf[i + 5] << 8));
+                if (d->int_mps == 0 || d->int_mps > 8) d->int_mps = 8;
+                /* HID boot protocol: 1 = keyboard, 2 = mouse/pointer. */
+                d->kind = (cur_proto == 2) ? HID_MOUSE : HID_KEYBOARD;
                 found = 1;
                 break;
             }
@@ -445,29 +524,29 @@ static bool enumerate(uint32_t port) {
     if (!found) { printf("canboot: xhci no HID interrupt EP\n"); return false; }
 
     /* SET_CONFIGURATION. */
-    if (control_xfer(0x00, 0x09, cfg_value, 0, 0, NULL) != CC_SUCCESS)
+    if (control_xfer(d, 0x00, 0x09, cfg_value, 0, 0, NULL) != CC_SUCCESS)
         return false;
     /* SET_PROTOCOL(boot=0) on the HID interface (class request). */
-    control_xfer(0x21, 0x0B, 0, iface_no, 0, NULL);
+    control_xfer(d, 0x21, 0x0B, 0, iface_no, 0, NULL);
 
     /* Configure Endpoint: add the interrupt IN endpoint. */
-    uint8_t epnum = g_int_epaddr & 0x0F;
-    g_int_dci = (uint8_t)(epnum * 2 + 1);        /* IN endpoint DCI */
+    uint8_t epnum = d->int_epaddr & 0x0F;
+    d->int_dci = (uint8_t)(epnum * 2 + 1);       /* IN endpoint DCI */
     memset(g_input_ctx, 0, sizeof(g_input_ctx));
     icc = (uint32_t *)ctx_entry(g_input_ctx, 0);
-    icc[1] = (1u << 0) | (1u << g_int_dci);      /* add slot + this EP */
+    icc[1] = (1u << 0) | (1u << d->int_dci);     /* add slot + this EP */
     slotc = (uint32_t *)ctx_entry(g_input_ctx, 1);
-    slotc[0] = ((uint32_t)g_int_dci << 27) | (speed << 20);
+    slotc[0] = ((uint32_t)d->int_dci << 27) | (speed << 20);
     slotc[1] = (port << 16);
 
-    g_int_idx = 0; g_int_cycle = 1;
-    ring_link(g_int_ring, 1);
-    uint32_t *epc = (uint32_t *)ctx_entry(g_input_ctx, g_int_dci + 1);
+    d->int_idx = 0; d->int_cycle = 1;
+    ring_link(g_int_ring[di], 1);
+    uint32_t *epc = (uint32_t *)ctx_entry(g_input_ctx, d->int_dci + 1);
     epc[0] = (3u << 16);                          /* interval (approx) */
-    epc[1] = (7u << 3) | (g_int_mps << 16) | (3u << 1); /* EPtype=intr-IN */
-    epc[2] = (uint32_t)(uintptr_t)g_int_ring | 1;
-    epc[3] = (uint32_t)((uint64_t)(uintptr_t)g_int_ring >> 32);
-    epc[4] = g_int_mps;                           /* avg TRB length */
+    epc[1] = (7u << 3) | (d->int_mps << 16) | (3u << 1); /* EPtype=intr-IN */
+    epc[2] = (uint32_t)(uintptr_t)g_int_ring[di] | 1;
+    epc[3] = (uint32_t)((uint64_t)(uintptr_t)g_int_ring[di] >> 32);
+    epc[4] = d->int_mps;                          /* avg TRB length */
 
     if (do_command((uint64_t)(uintptr_t)g_input_ctx,
                    TRB_TYPE(TRB_CONFIG_EP) | (slot << 24), NULL) != CC_SUCCESS) {
@@ -475,9 +554,19 @@ static bool enumerate(uint32_t port) {
         return false;
     }
 
-    printf("canboot: usb-hid keyboard on port %u slot %u ep 0x%02x mps %u\n",
-           port, slot, g_int_epaddr, g_int_mps);
+    d->port = port;
+    d->used = true;
+    memset(d->last, 0, sizeof(d->last));
+    printf("canboot: usb-hid %s on port %u slot %u ep 0x%02x mps %u\n",
+           d->kind == HID_MOUSE ? "mouse" : "keyboard",
+           port, slot, d->int_epaddr, d->int_mps);
     return true;
+}
+
+static struct hid_dev *alloc_dev(void) {
+    for (int i = 0; i < MAX_HID; i++)
+        if (!g_hid[i].used) return &g_hid[i];
+    return NULL;
 }
 
 bool canboot_usb_hid_init(void) {
@@ -490,6 +579,8 @@ bool canboot_usb_hid_init(void) {
             devs[i].prog_if    == XHCI_PROGIF) { pd = &devs[i]; break; }
     }
     if (!pd) return false;
+
+    memset(g_hid, 0, sizeof(g_hid));
 
     hal_pci_enable_bus_master(pd->addr);
     uint64_t bar = hal_pci_bar_addr(pd->addr, 0);
@@ -559,19 +650,34 @@ bool canboot_usb_hid_init(void) {
         canboot_cpu_relax();
     }
 
-    /* Find a connected port, reset it, enumerate. */
+    /* Enumerate every connected root-hub port, binding up to MAX_HID HID
+     * devices (e.g. a keyboard and a mouse/touchpad simultaneously). No
+     * interrupt transfers are queued during this loop so the shared event
+     * ring carries only command/port events. */
     for (uint32_t p = 1; p <= maxports; p++) {
         if (!(rd32(g_op, OP_PORTSC(p)) & PORTSC_CCS)) continue;
         if (!reset_port(p)) continue;
-        if (enumerate(p)) {
-            g_int_port = p;
-            g_present = true;
-            queue_report();
-            canboot_input_register_pump(usb_hid_pump);
-            return true;
+        struct hid_dev *d = alloc_dev();
+        if (!d) break;                         /* table full */
+        if (!enumerate(d, p)) {
+            memset(d, 0, sizeof(*d));          /* roll back a partial bind */
         }
     }
-    printf("canboot: xhci up (%u ports) but no HID keyboard enumerated\n",
+
+    /* Now arm every bound device and register the single shared pump. */
+    int bound = 0;
+    for (int i = 0; i < MAX_HID; i++) {
+        if (!g_hid[i].used) continue;
+        queue_report(&g_hid[i]);
+        bound++;
+    }
+    if (bound) {
+        g_present = true;
+        canboot_input_register_pump(usb_hid_pump);
+        return true;
+    }
+
+    printf("canboot: xhci up (%u ports) but no HID device enumerated\n",
            maxports);
     return false;
 }

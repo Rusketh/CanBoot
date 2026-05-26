@@ -78,13 +78,22 @@ if [ -n "${NVME_IMG:-}" ]; then
     NVME_ARGS="-drive if=none,id=nvm0,file=$NVME_IMG,format=raw -device nvme,serial=canvme,drive=nvm0"
 fi
 
-# Optional USB: an xHCI controller with a USB-HID boot keyboard. When
-# USB_KBD is set the kernel's xHCI driver enumerates it and feeds key
-# events; injected keystrokes arrive tagged source=usb-hid.
+# Optional USB: an xHCI controller with USB-HID boot devices. When USB_KBD
+# is set the kernel's xHCI driver enumerates a boot keyboard and feeds key
+# events; injected keystrokes arrive tagged source=usb-hid. When USB_MOUSE
+# is set a boot mouse is attached too, so the driver binds both devices
+# simultaneously (universal-HID class detection + multi-device) and the
+# pointer probe is driven through the USB mouse.
 USB_ARGS=""
-if [ -n "${USB_KBD:-}" ]; then
-    USB_ARGS="-device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0"
-    KBD_DEV=""   # drop the virtio keyboard so sendkey routes to usb-kbd
+if [ -n "${USB_KBD:-}" ] || [ -n "${USB_MOUSE:-}" ]; then
+    USB_ARGS="-device qemu-xhci,id=xhci"
+    if [ -n "${USB_KBD:-}" ]; then
+        USB_ARGS="$USB_ARGS -device usb-kbd,bus=xhci.0"
+        KBD_DEV=""   # drop the virtio keyboard so sendkey routes to usb-kbd
+    fi
+    if [ -n "${USB_MOUSE:-}" ]; then
+        USB_ARGS="$USB_ARGS -device usb-mouse,bus=xhci.0"
+    fi
 fi
 
 AUDIO_WAV="${AUDIO_WAV:-build/canboot-bios-audio.wav}"
@@ -303,9 +312,14 @@ PY
         }
         check 'canboot: framebuffer painted'
         check 'canboot: ps/2 input ready'
-        if [ -n "${USB_KBD:-}" ]; then
-            check 'canboot: usb-hid keyboard on port'
-            check 'canboot: rx usb-hid'
+        if [ -n "${USB_KBD:-}" ] || [ -n "${USB_MOUSE:-}" ]; then
+            # Each attached boot device must enumerate and be classified
+            # correctly (proves universal-HID class detection + binding
+            # more than one device on the same controller).
+            [ -n "${USB_KBD:-}" ]   && check 'canboot: usb-hid keyboard on port'
+            [ -n "${USB_MOUSE:-}" ] && check 'canboot: usb-hid mouse on port'
+            # Injected keystrokes arrive tagged source=usb-hid.
+            [ -n "${USB_KBD:-}" ]   && check 'canboot: rx usb-hid'
         else
             check 'canboot: virtio-input ready'
             check 'canboot: rx '

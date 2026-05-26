@@ -91,9 +91,17 @@ Backends:
 
 | File | Driver |
 |------|--------|
-| `hal/input/ps2.c`          | x86_64 i8042 |
-| `hal/input/virtio_input.c` | virtio-input modern PCI |
+| `hal/input/ps2.c`          | x86_64 i8042 keyboard + mouse/touchpad (aux port) |
+| `hal/input/virtio_input.c` | virtio-input modern PCI (keyboard, mouse, tablet) |
+| `hal/usb/xhci.c`           | xHCI + universal USB-HID boot keyboard **and** mouse/pointer; binds several devices at once |
 | `hal/input/input_stub_aarch64.c` | aarch64 only-keyboard-via-virtio stub |
+
+The USB-HID layer uses the HID *boot protocol* (`SET_PROTOCOL=0`) and
+classifies each device from its interface protocol (1 = keyboard,
+2 = mouse), so any boot-compliant keyboard or pointing device binds
+through one code path — the same "works on anything" contract a basic
+firmware/OS HID driver relies on. Keyboards push key events into the ring;
+pointers feed the shared `canboot_input_mouse_*` state.
 
 ## Console — `hal/include/hal/console.h`
 
