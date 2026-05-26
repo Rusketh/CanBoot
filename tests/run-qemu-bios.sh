@@ -121,6 +121,17 @@ if [ -n "${GPU_DEV:-}" ]; then
     GPU_ARGS="-device virtio-gpu-pci"
 fi
 
+# Audio device under test: "hda" (default, Intel HDA) or "ac97". The kernel's
+# audio backend probes HDA then AC'97 and binds whichever is present.
+AUDIO="${AUDIO:-hda}"
+if [ "$AUDIO" = "ac97" ]; then
+    AUDIO_DEV_ARGS="-device AC97,audiodev=snd"
+    AUDIO_NAME="ac97"
+else
+    AUDIO_DEV_ARGS="-device intel-hda -device hda-duplex,audiodev=snd"
+    AUDIO_NAME="intel-hda"
+fi
+
 AUDIO_WAV="${AUDIO_WAV:-build/canboot-bios-audio.wav}"
 rm -f "$AUDIO_WAV"
 qemu-system-x86_64 \
@@ -138,8 +149,7 @@ qemu-system-x86_64 \
     $RNG_ARGS \
     $GPU_ARGS \
     -audiodev "wav,id=snd,path=$AUDIO_WAV" \
-    -device intel-hda \
-    -device hda-duplex,audiodev=snd \
+    $AUDIO_DEV_ARGS \
     -serial "file:$LOG" \
     -monitor "unix:$MON_SOCK,server,nowait" \
     -display none \
@@ -522,7 +532,7 @@ PY
         # captured WAV must contain non-silent samples (proof the
         # kernel pushed our sine tone into the DMA ring and the
         # device drained it through to the host wav backend).
-        check 'cando audio.deviceName = intel-hda'
+        check "cando audio.deviceName = $AUDIO_NAME"
         check 'cando audio.present = true'
         check 'cando audio.newSource = 0'
         check 'cando audio.play(src) = true'

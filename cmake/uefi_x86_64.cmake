@@ -46,7 +46,9 @@ if(GNUEFI_INCLUDE_DIR AND GNUEFI_ARCH_INCLUDE_DIR
         ${CANBOOT_NTFS3G_SOURCES}
         ${CANBOOT_NTFS3G_MKFS_SOURCES}
         ${CANBOOT_LWEXT4_SOURCES}
+        hal/audio/audio_x86.c
         hal/audio/intel_hda.c
+        hal/audio/ac97.c
     )
 
     set(EFI_OBJS "")
