@@ -248,33 +248,33 @@ static bool try_iso(struct canboot_disk *d, char *out, uint32_t *out_size,
     return true;
 }
 
-/* Raw sector round-trip on the NVMe device, when present. Saves a scratch
+/* Raw sector round-trip on a named device, when present. Saves a scratch
  * sector, writes a known pattern, reads it back, verifies, and restores
- * the original contents. */
-static void nvme_test(uint32_t nd) {
-    struct canboot_disk *nv = NULL;
+ * the original contents. Used for the NVMe and USB-storage smoke paths. */
+static void raw_rw_test(uint32_t nd, const char *name) {
+    struct canboot_disk *dev = NULL;
     for (uint32_t i = 0; i < nd; i++) {
         struct canboot_disk *d = hal_disk_get(i);
-        if (d && strcmp(d->name, "nvme0") == 0) { nv = d; break; }
+        if (d && strcmp(d->name, name) == 0) { dev = d; break; }
     }
-    if (!nv) return;
-    printf("selftest: nvme present blocks=%llu bs=%u\n",
-           (unsigned long long)nv->block_count, nv->block_size);
+    if (!dev) return;
+    printf("selftest: %s present blocks=%llu bs=%u\n",
+           name, (unsigned long long)dev->block_count, dev->block_size);
 
-    uint32_t bs = nv->block_size;
-    if (bs == 0 || bs > 4096) { printf("selftest: FAIL nvme bad block size\n"); return; }
+    uint32_t bs = dev->block_size;
+    if (bs == 0 || bs > 4096) { printf("selftest: FAIL %s bad block size\n", name); return; }
     static __attribute__((aligned(8))) uint8_t save[4096];
     static __attribute__((aligned(8))) uint8_t pat[4096];
     static __attribute__((aligned(8))) uint8_t back[4096];
     uint64_t lba = 2;   /* scratch sector well past any boot sector */
 
-    if (hal_disk_read(nv, lba, 1, save) != 0) { printf("selftest: FAIL nvme read\n"); return; }
+    if (hal_disk_read(dev, lba, 1, save) != 0) { printf("selftest: FAIL %s read\n", name); return; }
     for (uint32_t i = 0; i < bs; i++) pat[i] = (uint8_t)(i * 7 + 0x5A);
-    if (hal_disk_write(nv, lba, 1, pat) != 0) { printf("selftest: FAIL nvme write\n"); return; }
-    if (hal_disk_read(nv, lba, 1, back) != 0) { printf("selftest: FAIL nvme readback\n"); return; }
-    if (memcmp(pat, back, bs) != 0) { printf("selftest: FAIL nvme data mismatch\n"); return; }
-    hal_disk_write(nv, lba, 1, save);   /* restore */
-    printf("selftest: nvme read/write ok\n");
+    if (hal_disk_write(dev, lba, 1, pat) != 0) { printf("selftest: FAIL %s write\n", name); return; }
+    if (hal_disk_read(dev, lba, 1, back) != 0) { printf("selftest: FAIL %s readback\n", name); return; }
+    if (memcmp(pat, back, bs) != 0) { printf("selftest: FAIL %s data mismatch\n", name); return; }
+    hal_disk_write(dev, lba, 1, save);   /* restore */
+    printf("selftest: %s read/write ok\n", name);
 }
 
 void disk_selftest(void) {
@@ -282,7 +282,8 @@ void disk_selftest(void) {
 
     hal_disk_init();
     uint32_t nd = hal_disk_count();
-    nvme_test(nd);
+    raw_rw_test(nd, "nvme0");
+    raw_rw_test(nd, "usb0");
     printf("selftest: discovered %u block device(s)\n", (unsigned)nd);
     for (uint32_t i = 0; i < nd; i++) {
         struct canboot_disk *d = hal_disk_get(i);

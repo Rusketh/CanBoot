@@ -78,14 +78,16 @@ if [ -n "${NVME_IMG:-}" ]; then
     NVME_ARGS="-drive if=none,id=nvm0,file=$NVME_IMG,format=raw -device nvme,serial=canvme,drive=nvm0"
 fi
 
-# Optional USB: an xHCI controller with USB-HID boot devices. When USB_KBD
-# is set the kernel's xHCI driver enumerates a boot keyboard and feeds key
-# events; injected keystrokes arrive tagged source=usb-hid. When USB_MOUSE
-# is set a boot mouse is attached too, so the driver binds both devices
-# simultaneously (universal-HID class detection + multi-device) and the
-# pointer probe is driven through the USB mouse.
+# Optional USB: an xHCI controller with USB-HID boot devices and/or a USB
+# mass-storage disk. When USB_KBD is set the kernel's xHCI driver enumerates
+# a boot keyboard and feeds key events; injected keystrokes arrive tagged
+# source=usb-hid. When USB_MOUSE is set a boot mouse is attached too, so the
+# driver binds both devices simultaneously (universal-HID class detection +
+# multi-device) and the pointer probe is driven through the USB mouse. When
+# USB_DISK is set a usb-storage device is attached and the disk selftest does
+# a raw read/write round-trip against it (universal SCSI Bulk-Only Transport).
 USB_ARGS=""
-if [ -n "${USB_KBD:-}" ] || [ -n "${USB_MOUSE:-}" ]; then
+if [ -n "${USB_KBD:-}" ] || [ -n "${USB_MOUSE:-}" ] || [ -n "${USB_DISK:-}" ]; then
     USB_ARGS="-device qemu-xhci,id=xhci"
     if [ -n "${USB_KBD:-}" ]; then
         USB_ARGS="$USB_ARGS -device usb-kbd,bus=xhci.0"
@@ -93,6 +95,12 @@ if [ -n "${USB_KBD:-}" ] || [ -n "${USB_MOUSE:-}" ]; then
     fi
     if [ -n "${USB_MOUSE:-}" ]; then
         USB_ARGS="$USB_ARGS -device usb-mouse,bus=xhci.0"
+    fi
+    if [ -n "${USB_DISK:-}" ]; then
+        USB_DISK_IMG="${USB_DISK_IMG:-build/canboot-usbdisk.img}"
+        [ -f "$USB_DISK_IMG" ] || truncate -s 16M "$USB_DISK_IMG"
+        USB_ARGS="$USB_ARGS -drive if=none,id=usbstick,file=$USB_DISK_IMG,format=raw"
+        USB_ARGS="$USB_ARGS -device usb-storage,drive=usbstick,bus=xhci.0"
     fi
 fi
 
@@ -353,6 +361,10 @@ PY
 
         if [ -n "${NVME_IMG:-}" ]; then
             check 'selftest: nvme read/write ok'
+        fi
+        if [ -n "${USB_DISK:-}" ]; then
+            check 'canboot: usb-storage usb0'
+            check 'selftest: usb0 read/write ok'
         fi
         check 'selftest: disk test ok'
         check 'selftest: cando_open ok'

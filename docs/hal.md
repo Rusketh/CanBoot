@@ -66,8 +66,17 @@ Backends register via `hal_disk_register`. Currently:
 
 | File | Driver |
 |------|--------|
-| `hal/disk/virtio_blk.c` | virtio-blk-pci |
-| `hal/disk/ahci.c`       | AHCI SATA |
+| `hal/disk/virtio_blk.c`  | virtio-blk-pci |
+| `hal/disk/ahci.c`        | AHCI SATA |
+| `hal/disk/nvme.c`        | NVMe |
+| `hal/disk/usb_storage.c` | USB mass storage (SCSI Bulk-Only Transport over xHCI) |
+
+The USB mass-storage backend is the universal USB-disk driver: the
+class/subclass/protocol (`0x08` / `0x06` / `0x50`) every USB flash drive and
+external disk implements. It layers SCSI transparent commands
+(INQUIRY / READ CAPACITY / READ(10) / WRITE(10)) on the xHCI core's bulk
+primitive and registers each device as `usb0`, `usb1`, ... so the FS layer
+can mount it - CanBoot can boot/read its `.cdo` from a USB stick.
 
 ## Display — `hal/include/hal/display.h`
 

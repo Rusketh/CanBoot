@@ -61,5 +61,6 @@ bool canboot_disk_register(const struct canboot_disk *d);
 bool canboot_virtio_blk_init(void);
 bool canboot_ahci_init(void);
 bool canboot_nvme_init(void);
+bool canboot_usb_storage_init(void);
 
 #endif /* CANBOOT_HAL_DISK_H */

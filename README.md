@@ -100,7 +100,7 @@ ACPI RSDP, command line) before dispatching the shared kernel.
 
 **HAL** — console (16550 / PL011), input (PS/2 keyboard + mouse/touchpad,
 virtio-input, universal USB-HID keyboard **and** mouse/pointer over xHCI),
-disk (virtio-blk, AHCI, NVMe), display (linear
+disk (virtio-blk, AHCI, NVMe, USB mass storage), display (linear
 framebuffer with pixel / line /
 text / image primitives, virtio-gpu on aarch64), net (virtio-net, e1000,
 rtl8139, pcnet), audio (Intel HDA on x86, virtio-snd on aarch64), PCI(e)
@@ -213,7 +213,7 @@ CanBoot boots to a `/init.cdo` prompt on both firmware paths on x86_64
 and on aarch64. The HAL covers serial, input (PS/2 keyboard +
 mouse/touchpad, virtio-input, universal USB-HID keyboard **and**
 mouse/pointer over xHCI — multiple devices bound at once), disk
-(virtio-blk, AHCI, NVMe), framebuffer (with
+(virtio-blk, AHCI, NVMe, USB mass storage over xHCI), framebuffer (with
 pixel readback assertions in CI), virtio-gpu on
 aarch64, NICs (virtio-net, e1000, rtl8139, pcnet), and audio (Intel HDA +
 virtio-snd). The heap is carved from the usable `boot_info` memory map

@@ -205,11 +205,13 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # Exercise the xHCI + universal USB-HID input: boot the BIOS smoke image
-  # with a qemu-xhci controller carrying both a usb-kbd and a usb-mouse (and
-  # no virtio keyboard, so injected keystrokes route to USB). The kernel
-  # enumerates both, classifies each from its HID boot protocol, binds them
-  # simultaneously, and the injected keys arrive tagged source=usb-hid.
+  # Exercise the xHCI + universal USB class drivers: boot the BIOS smoke
+  # image with a qemu-xhci controller carrying a usb-kbd, a usb-mouse and a
+  # usb-storage disk (and no virtio keyboard, so injected keystrokes route to
+  # USB). The kernel enumerates all three, classifies each from its
+  # interface descriptors, binds them simultaneously, delivers keys tagged
+  # source=usb-hid, and the disk selftest does a SCSI read/write round-trip
+  # over Bulk-Only Transport against the usb-storage device.
   usb-x86_64:
     name: x86_64 usb
     runs-on: ubuntu-latest
@@ -241,10 +243,11 @@ jobs:
               build/canboot-x86_64.elf
               build/canboot-x86_64-bios.iso
 
-      - name: QEMU smoke test (usb-kbd + usb-mouse)
+      - name: QEMU smoke test (usb-kbd + usb-mouse + usb-storage)
         env:
           USB_KBD: "1"
           USB_MOUSE: "1"
+          USB_DISK: "1"
           TIMEOUT: "280"
         run: bash tests/run-qemu-bios.sh build/canboot-x86_64-bios.iso
 
