@@ -345,6 +345,10 @@ PY
         check 'selftest: cando_openlibs ok'
         check 'selftest: cando_close ok'
         check 'selftest: cando link test ok'
+        # Focused tracing-JIT self-test (tests/selftest/cando.c).
+        check 'selftest: jit parity ok'
+        check 'selftest: jit native ok'
+        check 'selftest: jit test ok'
         check 'canboot-cando-runtime-marker'
         check 'selftest: cando_dostring ok'
         check 'selftest: init.cdo executed ok'

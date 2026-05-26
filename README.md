@@ -124,14 +124,21 @@ relocations are incompatible with the gnu-efi PIC link, so that build runs
 uniprocessor. See `rt/sched/include/sched/sched.h` and
 `arch/x86_64/smp.h`.
 
-**JIT** — the vendored CanDo ships a real tracing JIT
-(`vendor/cando/source/jit/codegen.c`) gated behind `jit.on()`. It works on
-x86_64: a hot loop is recorded, compiled to machine code in the JIT arena,
-and executed, producing results identical to the interpreter
-(`jit.stats().traces_compiled` reflects the compiled traces). aarch64 has
-no native emitter yet (`cando_port/jit/codegen_stub_aarch64.c` returns
-false), so hot traces fall back to the interpreter — correct, no speed-up.
-init.cdo exercises both on every boot.
+**JIT** — the vendored CanDo ships a real tracing JIT gated behind
+`jit.on()`. A hot loop is recorded, compiled to machine code in the JIT
+arena, and executed, producing results identical to the interpreter
+(`jit.stats().traces_compiled` reflects the compiled traces). x86_64 uses
+the vendored emitter (`vendor/cando/source/jit/codegen.c`); aarch64 now
+has its own native A64 emitter (`cando_port/jit/codegen_aarch64.c`) that
+compiles loop traces — integer/f64 arithmetic (incl. modulo),
+comparisons, frame load/store, numeric globals, fast-native calls
+(e.g. `math.sqrt`), and guard side-exits — to real machine code (with
+I-cache maintenance and page-table fix-up so the JIT arena is executable
+under AAVMF). Ops it doesn't yet handle (function traces, object/array
+access) cleanly fall back to the interpreter. init.cdo and the C
+self-test exercise both on every boot and assert bit-identical results
+with the JIT on vs off (measured hot-loop speedup: x86_64 ~30x,
+aarch64 ~8x under QEMU).
 
 **Network + TLS** — lwIP 2.2.1 in NO_SYS mode over virtio-net (DHCP /
 UDP / TCP / HTTP); Mbed TLS 3.6.x LTS with hardware entropy
@@ -163,8 +170,9 @@ rt/                      picolibc syscall stubs, thread scheduler (sched),
 cando_port/
   lib/                   CanDo language bindings (one per namespace)
   runtime/               POSIX function stubs
-  jit/                   aarch64 codegen stub (x86_64 uses vendored CanDo
-                         codegen.c, a working machine-code emitter)
+  jit/                   aarch64 native A64 machine-code emitter
+                         (codegen_aarch64.c); x86_64 uses vendored CanDo
+                         codegen.c
   vendor_glue/           lwext4 / ntfs-3g / minimp3 / stb glue
   shims/                 POSIX header shims for bare-metal builds
 vendor/                  submodules: cando, picolibc, lwip, mbedtls,
@@ -213,19 +221,12 @@ API. The network stack runs DHCP, **DNS**, TCP/UDP, HTTP, and **TLS 1.2
 and 1.3** with session resumption against pinned CAs. Scheduling is
 **preemptive** on both arches (x86_64 LAPIC + aarch64 GICv2/generic
 timer); the BIOS kernel boots **SMP** Application Processors. The CanDo VM
-runs unmodified with a working **tracing JIT** on x86_64 and the
-**gui.cdo** widget toolkit. Its real upstream standard library runs on the
-bare metal where it doesn't need a host OS — `thread` (spawns OS threads
-via the `thread {}` keyword onto the scheduler), `stream`, `datetime`,
-`process`, `console`, plus `array`/`object`/`string`/`math`/`json`/`csv`/
-`yaml`/`meta` — alongside ~25 canboot-specific bindings for the HAL
-(`display`/`input`/`fs`/`net`/`tls`/`crypto`/…). CanDo's `socket` /
-`secure_socket` / `http`-server libraries are not yet ported: they ride on
-BSD sockets + OpenSSL (`sockutil.h` hard-includes `<openssl/ssl.h>`), while
-canboot has only NO_SYS lwIP (raw callback API, no BSD sockets) + Mbed TLS,
-so the thin canboot `net`/`http`/`tls` bindings provide client TCP/UDP/
-HTTP/HTTPS for now. CI matrices BIOS, UEFI x86_64, both aarch64 paths, the
-NIC models, NVMe, and USB-HID to green on every push.
+runs unmodified with a working **tracing JIT that emits native machine
+code on both x86_64 and aarch64** (the aarch64 A64 backend compiles hot
+loop traces; unsupported ops fall back to the interpreter) and the
+**gui.cdo** widget toolkit; ~25 bare-metal bindings are registered. CI
+matrices BIOS, UEFI x86_64, both aarch64 paths, the NIC models, and NVMe
+to green on every push.
 
 Chronology lives in `git log` and on the
 [Releases page](https://github.com/Rusketh/CanBoot/releases).

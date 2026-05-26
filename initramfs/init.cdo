@@ -523,10 +523,14 @@ print("cando concurrent workers =", cr1, cr2);
 print("cando stdlib end");
 
 // ---- JIT: profile a compute-heavy loop, compile it, verify parity ----
-// On x86_64 the vendored CanDo codegen (vendor/cando/source/jit/codegen.c)
-// emits real machine code for hot traces; on aarch64 codegen is stubbed
-// so this runs interpreted (traces_compiled stays 0). Either way the
-// result must be identical with JIT on vs off.
+// The vendored CanDo codegen (vendor/cando/source/jit/codegen.c on
+// x86_64, cando_port/jit/codegen_aarch64.c on aarch64) emits real
+// machine code for hot traces on BOTH arches now. The hot inner WHILE
+// loop mixes integer scaling, f64 division and a comparison/branch, so
+// it exercises the arithmetic + guard paths. Whatever the backend, the
+// result MUST be bit-identical with JIT on vs off, and traces_compiled
+// must reach >=1. We also time both runs so the boot log reports the
+// measured speedup.
 print("cando jit begin");
 VAR jheavy = FUNCTION(n) {
     VAR acc = 0;
@@ -535,15 +539,23 @@ VAR jheavy = FUNCTION(n) {
     RETURN acc;
 };
 jit.reset();
-VAR jit_off = jheavy(100000);
+jit.off();
+VAR jit_off = 0;
+VAR jit_rep = 0;
+VAR jit_t_off0 = time.ms();
+WHILE (jit_rep < 20) { jit_off = jheavy(100000); jit_rep = jit_rep + 1; }
+VAR jit_t_off1 = time.ms();
 jit.on();
 VAR jit_on = 0;
-VAR jit_rep = 0;
-WHILE (jit_rep < 30) { jit_on = jheavy(100000); jit_rep = jit_rep + 1; }
+jit_rep = 0;
+VAR jit_t_on0 = time.ms();
+WHILE (jit_rep < 20) { jit_on = jheavy(100000); jit_rep = jit_rep + 1; }
+VAR jit_t_on1 = time.ms();
 VAR jit_st = jit.stats();
 jit.off();
 print("cando jit match =", jit_off == jit_on);
 print("cando jit traces_compiled =", jit_st.traces_compiled);
+print("cando jit off_ms =", jit_t_off1 - jit_t_off0, "on_ms =", jit_t_on1 - jit_t_on0);
 IF (jit_st.traces_compiled >= 1) { print("cando jit compiled ok"); }
 print("cando jit end");
 
