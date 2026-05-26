@@ -214,9 +214,18 @@ and 1.3** with session resumption against pinned CAs. Scheduling is
 **preemptive** on both arches (x86_64 LAPIC + aarch64 GICv2/generic
 timer); the BIOS kernel boots **SMP** Application Processors. The CanDo VM
 runs unmodified with a working **tracing JIT** on x86_64 and the
-**gui.cdo** widget toolkit; ~25 bare-metal bindings are registered. CI
-matrices BIOS, UEFI x86_64, both aarch64 paths, the NIC models, and NVMe
-to green on every push.
+**gui.cdo** widget toolkit. Its real upstream standard library runs on the
+bare metal where it doesn't need a host OS — `thread` (spawns OS threads
+via the `thread {}` keyword onto the scheduler), `stream`, `datetime`,
+`process`, `console`, plus `array`/`object`/`string`/`math`/`json`/`csv`/
+`yaml`/`meta` — alongside ~25 canboot-specific bindings for the HAL
+(`display`/`input`/`fs`/`net`/`tls`/`crypto`/…). CanDo's `socket` /
+`secure_socket` / `http`-server libraries are not yet ported: they ride on
+BSD sockets + OpenSSL (`sockutil.h` hard-includes `<openssl/ssl.h>`), while
+canboot has only NO_SYS lwIP (raw callback API, no BSD sockets) + Mbed TLS,
+so the thin canboot `net`/`http`/`tls` bindings provide client TCP/UDP/
+HTTP/HTTPS for now. CI matrices BIOS, UEFI x86_64, both aarch64 paths, the
+NIC models, NVMe, and USB-HID to green on every push.
 
 Chronology lives in `git log` and on the
 [Releases page](https://github.com/Rusketh/CanBoot/releases).
