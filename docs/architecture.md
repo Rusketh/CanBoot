@@ -83,6 +83,30 @@ section may land at a different runtime offset, so the
 `_relocate` function (gnu-efi-derived) walks `.rela` and patches
 the GOT before calling our actual `kmain`.
 
+### JIT executable memory (aarch64)
+
+The tracing JIT writes machine code into a static arena
+(`cando_port/runtime/stubs.c`, exposed through the `mmap` shim) and
+jumps into it. Two aarch64-only hazards that x86_64 doesn't have:
+
+- **I-cache coherency.** A64 has split I/D caches with no hardware
+  coherency for self-modified code. After writing a trace the emitter
+  (`cando_port/jit/codegen_aarch64.c`) cleans the D-cache to PoU
+  (`dc cvau`), `dsb ish`, invalidates the I-cache to PoU (`ic ivau`),
+  `dsb ish`, `isb` over the emitted range before executing it. Line
+  sizes come from `CTR_EL0`.
+- **Executable permission.** The direct `-kernel` path runs MMU-off,
+  so the arena is implicitly RWX — but that path doesn't build the VM,
+  so the JIT is **UEFI-only** in practice. Under AAVMF the kernel runs
+  at EL1 on the firmware's page tables, which map the loaded image's
+  data sections (where the arena lives) writable + execute-never. The
+  emitter walks the active stage-1 tables (`TTBR0_EL1`, 4 KiB granule)
+  and clears the `PXN`/`UXN` bits on the descriptor for each trace page
+  (then `tlbi`/`dsb`/`isb`); AAVMF leaves `SCTLR_EL1.WXN` clear, so the
+  pages become RWX. Each trace buffer is page-aligned and page-sized
+  (the `mmap` shim rounds up), so this never disturbs neighbouring
+  allocations beyond the mapping's block granularity.
+
 ## boot_info
 
 A single struct populated by either loader. Schema lives in
