@@ -124,4 +124,8 @@ bool canboot_ps2_init(void);
 bool canboot_virtio_input_init(void);
 bool canboot_virtio_input_present(void);
 
+/* USB-HID boot keyboard over xHCI (call after hal_pci_init()). */
+bool canboot_usb_hid_init(void);
+bool canboot_usb_hid_present(void);
+
 #endif /* CANBOOT_HAL_INPUT_H */

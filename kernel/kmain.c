@@ -289,6 +289,12 @@ static void kmain_body(struct boot_info *bi) {
         hal_console_write("canboot: virtio-input absent\n");
     }
 
+    if (canboot_usb_hid_init()) {
+        hal_console_write("canboot: usb-hid input ready\n");
+    } else {
+        hal_console_write("canboot: usb-hid input absent\n");
+    }
+
     hal_console_write("canboot: input loop start\n");
 
     /* TSC-based timeout (~3-5s depending on CPU frequency). The smoke
