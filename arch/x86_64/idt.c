@@ -97,9 +97,16 @@ void canboot_idt_install(void) {
     for (int i = 0; i < 32; i++) {
         set_gate(i, stubs[i]);
     }
-    /* Vectors 32..255 are not installed; we never enable interrupts so
-     * hardware IRQs can't fire. */
+    /* Vectors 32..255 filled lazily (the LAPIC timer gate is added by
+     * canboot_lapic_timer_setup). */
 
+    canboot_idt_load();
+}
+
+/* Load the shared IDT on the current CPU. The BSP calls this via
+ * canboot_idt_install; each SMP AP calls it directly so its IDTR points
+ * at the same table (the gates were already populated by the BSP). */
+void canboot_idt_load(void) {
     struct idtr_desc d = {
         .limit = sizeof(idt) - 1,
         .base  = (uint64_t)(uintptr_t)idt,

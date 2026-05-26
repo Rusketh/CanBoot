@@ -31,6 +31,21 @@
 #define LWIP_RAW                        1
 #define LWIP_DHCP                       1
 
+/* DNS resolver over UDP. dns.c is already in the lwIP core source list;
+ * lwip_init() calls dns_init(), and DHCP fills in the offered DNS server
+ * (SLIRP hands out 10.0.2.3). Retries ride sys_check_timeouts(), which
+ * the net pump loops already call. */
+#define LWIP_DNS                        1
+#define DNS_TABLE_SIZE                  4
+#define DNS_MAX_SERVERS                 2
+#define DNS_MAX_NAME_LENGTH             256
+#define DNS_DOES_NAME_CHECK             1
+#define MEMP_NUM_UDP_PCB                8
+
+/* lwIP needs a randomness source for DNS query IDs + UDP source ports. */
+unsigned int canboot_lwip_rand(void);
+#define LWIP_RAND()                     (canboot_lwip_rand())
+
 /* lwIP's threaded/socket APIs need an OS - disable in NO_SYS. */
 #define LWIP_NETCONN                    0
 #define LWIP_SOCKET                     0

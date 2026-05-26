@@ -33,7 +33,7 @@ fi
 qemu-system-aarch64 --version >&2 || true
 
 qemu-system-aarch64 \
-    -machine virt \
+    -machine virt,gic-version=2 \
     -cpu cortex-a72 \
     -m 256M \
     -nodefaults \
@@ -74,6 +74,10 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'canboot: handshake confirmed (aarch64 boot_info)'
         check 'selftest: starting self-test'
         check 'selftest: self-test ok'
+
+        check 'selftest: preemption ok'
+
+        check 'selftest: big-heap'
         check 'canboot: aarch64 hello world boot complete'
 
         # FDT walker must have found at least one usable mmap entry

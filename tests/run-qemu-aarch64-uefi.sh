@@ -76,6 +76,12 @@ python3 "$ROOT/tests/sidecars/http_hello.py"  127.0.0.1 "$HTTP_PORT"  >"$(dirnam
 HTTP_PID=$!
 python3 "$ROOT/tests/sidecars/https_secure.py" 127.0.0.1 "$HTTPS_PORT" >"$(dirname "$LOG")/https.log" 2>&1 &
 HTTPS_PID=$!
+# Port 53 is privileged; CI runs the sidecar as a non-root user, so
+# lower the unprivileged-port floor (no-op as root, sudo in CI).
+sudo -n sysctl -w net.ipv4.ip_unprivileged_port_start=53 >/dev/null 2>&1 \
+    || sysctl -w net.ipv4.ip_unprivileged_port_start=53 >/dev/null 2>&1 || true
+python3 "$ROOT/tests/sidecars/dns_fixed.py" 127.0.0.1 53 canboot.test 10.0.2.2 >"$(dirname "$LOG")/dns.log" 2>&1 &
+DNS_PID=$!
 sleep 0.3
 
 QEMU_STDERR="${LOG%.log}.stderr.log"
@@ -96,7 +102,7 @@ AUDIO_WAV="${AUDIO_WAV:-build-aarch64/canboot-aarch64-uefi-audio.wav}"
 rm -f "$AUDIO_WAV"
 
 qemu-system-aarch64 \
-    -machine virt \
+    -machine virt,gic-version=2 \
     -cpu cortex-a72 \
     -m 512M \
     -nodefaults \
@@ -171,7 +177,7 @@ PY
 INJECTOR_PID=$!
 
 cleanup() {
-    for pid in "$INJECTOR_PID" "$UDP_PID" "$HTTP_PID" "$HTTPS_PID"; do
+    for pid in "$INJECTOR_PID" "$UDP_PID" "$HTTP_PID" "$HTTPS_PID" "$DNS_PID"; do
         if [ -n "${pid:-}" ] && kill -0 "$pid" 2>/dev/null; then
             kill "$pid" 2>/dev/null || true
             wait "$pid" 2>/dev/null || true
@@ -215,11 +221,21 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         fi
         check 'selftest: starting self-test'
         check 'selftest: self-test ok'
+
+        check 'selftest: preemption ok'
+
+        check 'selftest: big-heap'
         check 'selftest: udp echo ok'
         check 'selftest: http get ok'
+
+        check 'selftest: dns lookup ok canboot.test=10.0.2.2'
         check 'selftest: handshake ok'
         check 'selftest: https get ok'
         check 'selftest: session resumption ok'
+
+        check 'selftest: tls1.3 handshake ok'
+
+        check 'selftest: tls1.3 https get ok'
         check 'selftest: tls test ok'
         check 'selftest: init.cdo marker ok'
         check 'selftest: disk test ok'
@@ -231,6 +247,12 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'selftest: init.cdo executed ok'
         check 'canboot: virtio-gpu fb '
         check 'selftest: display lib registered'
+        check 'cando jit match = true'
+
+        check 'cando gui included ok ver 1.0.0'
+
+        check 'cando gui dashboard painted'
+
         check 'selftest: display test ok'
         check 'selftest: input lib registered'
         check 'selftest: system libs registered'
@@ -240,6 +262,10 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'cando net.udpEcho = cando-udp-probe'
         check 'cando net.httpGet = canboot-hello'
         check 'cando tls.httpsGet = canboot-secure'
+        check 'cando tls via dns = canboot-secure'
+
+        check 'cando tls.version = TLSv1.3'
+
         check 'cando sys libs end'
         check 'selftest: crypto libs registered'
         check 'cando hex.encode(canboot) = 63616e626f6f74'
@@ -292,6 +318,12 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
             check 'cando fs.read new.txt = freshly-created-by-canboot'
             check 'cando fs.delete new.txt = true'
             check 'cando fs.read new.txt after delete = null'
+            # NTFS subdirectory tree (mkdir + file in subdir + file rename
+            # via link+unlink + listing) through libntfs-3g.
+            check 'cando ntfs subdir read = ntfs-subdir-2026'
+            check 'cando ntfs subdir rename = true'
+            check 'cando ntfs subdir read2 = ntfs-subdir-2026'
+            check 'cando ntfs rmdir = true'
             # mkntfs (vendored libntfs-3g/ntfsprogs) ran end-to-end
             # on the test image. After the format the volume looks
             # freshly mkntfs'd from canboot - we re-detect as NTFS
@@ -341,6 +373,10 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
             check 'cando fs.detect ext4 after mkfs = ext4'
             check 'cando fs.write ext4 after mkfs = true'
             check 'cando fs.read ext4 after mkfs = canboot-ext4-postformat-2026'
+            # ext4 subdirectory tree (mkdir + file in subdir + rename +
+            # listing) through lwext4.
+            check 'cando ext4 subdir read = ext4-subdir-2026'
+            check 'cando ext4 rmdir = true'
 
             # Host-side validation: debugfs dumps postfmt.txt from
             # the canboot-formatted ext4 volume and the content must

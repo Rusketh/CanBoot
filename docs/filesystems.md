@@ -29,8 +29,11 @@ fixed in `detect_fs()` in `cando_port/lib/fs.c`.
 
 ## FAT32
 
-In-tree driver. Root-directory-only support, 8.3 names. Multi-cluster
-chains work for both read and write. Used by the boot media itself.
+In-tree driver, 8.3 names (no LFN). Nested directories are supported via
+a path engine (`canboot_fat32_*_path`, `mkdir`/`rmdir`/`rename`,
+`list_path`) layered over the original root-only helpers, which remain for
+the boot loaders. Multi-cluster chains work for both read and write. Used
+by the boot media itself.
 
 Format (`fs.mkfs(d, p, "fat32", "LABEL")`) lays down:
 
@@ -96,8 +99,23 @@ fs.read(1, 0, "/probe.txt")     // forward slash everywhere
 fs.read(0, 0, "/init.cdo")
 ```
 
-For FAT32 the dispatcher strips the leading `/` before calling the
-8.3 lookup. For NTFS and ext4 the path is passed through verbatim.
+The cando `fs.*` surface also exposes `fs.mkdir` / `fs.rmdir` /
+`fs.rename` and a path argument to `fs.list`, dispatched to the FAT32
+path engine, lwext4 (`ext4_dir_mk`/`ext4_dir_rm`/`ext4_frename`) and
+libntfs-3g (`ntfs_create`/`ntfs_readdir`; file rename via
+`ntfs_link`+unlink). NTFS *directory* rename is unsupported - libntfs-3g
+has no low-level directory-rename primitive.
+
+## POSIX surface
+
+`fs/vfs.c` backs the C library's POSIX directory + path calls
+(`opendir`/`readdir`/`closedir`, `mkdir`, `rmdir`, `rename`, `unlink`,
+`chdir`/`getcwd`, `stat`) - previously ENOSYS stubs - by mounting the
+first writable volume (FAT32 preferred) whole-disk and dispatching to the
+same FS engines. Paths resolve against a process-wide cwd with `.`/`..`
+collapsing. The minimal aarch64 direct-kernel target links neither this
+file nor the FS drivers, so it keeps the historical ENOSYS stubs (kept as
+weak fallbacks).
 
 ## Test images
 

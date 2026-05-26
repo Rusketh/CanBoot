@@ -22,6 +22,7 @@
 #include "canboot/boot_info.h"
 #include "canboot/env.h"
 #include "hal/console.h"
+#include "sync/cpu.h"
 
 #if CANBOOT_AARCH64_EFI_BUILD
 #include "hal/pci.h"
@@ -98,6 +99,10 @@ void kmain(struct boot_info *bi) {
     hal_console_write(" source=");
     hal_console_write(boot_source_name(bi->boot_source));
     hal_console_write("\n");
+
+    /* Select the malloc heap from the usable mmap regions before anything
+     * allocates. Replaces the old fixed static arena. */
+    canboot_heap_init(bi);
 
     if (bi->fb.format == CANBOOT_FB_RGB) {
         hal_console_write("canboot: fb rgb addr=");
@@ -221,6 +226,19 @@ void kmain(struct boot_info *bi) {
     /* Milestone 5: picolibc + pthread shim self-test. Same harness the
      * x86_64 kmain runs, links against the same libc.a. */
     canboot_pthread_init();
+
+    /* M4: bring up the EL1 vector table + GICv2 + virtual generic timer
+     * (100 Hz) as the preemption timebase, then enable forced preemption,
+     * mirroring the x86_64 LAPIC path. The allocator guard (M5) already
+     * serialises malloc, so timer preemption is safe. */
+    extern void canboot_aarch64_irq_init(unsigned hz);
+    extern void canboot_sched_arm_irqs(void);
+    extern void canboot_sched_set_preemption(int enabled);
+    canboot_aarch64_irq_init(100);
+    canboot_sched_arm_irqs();
+    canboot_irq_enable();
+    canboot_sched_set_preemption(1);
+
     runtime_selftest();
 
 #if CANBOOT_AARCH64_EFI_BUILD

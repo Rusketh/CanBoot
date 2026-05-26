@@ -29,6 +29,7 @@
 #include "lwip/ip4_addr.h"
 
 #include "lwip_bio.h"
+#include "canboot_resolver.h"
 
 #include "core/value.h"
 #include "vm/vm.h"
@@ -64,6 +65,15 @@ static bool parse_ipv4(const char *s, ip_addr_t *out) {
     return true;
 }
 
+static bool resolve_host(const char *s, ip_addr_t *out) {
+    if (parse_ipv4(s, out)) return true;
+    return s && canboot_dns_resolve(s, out, 5000) == 0;
+}
+
+/* Protocol negotiated by the most recent httpsGet ("TLSv1.3" / "TLSv1.2"),
+ * exposed via tls.version() so scripts can confirm the handshake version. */
+static const char *g_last_version = "";
+
 /* Module-local TLS state. Reinitialised on every call so a failed
  * handshake doesn't poison subsequent attempts. */
 static mbedtls_entropy_context  g_ent;
@@ -83,7 +93,7 @@ static int tls_https_get(CandoVM *vm, int argc, CandoValue *args) {
     if (!sni)  sni  = "canboot-test";
 
     ip_addr_t dst;
-    if (!host || !parse_ipv4(host, &dst)) { cando_vm_push(vm, cando_null()); return 1; }
+    if (!host || !resolve_host(host, &dst)) { cando_vm_push(vm, cando_null()); return 1; }
 
     mbedtls_entropy_init(&g_ent);
     mbedtls_ctr_drbg_init(&g_drbg);
@@ -119,6 +129,7 @@ static int tls_https_get(CandoVM *vm, int argc, CandoValue *args) {
         if (rc != MBEDTLS_ERR_SSL_WANT_READ && rc != MBEDTLS_ERR_SSL_WANT_WRITE) goto fail;
     }
     if (mbedtls_ssl_get_verify_result(&g_ssl) != 0) goto fail;
+    g_last_version = mbedtls_ssl_get_version(&g_ssl);
 
     /* Build + send GET request. */
     char req[256];
@@ -180,8 +191,17 @@ fail:
     return 1;
 }
 
+static int tls_version(CandoVM *vm, int argc, CandoValue *args) {
+    (void)argc; (void)args;
+    CandoString *s = cando_string_new(g_last_version,
+                                      (uint32_t)strlen(g_last_version));
+    cando_vm_push(vm, cando_string_value(s));
+    return 1;
+}
+
 static const LibutilMethodEntry tls_methods[] = {
     { "httpsGet", tls_https_get },
+    { "version",  tls_version   },
 };
 
 void canboot_cando_open_tlslib(CandoVM *vm) {

@@ -88,6 +88,7 @@ set(CANBOOT_PORTABLE_SOURCES
     fs/ntfs.c
     fs/iso9660.c
     fs/fat32.c
+    fs/vfs.c
 
     # Device-class HAL: works on every bus + transport canboot
     # supports (PCI/PCIe via virtio-pci, virtio-* devices, framebuffer
@@ -95,6 +96,7 @@ set(CANBOOT_PORTABLE_SOURCES
     hal/audio/audio_stub.c
     hal/disk/disk.c
     hal/disk/virtio_blk.c
+    hal/disk/nvme.c
     hal/display/display.c
     hal/input/input_queue.c
     hal/input/virtio_input.c
@@ -107,6 +109,7 @@ set(CANBOOT_PORTABLE_SOURCES
 
     # Networking + TLS port shims.
     net/lwip_port/sys_arch.c
+    net/lwip_port/resolver.c
     net/mbedtls_port/entropy.c
     net/mbedtls_port/inet_pton.c
     net/mbedtls_port/lwip_bio.c

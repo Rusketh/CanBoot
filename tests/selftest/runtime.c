@@ -17,6 +17,11 @@
 
 #include "pthread.h"
 #include "hal/console.h"
+#include "sync/cpu.h"
+
+/* Bitmask of logical CPUs the workers were observed running on. With SMP
+ * APs online and a shared run queue, work lands on more than one CPU. */
+static volatile unsigned g_cpus_seen;
 
 #define WORKERS         4
 #define INCS_PER_WORKER 1000
@@ -28,6 +33,8 @@ static volatile int    g_alloc_fail;   /* set if a heap readback is wrong */
 static void *worker(void *arg) {
     int id = (int)(intptr_t)arg;
     for (int i = 0; i < INCS_PER_WORKER; i++) {
+        __atomic_or_fetch(&g_cpus_seen, 1u << (canboot_cpu_id() & 31u),
+                          __ATOMIC_RELAXED);
         /* Hammer the allocator OUTSIDE the mutex so all workers contend on
          * the heap concurrently. With preemption on, a timer switch landing
          * mid-malloc would corrupt the (single-thread-built) picolibc free
@@ -60,6 +67,140 @@ static void *worker(void *arg) {
 
 size_t canboot_heap_bytes_used(void);
 size_t canboot_heap_bytes_total(void);
+unsigned long canboot_sched_ticks(void);
+
+/* Preemption proof: a worker that NEVER yields. With cooperative
+ * scheduling it would starve every other thread; if it still makes
+ * progress while the main thread also runs (and the tick counter
+ * advances), the timer must be preempting. */
+static volatile int           g_spin_stop;
+static volatile unsigned long g_spin_count;
+
+static void *spinner(void *arg) {
+    (void)arg;
+    while (!g_spin_stop) {
+        g_spin_count++;
+        __asm__ volatile ("" ::: "memory");
+    }
+    return NULL;
+}
+
+static int preemption_test(void) {
+    g_spin_stop = 0;
+    g_spin_count = 0;
+    pthread_t st;
+    if (pthread_create(&st, 0, spinner, 0) != 0) {
+        printf("selftest: FAIL preemption spinner create\n");
+        return 0;
+    }
+    /* Busy-wait ~5 timer ticks WITHOUT yielding. If preemption is on, the
+     * spinner gets scheduled in the gaps; if the timer never ticks, the
+     * guard bound trips and we report it rather than hanging forever. */
+    unsigned long t0 = canboot_sched_ticks();
+    unsigned long guard = 0;
+    while (canboot_sched_ticks() - t0 < 5 && guard < 3000000000UL) {
+        guard++;
+        __asm__ volatile ("" ::: "memory");
+    }
+    int ticked = (canboot_sched_ticks() - t0 >= 5);
+    g_spin_stop = 1;
+    pthread_join(st, 0);
+
+    if (!ticked) {
+        printf("selftest: FAIL preemption timer not ticking (guard=%lu)\n", guard);
+        return 0;
+    }
+    if (g_spin_count == 0) {
+        printf("selftest: FAIL preemption: non-yielding worker never ran\n");
+        return 0;
+    }
+    printf("selftest: preemption ok spinner=%lu over >=5 ticks\n", g_spin_count);
+    return 1;
+}
+
+/* Stress the mmap-backed heap: allocate and free well past the old 16 MiB
+ * static arena, across many block sizes, verifying each block's contents
+ * survive intact. Proves the allocator hands out a large region without
+ * corruption. Returns 1 on success. */
+#define BIGHEAP_BLOCKS 512
+static unsigned char *bh_p[BIGHEAP_BLOCKS];
+static size_t         bh_sz[BIGHEAP_BLOCKS];
+
+static int big_heap_test(void) {
+    const size_t target = 34u * 1024u * 1024u;   /* comfortably > 32 MiB */
+    size_t total = 0;
+    int n = 0;
+
+    for (; n < BIGHEAP_BLOCKS && total < target; n++) {
+        /* Spread sizes across 8 KiB .. ~136 KiB so many free-list bins and
+         * sbrk growth paths get exercised. */
+        size_t sz = (size_t)(8u * 1024u + ((n * 2659u) & 0x1FFFFu));
+        unsigned char *p = (unsigned char *)malloc(sz);
+        if (!p) {
+            printf("selftest: FAIL big-heap malloc n=%d sz=%zu total=%zu\n",
+                   n, sz, total);
+            for (int k = 0; k < n; k++) free(bh_p[k]);
+            return 0;
+        }
+        memset(p, (unsigned char)(n * 131 + 7), sz);
+        bh_p[n] = p;
+        bh_sz[n] = sz;
+        total += sz;
+    }
+
+    if (total < 32u * 1024u * 1024u) {
+        printf("selftest: FAIL big-heap only reached %zu bytes (< 32 MiB)\n",
+               total);
+        for (int k = 0; k < n; k++) free(bh_p[k]);
+        return 0;
+    }
+
+    /* Verify every block still holds its tag. */
+    for (int i = 0; i < n; i++) {
+        unsigned char tag = (unsigned char)(i * 131 + 7);
+        for (size_t k = 0; k < bh_sz[i]; k += 509) {
+            if (bh_p[i][k] != tag) {
+                printf("selftest: FAIL big-heap corruption block=%d off=%zu\n",
+                       i, k);
+                for (int z = 0; z < n; z++) free(bh_p[z]);
+                return 0;
+            }
+        }
+    }
+
+    /* Free the even blocks, reallocate into the freed space at new sizes,
+     * verify, then release everything. */
+    for (int i = 0; i < n; i += 2) { free(bh_p[i]); bh_p[i] = NULL; }
+    for (int i = 0; i < n; i += 2) {
+        size_t sz = (size_t)(4u * 1024u + ((i * 1471u) & 0xFFFFu));
+        unsigned char *p = (unsigned char *)malloc(sz);
+        if (!p) {
+            printf("selftest: FAIL big-heap realloc-wave n=%d sz=%zu\n", i, sz);
+            for (int z = 1; z < n; z += 2) free(bh_p[z]);
+            return 0;
+        }
+        memset(p, (unsigned char)(i * 17 + 3), sz);
+        bh_p[i] = p;
+        bh_sz[i] = sz;
+    }
+    for (int i = 0; i < n; i++) {
+        unsigned char tag = (i & 1) ? (unsigned char)(i * 131 + 7)
+                                    : (unsigned char)(i * 17 + 3);
+        size_t step = (i & 1) ? 509 : 251;
+        for (size_t k = 0; k < bh_sz[i]; k += step) {
+            if (bh_p[i][k] != tag) {
+                printf("selftest: FAIL big-heap wave2 corruption block=%d\n", i);
+                for (int z = 0; z < n; z++) free(bh_p[z]);
+                return 0;
+            }
+        }
+    }
+    for (int i = 0; i < n; i++) free(bh_p[i]);
+
+    printf("selftest: big-heap alloc/free %zu bytes across %d blocks (>32 MiB) ok\n",
+           total, n);
+    return 1;
+}
 
 void runtime_selftest(void) {
     hal_console_write("selftest: starting self-test\n");
@@ -92,6 +233,16 @@ void runtime_selftest(void) {
     free(big);
     printf("selftest: heap bytes_used=%zu bytes_total=%zu\n",
            canboot_heap_bytes_used(), canboot_heap_bytes_total());
+
+    /* mmap-backed heap stress: > 32 MiB across many sizes. */
+    if (!big_heap_test()) {
+        return;
+    }
+
+    /* Forced-preemption proof (timer-driven scheduling). */
+    if (!preemption_test()) {
+        return;
+    }
 
     /* pthread: spawn workers that race a mutex-protected counter and
      * concurrently hammer the allocator under live preemption. */
@@ -130,6 +281,11 @@ void runtime_selftest(void) {
     }
     printf("selftest: pthread counter=%d (expected %d) heap-race ok\n",
            g_counter, expected);
+
+    unsigned mask = g_cpus_seen;
+    unsigned ncpu = 0;
+    for (unsigned m = mask; m; m &= m - 1) ncpu++;
+    printf("selftest: smp observed %u cpu(s) (mask=0x%x)\n", ncpu, mask);
 
     hal_console_write("selftest: self-test ok\n");
 }

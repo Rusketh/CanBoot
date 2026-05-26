@@ -62,6 +62,8 @@ elseif(CANBOOT_ARCH STREQUAL "aarch64")
         arch/aarch64/bootstrap.S
         arch/aarch64/aarch64_entry.c
         arch/aarch64/fdt.c
+        arch/aarch64/vectors.S
+        arch/aarch64/irq.c
         kernel/kmain_aarch64.c
         kernel/env.c
         kernel/fb.c
@@ -230,6 +232,7 @@ elseif(CANBOOT_ARCH STREQUAL "aarch64")
 
     set_source_files_properties(
         arch/aarch64/bootstrap.S
+        arch/aarch64/vectors.S
         rt/sched/arch/ctx_aarch64.S
         PROPERTIES LANGUAGE ASM
     )

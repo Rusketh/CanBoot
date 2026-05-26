@@ -14,6 +14,9 @@
 
 void canboot_idt_install(void);
 
+/* Load the shared IDT on the current CPU (the SMP APs call this). */
+void canboot_idt_load(void);
+
 /* Install an interrupt gate for `vec` pointing at an asm stub. Used by
  * the LAPIC timer bring-up (M2) to wire vectors 32+ after the base IDT
  * is loaded. Present, ring 0, 64-bit interrupt gate. */

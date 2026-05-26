@@ -91,6 +91,11 @@ set(EFI_AARCH64_SOURCES
     hal/audio/virtio_snd.c
     cando_port/jit/codegen_stub_aarch64.c
 
+    # aarch64 EL1 vector table + GICv2/generic-timer IRQ path (M4
+    # preemption), shared with the direct-kernel build.
+    arch/aarch64/vectors.S
+    arch/aarch64/irq.c
+
     # aarch64 thread context switch (the scheduler core itself,
     # rt/sched/sched.c, rides in via CANBOOT_PORTABLE_SOURCES below).
     rt/sched/arch/ctx_aarch64.S

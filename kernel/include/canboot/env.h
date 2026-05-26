@@ -18,4 +18,9 @@ void                    canboot_env_set_boot_info(const struct boot_info *bi);
  * by the HAL disk layer (ATAPI CD-ROM under VirtualBox, etc.). */
 int canboot_bootfile_get(const char *name, const void **ptr, uint32_t *len);
 
+/* Select the malloc heap region from boot_info->mmap[]. Call once during
+ * early bring-up, after the console is up and before the first allocation.
+ * Defined in rt/picolibc_port/syscalls.c. */
+void canboot_heap_init(const struct boot_info *bi);
+
 #endif

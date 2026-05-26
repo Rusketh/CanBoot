@@ -87,3 +87,14 @@ u32_t sys_now(void) {
     uint64_t t  = arch_now();
     return (u32_t)((t * 1000ull) / hz);
 }
+
+/* LWIP_RAND() source: lwIP uses it to randomise DNS query IDs and the
+ * UDP source port. Mix the cycle counter into an LCG so successive calls
+ * differ even within the same millisecond. Non-cryptographic, which is
+ * all lwIP asks of LWIP_RAND. */
+unsigned int canboot_lwip_rand(void) {
+    static uint64_t state;
+    state = state * 6364136223846793005ull + 1442695040888963407ull;
+    state ^= arch_now();
+    return (unsigned int)((state >> 33) & 0xFFFFFFFFu);
+}

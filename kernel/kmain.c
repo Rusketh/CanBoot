@@ -135,6 +135,17 @@ static void enable_sse_fpu(void) {
     __asm__ volatile ("mov %0, %%cr4" : : "r"(cr4));
 }
 
+/* Per-CPU setup an SMP AP must repeat before it touches SSE code or any
+ * _Thread_local (errno etc., reached through %fs). APs share the BSP's
+ * one TLS area, matching the single-area model the rest of the runtime
+ * already uses (so a thread that migrates between CPUs sees the same
+ * thread-locals). Called from canboot_ap_main after it reloads the GDT
+ * and IDT. */
+void canboot_ap_cpu_setup(void) {
+    enable_sse_fpu();
+    setup_tls();
+}
+
 static void kmain_body(struct boot_info *bi);
 
 /* UEFI leaves us on the firmware's stack which is too small for Mbed
@@ -181,6 +192,10 @@ static void kmain_body(struct boot_info *bi) {
     hal_console_write(" source=");
     hal_console_write(boot_source_name(bi->boot_source));
     hal_console_write("\n");
+
+    /* Select the malloc heap from the usable mmap regions before anything
+     * allocates. Replaces the old fixed static arena. */
+    canboot_heap_init(bi);
 
     if (bi->fb.format == CANBOOT_FB_RGB) {
         hal_console_write("canboot: fb rgb addr=");
@@ -342,13 +357,13 @@ static void kmain_body(struct boot_info *bi) {
     canboot_sched_set_preemption(1);
 
 #ifdef CANBOOT_HAVE_SMP
-    /* M3 (SMP): bring up Application Processors. DISABLED by default —
-     * the AP trampoline (arch/x86_64/ap_trampoline.S) is unverified and a
-     * fault during bring-up would wedge the whole boot. Change `if (0)`
-     * to `if (1)` to enable it for multi-core boot-debugging. */
+    /* M3 (SMP): bring up Application Processors. Each AP reloads the
+     * kernel GDT/IDT and repeats the per-CPU SSE + FS_BASE setup
+     * (canboot_ap_main) before enabling its timer, so it can run the
+     * shared run queue safely. If no AP responds, bring-up is a no-op and
+     * the boot continues uniprocessor. */
     extern void canboot_smp_boot_aps(uint64_t acpi_rsdp);
-    if (0)
-        canboot_smp_boot_aps(bi->acpi_rsdp);
+    canboot_smp_boot_aps(bi->acpi_rsdp);
 #endif
 
     runtime_selftest();

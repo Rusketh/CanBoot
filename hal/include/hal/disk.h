@@ -60,5 +60,6 @@ bool canboot_disk_register(const struct canboot_disk *d);
 /* Driver init entry points - called by hal_disk_init in order. */
 bool canboot_virtio_blk_init(void);
 bool canboot_ahci_init(void);
+bool canboot_nvme_init(void);
 
 #endif /* CANBOOT_HAL_DISK_H */

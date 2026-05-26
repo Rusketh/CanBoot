@@ -155,6 +155,56 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # Exercise the NVMe driver: boot the BIOS smoke image with a QEMU nvme
+  # device attached. The kernel binds it (admin + I/O queues, identify
+  # namespace) and the disk selftest does a raw read/write round-trip
+  # ("selftest: nvme read/write ok").
+  nvme-x86_64:
+    name: x86_64 nvme
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build gcc binutils \
+            meson python3 \
+            grub-pc-bin grub-common \
+            gnu-efi ovmf \
+            xorriso mtools dosfstools \
+            qemu-system-x86
+
+      - name: Configure
+        run: cmake -B build -G Ninja -DCANBOOT_ARCH=x86_64
+
+      - name: Build kernel ELF
+        run: cmake --build build --target canboot-x86_64 --verbose
+
+      - name: Build BIOS ISO
+        run: bash scripts/mkiso/bios.sh
+              build/canboot-x86_64.elf
+              build/canboot-x86_64-bios.iso
+
+      - name: QEMU smoke test (nvme)
+        env:
+          NVME_IMG: build/nvme-test.img
+          TIMEOUT: "280"
+        run: bash tests/run-qemu-bios.sh build/canboot-x86_64-bios.iso
+
+      - name: Upload serial log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-nvme-log
+          path: build/qemu-bios.log
+          if-no-files-found: ignore
+          retention-days: 7
+
   build-aarch64:
     name: aarch64 ${{ matrix.firmware }}
     runs-on: ubuntu-latest

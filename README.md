@@ -99,10 +99,10 @@ firmware paths populate the same `boot_info` (framebuffer, memory map,
 ACPI RSDP, command line) before dispatching the shared kernel.
 
 **HAL** — console (16550 / PL011), input (PS/2, virtio-input), disk
-(virtio-blk, AHCI), display (linear framebuffer with pixel / line /
-text / image primitives, virtio-gpu on aarch64), net (virtio-net),
-audio (Intel HDA on x86, virtio-snd on aarch64), PCI(e) enumeration,
-virtio-pci transport.
+(virtio-blk, AHCI, NVMe), display (linear framebuffer with pixel / line /
+text / image primitives, virtio-gpu on aarch64), net (virtio-net, e1000,
+rtl8139, pcnet), audio (Intel HDA on x86, virtio-snd on aarch64), PCI(e)
+enumeration, virtio-pci transport.
 
 **Filesystems** — read-only ISO9660 (boot path), read+write FAT32 (root
 directory), read+write ext4 (lwext4) and NTFS (libntfs-3g + mkntfs),
@@ -110,11 +110,27 @@ GPT/MBR partition tables.
 
 **Runtime** — picolibc 1.8.11 as the C library, a preemptive-capable
 thread scheduler (`rt/sched`) with a full register context switch behind
-the POSIX pthread surface, a 4 MiB static heap. The x86_64 LAPIC timer
-(preemption timebase) and SMP bring-up (ACPI MADT discovery + an AP
-trampoline, global-run-queue scheduler) are wired but gated/dormant
-pending the reentrancy hardening of the I/O stack; see
-`rt/sched/include/sched/sched.h` and `arch/x86_64/smp.h`.
+the POSIX pthread surface, and a heap carved from the largest usable
+region in `boot_info->mmap[]` (hundreds of MiB under QEMU; serialised
+behind the preempt/SMP allocator guard). Forced timer preemption is on:
+the x86_64 LAPIC timer and the aarch64 GICv2 + virtual generic timer both
+drive `canboot_sched_on_tick`. x86_64 SMP boots the Application Processors
+by default on the BIOS kernel (ACPI MADT discovery + AP trampoline; each
+AP reloads the GDT/IDT and repeats per-CPU SSE + FS_BASE setup, then joins
+the global run queue) — a selftest confirms work runs on >1 CPU. SMP is
+not enabled on the UEFI image: the trampoline's absolute (`movabs`)
+relocations are incompatible with the gnu-efi PIC link, so that build runs
+uniprocessor. See `rt/sched/include/sched/sched.h` and
+`arch/x86_64/smp.h`.
+
+**JIT** — the vendored CanDo ships a real tracing JIT
+(`vendor/cando/source/jit/codegen.c`) gated behind `jit.on()`. It works on
+x86_64: a hot loop is recorded, compiled to machine code in the JIT arena,
+and executed, producing results identical to the interpreter
+(`jit.stats().traces_compiled` reflects the compiled traces). aarch64 has
+no native emitter yet (`cando_port/jit/codegen_stub_aarch64.c` returns
+false), so hot traces fall back to the interpreter — correct, no speed-up.
+init.cdo exercises both on every boot.
 
 **Network + TLS** — lwIP 2.2.1 in NO_SYS mode over virtio-net (DHCP /
 UDP / TCP / HTTP); Mbed TLS 3.6.x LTS with hardware entropy
@@ -146,7 +162,8 @@ rt/                      picolibc syscall stubs, thread scheduler (sched),
 cando_port/
   lib/                   CanDo language bindings (one per namespace)
   runtime/               POSIX function stubs
-  jit/                   per-arch JIT codegen stubs
+  jit/                   aarch64 codegen stub (x86_64 uses vendored CanDo
+                         codegen.c, a working machine-code emitter)
   vendor_glue/           lwext4 / ntfs-3g / minimp3 / stb glue
   shims/                 POSIX header shims for bare-metal builds
 vendor/                  submodules: cando, picolibc, lwip, mbedtls,
@@ -183,14 +200,21 @@ Prebuilt nightly and stable images are on the
 ## Status
 
 CanBoot boots to a `/init.cdo` prompt on both firmware paths on x86_64
-and on aarch64. The HAL covers serial, input, disk (virtio-blk + AHCI),
-framebuffer (with pixel readback assertions in CI), virtio-gpu on
-aarch64, virtio-net, and audio (Intel HDA + virtio-snd). Filesystems
-cover ISO9660 / FAT32 / ext4 / NTFS read+write including mkfs. The
-network stack runs DHCP, TCP/UDP, HTTP, and TLS 1.2 with session
-resumption against pinned CAs. The CanDo VM runs unmodified with ~25
-bare-metal bindings registered. CI matrices BIOS, UEFI x86_64, and
-both aarch64 paths to green on every push.
+and on aarch64. The HAL covers serial, input, disk (virtio-blk, AHCI,
+NVMe), framebuffer (with pixel readback assertions in CI), virtio-gpu on
+aarch64, NICs (virtio-net, e1000, rtl8139, pcnet), and audio (Intel HDA +
+virtio-snd). The heap is carved from the usable `boot_info` memory map
+(hundreds of MiB). Filesystems cover ISO9660 / FAT32 / ext4 / NTFS
+read+write including mkfs and **nested directories** (mkdir/rmdir/rename/
+readdir), exposed through the cando `fs.*` surface and the POSIX directory
+API. The network stack runs DHCP, **DNS**, TCP/UDP, HTTP, and **TLS 1.2
+and 1.3** with session resumption against pinned CAs. Scheduling is
+**preemptive** on both arches (x86_64 LAPIC + aarch64 GICv2/generic
+timer); the BIOS kernel boots **SMP** Application Processors. The CanDo VM
+runs unmodified with a working **tracing JIT** on x86_64 and the
+**gui.cdo** widget toolkit; ~25 bare-metal bindings are registered. CI
+matrices BIOS, UEFI x86_64, both aarch64 paths, the NIC models, and NVMe
+to green on every push.
 
 Chronology lives in `git log` and on the
 [Releases page](https://github.com/Rusketh/CanBoot/releases).

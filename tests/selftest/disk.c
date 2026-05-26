@@ -12,6 +12,9 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "hal/disk.h"
 #include "fs/iso9660.h"
@@ -32,6 +35,157 @@ static void hex_dump_first(const char *what, const uint8_t *buf, size_t n) {
         else printf("\\x%02x", (unsigned)buf[i]);
     }
     printf("'\n");
+}
+
+struct subdir_acc { int saw_deep; int saw_hello; int count; };
+static bool subdir_list_cb(const char *name, uint32_t size, bool is_dir,
+                           void *user) {
+    (void)size;
+    struct subdir_acc *a = user;
+    a->count++;
+    if (is_dir && strcmp(name, "DEEP") == 0) a->saw_deep = 1;
+    if (!is_dir && strcmp(name, "HELLO.TXT") == 0) a->saw_hello = 1;
+    return true;
+}
+
+/* Exercise the FAT32 subdirectory engine end to end on a writable
+ * volume: build a tree, write/read a file inside it, list it, rename
+ * and delete, then tear the tree back down. */
+static void fat32_subdir_test(struct canboot_fat32 *fs) {
+    static const char payload[] = "subdir-payload-2026";
+    char buf[64];
+    uint32_t got = 0;
+
+    /* Clean up any leftovers from a previous boot of the same image. */
+    canboot_fat32_unlink_path(fs, "/sub/deep/renamed.txt");
+    canboot_fat32_unlink_path(fs, "/sub/deep/hello.txt");
+    canboot_fat32_rmdir(fs, "/sub/deep");
+    canboot_fat32_rmdir(fs, "/sub");
+
+    if (canboot_fat32_mkdir(fs, "/sub") != 0) {
+        printf("selftest: FAIL fat32 mkdir /sub\n"); return;
+    }
+    if (canboot_fat32_mkdir(fs, "/sub/deep") != 0) {
+        printf("selftest: FAIL fat32 mkdir /sub/deep\n"); return;
+    }
+    if (canboot_fat32_write_path(fs, "/sub/deep/hello.txt",
+                                 payload, sizeof(payload) - 1) != 0) {
+        printf("selftest: FAIL fat32 write /sub/deep/hello.txt\n"); return;
+    }
+    got = 0;
+    if (canboot_fat32_read_path(fs, "/sub/deep/hello.txt",
+                                buf, sizeof(buf) - 1, &got) <= 0 ||
+        got != sizeof(payload) - 1 ||
+        memcmp(buf, payload, sizeof(payload) - 1) != 0) {
+        printf("selftest: FAIL fat32 read-back /sub/deep/hello.txt got=%u\n", got);
+        return;
+    }
+
+    struct subdir_acc a1 = {0};
+    canboot_fat32_list_path(fs, "/sub", subdir_list_cb, &a1);
+    struct subdir_acc a2 = {0};
+    canboot_fat32_list_path(fs, "/sub/deep", subdir_list_cb, &a2);
+    if (!a1.saw_deep || !a2.saw_hello) {
+        printf("selftest: FAIL fat32 list (deep=%d hello=%d)\n",
+               a1.saw_deep, a2.saw_hello);
+        return;
+    }
+
+    if (canboot_fat32_rename(fs, "/sub/deep/hello.txt",
+                             "/sub/deep/renamed.txt") != 0) {
+        printf("selftest: FAIL fat32 rename\n"); return;
+    }
+    got = 0;
+    if (canboot_fat32_read_path(fs, "/sub/deep/renamed.txt",
+                                buf, sizeof(buf) - 1, &got) <= 0 ||
+        memcmp(buf, payload, sizeof(payload) - 1) != 0) {
+        printf("selftest: FAIL fat32 read renamed\n"); return;
+    }
+    if (canboot_fat32_read_path(fs, "/sub/deep/hello.txt", buf, sizeof(buf), &got) > 0) {
+        printf("selftest: FAIL fat32 old name still present after rename\n"); return;
+    }
+
+    if (canboot_fat32_unlink_path(fs, "/sub/deep/renamed.txt") != 0) {
+        printf("selftest: FAIL fat32 unlink renamed\n"); return;
+    }
+    if (canboot_fat32_rmdir(fs, "/sub/deep") != 0) {
+        printf("selftest: FAIL fat32 rmdir /sub/deep\n"); return;
+    }
+    if (canboot_fat32_rmdir(fs, "/sub") != 0) {
+        printf("selftest: FAIL fat32 rmdir /sub\n"); return;
+    }
+    /* rmdir must refuse a non-empty directory: rebuild one level and check. */
+    canboot_fat32_mkdir(fs, "/sub");
+    canboot_fat32_write_path(fs, "/sub/x.txt", "x", 1);
+    if (canboot_fat32_rmdir(fs, "/sub") == 0) {
+        printf("selftest: FAIL fat32 rmdir removed a non-empty dir\n"); return;
+    }
+    canboot_fat32_unlink_path(fs, "/sub/x.txt");
+    canboot_fat32_rmdir(fs, "/sub");
+
+    printf("selftest: fat32 subdir tree ok (list entries: sub=%d deep=%d)\n",
+           a1.count, a2.count);
+}
+
+/* Exercise the POSIX directory + path surface (fs/vfs.c) against the
+ * primary volume - the same writable FAT32 disk. Proves opendir/readdir,
+ * mkdir/rmdir, rename, unlink and chdir/getcwd route through the FS HAL
+ * instead of returning ENOSYS. */
+static void posix_fs_test(struct canboot_disk *d) {
+    /* Clean up any leftovers from a prior boot. */
+    unlink("/pdir/f.bin");
+    unlink("/pdir/g.bin");
+    rmdir("/pdir/kid");
+    rmdir("/pdir");
+
+    if (mkdir("/pdir", 0755) != 0) { printf("selftest: FAIL posix mkdir /pdir\n"); return; }
+    if (mkdir("/pdir/kid", 0755) != 0) { printf("selftest: FAIL posix mkdir /pdir/kid\n"); return; }
+
+    /* Create a file with the FAT engine so unlink/rename have something
+     * to act on (the POSIX open() path is read-only). */
+    struct canboot_fat32 fs;
+    if (canboot_fat32_open(d, &fs))
+        canboot_fat32_write_path(&fs, "/pdir/f.bin", "posix", 5);
+
+    char cwd[64] = {0};
+    if (!getcwd(cwd, sizeof(cwd)) || strcmp(cwd, "/") != 0) {
+        printf("selftest: FAIL posix getcwd start = '%s'\n", cwd); return;
+    }
+    if (chdir("/pdir") != 0) { printf("selftest: FAIL posix chdir\n"); return; }
+    if (!getcwd(cwd, sizeof(cwd)) || strcmp(cwd, "/pdir") != 0) {
+        printf("selftest: FAIL posix getcwd after chdir = '%s'\n", cwd); return;
+    }
+
+    /* opendir/readdir: relative path resolves against cwd (/pdir). */
+    DIR *dir = opendir(".");
+    int saw_kid = 0, saw_file = 0, entries = 0;
+    if (dir) {
+        struct dirent *e;
+        while ((e = readdir(dir)) != NULL) {
+            entries++;
+            if (e->d_type == DT_DIR && strcmp(e->d_name, "KID") == 0) saw_kid = 1;
+            if (e->d_type == DT_REG && strcmp(e->d_name, "F.BIN") == 0) saw_file = 1;
+        }
+        closedir(dir);
+    }
+    if (!saw_kid || !saw_file) {
+        printf("selftest: FAIL posix readdir (kid=%d file=%d entries=%d)\n",
+               saw_kid, saw_file, entries);
+        chdir("/"); return;
+    }
+
+    /* rename + unlink the file via POSIX (absolute paths). */
+    if (rename("/pdir/f.bin", "/pdir/g.bin") != 0) {
+        printf("selftest: FAIL posix rename\n"); chdir("/"); return;
+    }
+    if (unlink("/pdir/g.bin") != 0) {
+        printf("selftest: FAIL posix unlink\n"); chdir("/"); return;
+    }
+    if (chdir("/") != 0) { printf("selftest: FAIL posix chdir /\n"); return; }
+    if (rmdir("/pdir/kid") != 0 || rmdir("/pdir") != 0) {
+        printf("selftest: FAIL posix rmdir\n"); return;
+    }
+    printf("selftest: posix fs surface ok (%d entries)\n", entries);
 }
 
 static bool try_fat32(struct canboot_disk *d, char *out, uint32_t *out_size,
@@ -71,6 +225,9 @@ static bool try_fat32(struct canboot_disk *d, char *out, uint32_t *out_size,
         } else {
             printf("selftest: FAIL fat32 write-probe\n");
         }
+
+        fat32_subdir_test(&fs);
+        posix_fs_test(d);
     }
     return true;
 }
@@ -91,11 +248,41 @@ static bool try_iso(struct canboot_disk *d, char *out, uint32_t *out_size,
     return true;
 }
 
+/* Raw sector round-trip on the NVMe device, when present. Saves a scratch
+ * sector, writes a known pattern, reads it back, verifies, and restores
+ * the original contents. */
+static void nvme_test(uint32_t nd) {
+    struct canboot_disk *nv = NULL;
+    for (uint32_t i = 0; i < nd; i++) {
+        struct canboot_disk *d = hal_disk_get(i);
+        if (d && strcmp(d->name, "nvme0") == 0) { nv = d; break; }
+    }
+    if (!nv) return;
+    printf("selftest: nvme present blocks=%llu bs=%u\n",
+           (unsigned long long)nv->block_count, nv->block_size);
+
+    uint32_t bs = nv->block_size;
+    if (bs == 0 || bs > 4096) { printf("selftest: FAIL nvme bad block size\n"); return; }
+    static __attribute__((aligned(8))) uint8_t save[4096];
+    static __attribute__((aligned(8))) uint8_t pat[4096];
+    static __attribute__((aligned(8))) uint8_t back[4096];
+    uint64_t lba = 2;   /* scratch sector well past any boot sector */
+
+    if (hal_disk_read(nv, lba, 1, save) != 0) { printf("selftest: FAIL nvme read\n"); return; }
+    for (uint32_t i = 0; i < bs; i++) pat[i] = (uint8_t)(i * 7 + 0x5A);
+    if (hal_disk_write(nv, lba, 1, pat) != 0) { printf("selftest: FAIL nvme write\n"); return; }
+    if (hal_disk_read(nv, lba, 1, back) != 0) { printf("selftest: FAIL nvme readback\n"); return; }
+    if (memcmp(pat, back, bs) != 0) { printf("selftest: FAIL nvme data mismatch\n"); return; }
+    hal_disk_write(nv, lba, 1, save);   /* restore */
+    printf("selftest: nvme read/write ok\n");
+}
+
 void disk_selftest(void) {
     printf("selftest: starting disk test\n");
 
     hal_disk_init();
     uint32_t nd = hal_disk_count();
+    nvme_test(nd);
     printf("selftest: discovered %u block device(s)\n", (unsigned)nd);
     for (uint32_t i = 0; i < nd; i++) {
         struct canboot_disk *d = hal_disk_get(i);

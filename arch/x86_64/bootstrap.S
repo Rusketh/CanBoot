@@ -98,14 +98,18 @@ hang:
     hlt
     jmp     hang
 
+/* GDT is global so the SMP AP bring-up (arch/x86_64/smp.c) can reload it
+ * on each AP, giving the same CS=0x08 / SS=0x10 the IDT gates expect. */
 .section .rodata
 .align 8
+.global gdt64
 gdt64:
     .quad   0                       /* null */
     .quad   0x00AF9A000000FFFF      /* 0x08: 64-bit code, DPL=0 */
     .quad   0x00AF92000000FFFF      /* 0x10: 64-bit data, DPL=0 */
 gdt64_end:
 
+.global gdt64_ptr
 gdt64_ptr:
     .word   gdt64_end - gdt64 - 1
     .quad   gdt64

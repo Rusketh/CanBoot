@@ -13,6 +13,7 @@
  */
 
 #include <errno.h>
+#include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -70,28 +71,49 @@ CandoValue cando_lib_file_stream_from_fp(struct CandoVM *vm,
 
 char *realpath(const char *path, char *out) {
     if (!path) STUB_FAIL_ERRNO(NULL, EINVAL);
-    /* No real fs resolution yet; just copy the input. future work
-     * binds these to the VFS once cando expects it. */
-    if (out) { strncpy(out, path, 4095); out[4095] = '\0'; return out; }
-    return (char *)path;
+    /* No real fs canonicalisation; copy the input. The POSIX contract is
+     * that `out` (when non-NULL) is a PATH_MAX buffer, so we must bound
+     * the copy to PATH_MAX-1 — writing more (the old hard-coded 4095)
+     * overflows the caller's stack buffer (cando's include resolver uses
+     * char[PATH_MAX], and PATH_MAX is 1024 here), smashing its return
+     * address. */
+    if (!out) return (char *)path;
+    size_t n = strlen(path);
+    if (n > (size_t)PATH_MAX - 1) n = (size_t)PATH_MAX - 1;
+    memcpy(out, path, n);
+    out[n] = '\0';
+    return out;
 }
+/* The path + directory POSIX surface is backed by the VFS in fs/vfs.c
+ * (strong definitions) wherever the FS drivers are linked. These weak
+ * fallbacks keep the minimal aarch64 direct-kernel target - which links
+ * neither the FS drivers nor cando - returning the historical ENOSYS. */
+__attribute__((weak))
 char *getcwd(char *buf, size_t size) {
     if (buf && size > 0) { buf[0] = '/'; if (size > 1) buf[1] = '\0'; return buf; }
     STUB_FAIL_ERRNO(NULL, EINVAL);
 }
 int access(const char *p, int m) { (void)p; (void)m; STUB_FAIL_ERRNO(-1, ENOENT); }
+__attribute__((weak))
 int rename(const char *a, const char *b) { (void)a; (void)b; STUB_FAIL_ERRNO(-1, ENOSYS); }
+__attribute__((weak))
 int mkdir(const char *p, mode_t m) { (void)p; (void)m; STUB_FAIL_ERRNO(-1, ENOSYS); }
+__attribute__((weak))
 int rmdir(const char *p) { (void)p; STUB_FAIL_ERRNO(-1, ENOSYS); }
 int chmod(const char *p, mode_t m) { (void)p; (void)m; STUB_FAIL_ERRNO(-1, ENOSYS); }
 int lstat(const char *p, struct stat *s) { (void)p; (void)s; STUB_FAIL_ERRNO(-1, ENOENT); }
+__attribute__((weak))
 int chdir(const char *p) { (void)p; STUB_FAIL_ERRNO(-1, ENOSYS); }
 
 /* ---- Directory enumeration ------------------------------------------ */
 
+__attribute__((weak))
 DIR *opendir(const char *name)  { (void)name; errno = ENOSYS; return NULL; }
+__attribute__((weak))
 int  closedir(DIR *dirp)        { (void)dirp; return 0; }
+__attribute__((weak))
 struct dirent *readdir(DIR *dirp) { (void)dirp; return NULL; }
+__attribute__((weak))
 void rewinddir(DIR *dirp)       { (void)dirp; }
 
 /* ---- Process / fork --------------------------------------------------- */

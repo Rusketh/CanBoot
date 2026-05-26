@@ -53,11 +53,29 @@ python3 "$ROOT/tests/sidecars/http_hello.py"  127.0.0.1 "$HTTP_PORT"  >"$WORK/ht
 HTTP_PID=$!
 python3 "$ROOT/tests/sidecars/https_secure.py" 127.0.0.1 "$HTTPS_PORT" >"$WORK/https.log" 2>&1 &
 HTTPS_PID=$!
+# Fixed-answer DNS server on host :53; the guest reaches it via SLIRP at
+# 10.0.2.2:53. Answers canboot.test -> 10.0.2.2 for the DNS smoke check.
+# Port 53 is privileged; CI runs the sidecar as a non-root user, so
+# lower the unprivileged-port floor (no-op as root, sudo in CI).
+sudo -n sysctl -w net.ipv4.ip_unprivileged_port_start=53 >/dev/null 2>&1 \
+    || sysctl -w net.ipv4.ip_unprivileged_port_start=53 >/dev/null 2>&1 || true
+python3 "$ROOT/tests/sidecars/dns_fixed.py" 127.0.0.1 53 canboot.test 10.0.2.2 >"$WORK/dns.log" 2>&1 &
+DNS_PID=$!
 sleep 0.5
 
 DISK_IMG="${DISK_IMG:-build/canboot-fat32.img}"
 if [ ! -f "$DISK_IMG" ]; then
     "$ROOT/scripts/mkdisk/fat32.sh" "$DISK_IMG" >/dev/null
+fi
+
+# Optional NVMe device. When NVME_IMG is set the kernel's NVMe driver
+# binds it and the disk selftest does a raw read/write round-trip
+# ("selftest: nvme read/write ok"). Off by default so the standard BIOS
+# run is unchanged.
+NVME_ARGS=""
+if [ -n "${NVME_IMG:-}" ]; then
+    [ -f "$NVME_IMG" ] || truncate -s 32M "$NVME_IMG"
+    NVME_ARGS="-drive if=none,id=nvm0,file=$NVME_IMG,format=raw -device nvme,serial=canvme,drive=nvm0"
 fi
 
 AUDIO_WAV="${AUDIO_WAV:-build/canboot-bios-audio.wav}"
@@ -71,6 +89,7 @@ qemu-system-x86_64 \
     $KBD_DEV $PTR_DEV $QMP_DEV \
     -netdev user,id=n0 \
     -device "${NIC_MODEL:-virtio-net-pci},netdev=n0" \
+    $NVME_ARGS \
     -audiodev "wav,id=snd,path=$AUDIO_WAV" \
     -device intel-hda \
     -device hda-duplex,audiodev=snd \
@@ -79,6 +98,7 @@ qemu-system-x86_64 \
     -display none \
     -no-reboot \
     -m 256M \
+    -smp 2 \
     -nographic \
     >/dev/null 2>&1 &
 QEMU_PID=$!
@@ -192,7 +212,7 @@ PY
 INJECTOR_PID=$!
 
 cleanup() {
-    for pid in "$INJECTOR_PID" "$QEMU_PID" "$UDP_PID" "$HTTP_PID" "$HTTPS_PID"; do
+    for pid in "$INJECTOR_PID" "$QEMU_PID" "$UDP_PID" "$HTTP_PID" "$HTTPS_PID" "$DNS_PID"; do
         if [ -n "${pid:-}" ] && kill -0 "$pid" 2>/dev/null; then
             kill "$pid" 2>/dev/null || true
             wait "$pid" 2>/dev/null || true
@@ -257,15 +277,35 @@ PY
         check 'canboot: virtio-input ready'
         check 'canboot: rx '
         check 'selftest: self-test ok'
+
+        check 'selftest: preemption ok'
+
+
+        check 'selftest: smp observed 2 cpu(s)'
+
+        check 'selftest: big-heap'
         check 'selftest: dhcp lease'
         check 'selftest: udp echo ok'
         check 'selftest: http get ok'
+        check 'selftest: dns lookup ok canboot.test=10.0.2.2'
         check 'selftest: net test ok'
         check 'selftest: handshake ok'
         check 'selftest: https get ok'
         check 'selftest: session resumption ok'
+
+        check 'selftest: tls1.3 handshake ok'
+
+        check 'selftest: tls1.3 https get ok'
         check 'selftest: tls test ok'
         check 'selftest: init.cdo marker ok'
+        check 'selftest: fat32 subdir tree ok'
+
+        check 'selftest: posix fs surface ok'
+
+
+        if [ -n "${NVME_IMG:-}" ]; then
+            check 'selftest: nvme read/write ok'
+        fi
         check 'selftest: disk test ok'
         check 'selftest: cando_open ok'
         check 'selftest: cando_openlibs ok'
@@ -275,6 +315,14 @@ PY
         check 'selftest: cando_dostring ok'
         check 'selftest: init.cdo executed ok'
         check 'selftest: display lib registered'
+        check 'cando jit match = true'
+
+        check 'cando jit compiled ok'
+
+        check 'cando gui included ok ver 1.0.0'
+
+        check 'cando gui dashboard painted'
+
         check 'selftest: display test ok'
         check 'selftest: input lib registered'
         check 'cando input poll begin'
@@ -289,6 +337,10 @@ PY
         check 'cando net.udpEcho = cando-udp-probe'
         check 'cando net.httpGet = canboot-hello'
         check 'cando tls.httpsGet = canboot-secure'
+        check 'cando tls via dns = canboot-secure'
+
+        check 'cando tls.version = TLSv1.3'
+
         check 'cando sys libs end'
         check 'selftest: crypto libs registered'
         check 'cando hex.encode(canboot) = 63616e626f6f74'
@@ -313,6 +365,12 @@ PY
         check 'cando fmt.sprintf = hex=1234 dec=42 str=hi'
         check 'cando ext libs end'
         check 'selftest: partition+fs libs registered'
+        check 'cando fs.read fat subdir = cdo-subdir-2026'
+
+        check 'cando fs.list fat subdir = G.TXT'
+
+        check 'cando fs.rmdir fat = true'
+
         check 'cando part libs end'
 
         # Pointer probe. The input.mouse() accessor must be reachable (the

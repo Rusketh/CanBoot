@@ -19,8 +19,10 @@
 #include "lwip/udp.h"
 #include "lwip/tcp.h"
 #include "lwip/ip4_addr.h"
+#include "lwip/dns.h"
 
 #include "hal/net.h"
+#include "canboot_resolver.h"
 
 uint64_t canboot_tsc_hz(void);
 
@@ -237,6 +239,34 @@ static bool run_http_get(void) {
     return true;
 }
 
+/* ---- DNS over lwIP UDP ------------------------------------------------ */
+
+static bool run_dns(void) {
+    /* Point the resolver at the fixed-answer DNS sidecar, reached via the
+     * SLIRP host gateway (10.0.2.2:53 -> host 127.0.0.1:53). DHCP already
+     * set server 0 to SLIRP's own DNS (10.0.2.3); override it so the test
+     * is deterministic and self-contained. */
+    ip_addr_t srv;
+    IP4_ADDR(&srv, 10, 0, 2, 2);
+    dns_setserver(0, &srv);
+
+    ip_addr_t got;
+    if (canboot_dns_resolve("canboot.test", &got, 5000) != 0) {
+        printf("selftest: FAIL dns resolve canboot.test\n");
+        return false;
+    }
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%d.%d.%d.%d",
+             ip4_addr1(ip_2_ip4(&got)), ip4_addr2(ip_2_ip4(&got)),
+             ip4_addr3(ip_2_ip4(&got)), ip4_addr4(ip_2_ip4(&got)));
+    if (strcmp(buf, "10.0.2.2") != 0) {
+        printf("selftest: FAIL dns canboot.test=%s (expected 10.0.2.2)\n", buf);
+        return false;
+    }
+    printf("selftest: dns lookup ok canboot.test=%s\n", buf);
+    return true;
+}
+
 /* ---- Entry ------------------------------------------------------------ */
 
 void net_selftest(void) {
@@ -308,6 +338,7 @@ void net_selftest(void) {
 
     if (!run_udp_echo()) return;
     if (!run_http_get())  return;
+    if (!run_dns())       return;
 
     printf("selftest: net test ok\n");
 }

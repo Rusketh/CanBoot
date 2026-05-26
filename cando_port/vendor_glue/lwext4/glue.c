@@ -133,6 +133,56 @@ int canboot_ext4_delete(int handle, const char *path) {
     return rc == EOK ? 0 : -1;
 }
 
+int canboot_ext4_mkdir(int handle, const char *path) {
+    char fp[256];
+    if (build_full_path(handle, path, fp, sizeof(fp)) != 0) return -1;
+    int rc = ext4_dir_mk(fp);
+    ext4_cache_flush(g_slots[handle].mp_name);
+    return rc == EOK ? 0 : -1;
+}
+
+int canboot_ext4_rmdir(int handle, const char *path) {
+    char fp[256];
+    if (build_full_path(handle, path, fp, sizeof(fp)) != 0) return -1;
+    int rc = ext4_dir_rm(fp);
+    ext4_cache_flush(g_slots[handle].mp_name);
+    return rc == EOK ? 0 : -1;
+}
+
+int canboot_ext4_rename(int handle, const char *oldp, const char *newp) {
+    char ofp[256], nfp[256];
+    if (build_full_path(handle, oldp, ofp, sizeof(ofp)) != 0) return -1;
+    if (build_full_path(handle, newp, nfp, sizeof(nfp)) != 0) return -1;
+    int rc = ext4_frename(ofp, nfp);
+    ext4_cache_flush(g_slots[handle].mp_name);
+    return rc == EOK ? 0 : -1;
+}
+
+/* List a directory into `out` as newline-separated names (subdirectories
+ * get a trailing '/'). Skips "." and "..". Returns bytes written, or -1. */
+int canboot_ext4_list(int handle, const char *path, char *out, int cap) {
+    char fp[256];
+    if (build_full_path(handle, path, fp, sizeof(fp)) != 0) return -1;
+    ext4_dir d;
+    if (ext4_dir_open(&d, fp) != EOK) return -1;
+    int used = 0;
+    const ext4_direntry *de;
+    while ((de = ext4_dir_entry_next(&d)) != NULL) {
+        const char *nm = (const char *)de->name;
+        int nl = de->name_length;
+        if (nl == 0) continue;
+        if (nl == 1 && nm[0] == '.') continue;
+        if (nl == 2 && nm[0] == '.' && nm[1] == '.') continue;
+        int is_dir = (de->inode_type == EXT4_DE_DIR);
+        if (used + nl + 2 >= cap) break;
+        memcpy(out + used, nm, nl); used += nl;
+        if (is_dir) out[used++] = '/';
+        out[used++] = '\n';
+    }
+    ext4_dir_close(&d);
+    return used;
+}
+
 int canboot_ext4_label(int handle, char *out, int cap) {
     if (handle < 0 || handle >= HSLOTS || !g_slots[handle].in_use) return -1;
     if (!out || cap <= 0) return -1;
