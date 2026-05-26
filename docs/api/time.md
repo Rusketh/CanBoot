@@ -1,4 +1,4 @@
-# time — monotonic clock + sleep
+# time — monotonic clock + wall clock + sleep
 
 Backed by the TSC-calibrated clock that lwIP's `sys_arch.c` uses.
 Calibration runs at boot against the i8254 PIT (x86_64) or the
@@ -13,6 +13,18 @@ lwIP's `sys_now()`.
 
 Microseconds since boot. 64-bit value held in a JS double, so the
 practical precision starts to drop after ~285 years. You're fine.
+
+## `time.now() -> number`
+
+Wall-clock time as **seconds since the Unix epoch** (1970-01-01 UTC),
+read from the CMOS real-time clock. Unlike `time.ms`/`time.us` this is
+absolute calendar time, suitable for displaying the current date or
+stamping records. Returns `0` when no RTC is available (e.g. the current
+aarch64 target), so guard with `IF (time.now() > 0) { ... }`.
+
+```cdo
+VAR secs = time.now();          // e.g. 1779790922
+```
 
 ## `time.ticks() -> number`
 
@@ -36,9 +48,9 @@ time.sleep(1000);   // 1-second pause
 
 ## Behaviour
 
-- The clock is **monotonic** — it never goes backwards. There's no
-  wall-clock time in CanBoot today (no RTC bring-up); use it for
-  measuring intervals, not for displaying "current time".
+- `time.ms`/`time.us`/`time.ticks` are **monotonic** — they never go
+  backwards — and measure intervals since boot. For absolute calendar
+  time use `time.now()` (CMOS RTC; x86_64 today).
 - `time.sleep(0)` returns immediately but still does one pump cycle,
   which makes it useful for "let the audio + network catch up" in a
   tight loop.

@@ -16,6 +16,7 @@
 #include "hal/console.h"
 #include "hal/input.h"
 #include "hal/pci.h"
+#include "hal/rtc.h"
 #include "sync/cpu.h"
 
 void fb_clear(const struct canboot_fb *fb, uint32_t pixel);
@@ -381,6 +382,22 @@ static void kmain_body(struct boot_info *bi) {
     /* Milestone 8: HAL disk + ISO9660 + FAT32 read/write; load /init.cdo. */
     extern void disk_selftest(void);
     disk_selftest();
+
+    /* CMOS real-time clock: read the wall clock and sanity-check it. */
+    struct canboot_datetime dt;
+    if (canboot_rtc_read(&dt) && dt.year >= 1970) {
+        hal_console_write("selftest: rtc ok year=");
+        put_dec((uint32_t)dt.year);
+        hal_console_write(" month=");
+        put_dec((uint32_t)dt.month);
+        hal_console_write(" day=");
+        put_dec((uint32_t)dt.day);
+        hal_console_write(" epoch=");
+        put_dec((uint32_t)canboot_wall_epoch());
+        hal_console_write("\n");
+    } else {
+        hal_console_write("selftest: rtc unavailable\n");
+    }
 
     /* Milestone 18: Intel HDA audio probe. Best-effort; the cando
      * audio library still works against the stub backend if no real

@@ -367,6 +367,7 @@ PY
             check 'selftest: usb0 read/write ok'
         fi
         check 'selftest: disk test ok'
+        check 'selftest: rtc ok year='
         check 'selftest: cando_open ok'
         check 'selftest: cando_openlibs ok'
         check 'selftest: cando_close ok'
