@@ -33,14 +33,16 @@
  *   IR_NOP, IR_LOOP                          prologue/epilogue/close
  *   IR_KNUM, IR_KBOOL                        constants
  *   IR_SLOAD (IRT_NUM), IR_SSTORE            frame slot load/store
- *   IR_ADD, IR_SUB, IR_MUL, IR_DIV           f64 arithmetic
+ *   IR_ADD, IR_SUB, IR_MUL, IR_DIV, IR_MOD   f64 arithmetic (MOD->fmod)
  *   IR_NEG                                   f64 negate
  *   IR_EQ, IR_NEQ, IR_LT, IR_LE, IR_GT, IR_GE  f64 compare -> 1.0/0.0
+ *   IR_GLOAD (IRT_NUM), IR_GSTORE            numeric globals (helper)
+ *   IR_CALL_F1                               fast-native f64(f64) call
  *   IR_GUARD_NUM                             runtime no-op
  *   IR_GUARD_TRUE, IR_GUARD_FALSE            guard + snapshot side-exit
- * Any other op (globals, arrays/objects, fast-native calls, function
- * traces, MOD) bails: cando_jit_codegen_trace returns false and the
- * trace runs on the IR-interpreter unchanged -- correct but slow.
+ * Any other op (IRT_OBJ slots/globals, arrays/objects, ranges, handle
+ * loads, function traces) bails: cando_jit_codegen_trace returns false
+ * and the trace runs on the IR-interpreter unchanged -- correct, slow.
  *
  * AArch64 specifics handled here:
  *   - I-cache coherency: after writing code we clean D-cache to PoU
@@ -70,6 +72,15 @@ void cando_jit_replay_snapshot_for_mcode(struct CandoVM *vm,
                                           CandoValue *frame_slots,
                                           u32 snap_idx);
 
+/* Numeric global load/store helpers (jit.c): return 0 on success
+ * (gload writes *out), nonzero on missing / non-numeric / const-
+ * protected so the caller side-exits to the interpreter. */
+extern int cando_jit_gload_for_mcode(struct CandoVM *vm,
+                                      struct CandoString *name, double *out);
+extern int cando_jit_gstore_for_mcode(struct CandoVM *vm,
+                                       struct CandoString *name, double value);
+
+extern double fmod(double, double);
 extern int printf(const char *, ...);
 
 /* NaN-box bit patterns (mirrors core/value.h). */
@@ -209,6 +220,14 @@ static void emit_and_reg(CG *cg, u32 xd, u32 xn, u32 xm) {
 /* cmp Xn, Xm  (subs xzr, Xn, Xm). */
 static void emit_cmp_reg(CG *cg, u32 xn, u32 xm) {
     cg_w32(cg, 0xEB000000u | (xm << 16) | (xn << 5) | XZR);
+}
+/* add Xd, Xn, Xm  (64-bit, shifted register, LSL 0). */
+static void emit_add_reg(CG *cg, u32 xd, u32 xn, u32 xm) {
+    cg_w32(cg, 0x8B000000u | (xm << 16) | (xn << 5) | xd);
+}
+/* cmp Wn, #0  (subs wzr, Wn, #0). */
+static void emit_cmp_w_zero(CG *cg, u32 wn) {
+    cg_w32(cg, 0x7100001Fu | (wn << 5));
 }
 /* fadd/fsub/fmul/fdiv Dd, Dn, Dm. */
 static void emit_fadd(CG *cg, u32 dd, u32 dn, u32 dm) {
@@ -415,6 +434,68 @@ static void emit_compare(CG *cg, IROp op, u32 a, u32 b, u32 i) {
     emit_str_d(cg, 0, R_VALS, i);
 }
 
+/* IR_MOD: vals[i] = fmod(vals[a], vals[b]).  Mirrors the interpreter,
+ * which calls fmod for OP_MOD semantics. */
+static void emit_mod(CG *cg, u32 a, u32 b, u32 i) {
+    emit_ldr_d(cg, 0, R_VALS, a);
+    emit_ldr_d(cg, 1, R_VALS, b);
+    emit_mov_imm64(cg, 9, (u64)(uintptr_t)&fmod);
+    emit_blr(cg, 9);
+    emit_str_d(cg, 0, R_VALS, i);
+}
+
+/* IR_GLOAD (IRT_NUM): vals[i] = numeric global by name.  Calls the
+ * jit.c helper with &vals[i] as the out-pointer; a nonzero return
+ * (missing / non-numeric) side-exits via cur_snap, matching the
+ * IR-interp.  `name` is the trace's interned CandoString*, embedded as
+ * an immediate. */
+static void emit_gload(CG *cg, const CandoTraceIR *ir, IRRef name_ref, u32 i) {
+    if (!IRREF_IS_K(name_ref)) { cg->failed = true; return; }
+    CandoValue cv = cando_ir_get_const(ir, name_ref);
+    if (!cando_is_string(cv)) { cg->failed = true; return; }
+    struct CandoString *name = (struct CandoString *)cando_as_string(cv);
+    emit_mov_reg(cg, 0, R_VM);                       /* x0 = vm        */
+    emit_mov_imm64(cg, 1, (u64)(uintptr_t)name);     /* x1 = name      */
+    emit_mov_imm64(cg, 9, (u64)i * 8u);
+    emit_add_reg(cg, 2, R_VALS, 9);                  /* x2 = &vals[i]  */
+    emit_mov_imm64(cg, 9, (u64)(uintptr_t)&cando_jit_gload_for_mcode);
+    emit_blr(cg, 9);
+    emit_cmp_w_zero(cg, 0);                           /* w0 != 0 -> bail */
+    cg_emit_guard(cg, CC_NE, cg->cur_snap);
+}
+
+/* IR_GSTORE (IRT_NUM): numeric global = vals[op2].  Nonzero return
+ * (const-protected) side-exits via cur_snap. */
+static void emit_gstore(CG *cg, const CandoTraceIR *ir, IRRef name_ref, u32 op2) {
+    if (!IRREF_IS_K(name_ref)) { cg->failed = true; return; }
+    CandoValue cv = cando_ir_get_const(ir, name_ref);
+    if (!cando_is_string(cv)) { cg->failed = true; return; }
+    struct CandoString *name = (struct CandoString *)cando_as_string(cv);
+    emit_mov_reg(cg, 0, R_VM);                       /* x0 = vm        */
+    emit_mov_imm64(cg, 1, (u64)(uintptr_t)name);     /* x1 = name      */
+    emit_ldr_d(cg, 0, R_VALS, op2);                  /* d0 = value     */
+    emit_mov_imm64(cg, 9, (u64)(uintptr_t)&cando_jit_gstore_for_mcode);
+    emit_blr(cg, 9);
+    emit_cmp_w_zero(cg, 0);
+    cg_emit_guard(cg, CC_NE, cg->cur_snap);
+}
+
+/* IR_CALL_F1: vals[i] = fast_native(vals[op2]).  op1 is the index into
+ * vm->fast_natives_f1[]; resolve the f64(*)(f64) pointer at codegen
+ * time (registrations are write-once at startup) and embed it.  AAPCS64
+ * passes the single f64 arg in d0 and returns it in d0. */
+static void emit_call_f1(CG *cg, u32 native_idx, u32 op2, u32 i) {
+    if (!cg->vm || native_idx >= cg->vm->fast_natives_f1_cap ||
+        cg->vm->fast_natives_f1[native_idx] == NULL) {
+        cg->failed = true; return;
+    }
+    CandoFastFn1 fn = cg->vm->fast_natives_f1[native_idx];
+    emit_ldr_d(cg, 0, R_VALS, op2);                  /* d0 = arg       */
+    emit_mov_imm64(cg, 9, (u64)(uintptr_t)fn);
+    emit_blr(cg, 9);
+    emit_str_d(cg, 0, R_VALS, i);                    /* vals[i] = d0   */
+}
+
 /* IR_GUARD_TRUE / IR_GUARD_FALSE: vals[op1] is a 0.0/1.0 bool lane.
  *   GUARD_TRUE  fails when vals[op1] == 0.0  -> b.eq (NaN: not equal,
  *                                                     guard passes)
@@ -592,8 +673,21 @@ static bool codegen_loop_trace(struct CandoVM *vm, CandoTrace *t) {
         case IR_ADD: case IR_SUB: case IR_MUL: case IR_DIV:
             emit_arith(&cg, (IROp)in->op, in->op1, in->op2, i);
             break;
+        case IR_MOD:
+            emit_mod(&cg, in->op1, in->op2, i);
+            break;
         case IR_NEG:
             emit_neg(&cg, in->op1, i);
+            break;
+        case IR_CALL_F1:
+            emit_call_f1(&cg, in->op1, in->op2, i);
+            break;
+        case IR_GLOAD:
+            if (in->type != IRT_NUM) { cg.failed = true; break; }
+            emit_gload(&cg, &t->ir, in->op1, i);
+            break;
+        case IR_GSTORE:
+            emit_gstore(&cg, &t->ir, in->op1, in->op2);
             break;
         case IR_EQ: case IR_NEQ: case IR_LT: case IR_LE:
         case IR_GT: case IR_GE:

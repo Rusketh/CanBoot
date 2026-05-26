@@ -104,15 +104,36 @@ static int load_init_cdo(char *out, uint32_t out_size, uint32_t *out_len) {
  * on every supported arch -- x86_64 via vendor codegen.c, aarch64 via
  * cando_port/jit/codegen_aarch64.c. */
 static void cando_jit_selftest(CandoVM *vm) {
+    /* Three hot loops covering the natively-compiled op set: local
+     * arithmetic (mul/div/add/sub), a global accumulator with modulo
+     * (gload/gstore/mod), and a fast-native call (math.sqrt ->
+     * IR_CALL_F1). Each must yield bit-identical results jit.off() vs
+     * jit.on(); a buggy emitter would diverge and fail parity here. */
     static const char *src =
         "VAR f = FUNCTION(n){ VAR a = 0; VAR i = 0;"
         " WHILE (i < n) { a = a + (i * 7) - (i / 3); i = i + 1; } RETURN a; };"
-        "jit.reset(); jit.off(); VAR off = f(40000);"
-        "jit.on(); VAR k = 0; VAR on = 0;"
-        " WHILE (k < 12) { on = f(40000); k = k + 1; }"
+        "VAR ga = 0; VAR gi = 0; VAR sa = 0; VAR si = 0;"
+        "jit.reset(); jit.off();"
+        " VAR a_off = f(40000);"
+        " ga = 0; gi = 0;"
+        " WHILE (gi < 40000) { ga = ga + (gi % 5) + 1; gi = gi + 1; }"
+        " VAR g_off = ga;"
+        " sa = 0; si = 1;"
+        " WHILE (si < 20000) { sa = sa + math.sqrt(si); si = si + 1; }"
+        " VAR s_off = sa;"
+        "jit.on(); VAR k = 0; VAR a_on = 0;"
+        " WHILE (k < 12) { a_on = f(40000); k = k + 1; }"
+        " ga = 0; gi = 0;"
+        " WHILE (gi < 40000) { ga = ga + (gi % 5) + 1; gi = gi + 1; }"
+        " VAR g_on = ga;"
+        " sa = 0; si = 1;"
+        " WHILE (si < 20000) { sa = sa + math.sqrt(si); si = si + 1; }"
+        " VAR s_on = sa;"
         "VAR st = jit.stats(); jit.off();"
-        "IF (off == on) { print(\"selftest: jit parity ok\"); }"
-        " ELSE { print(\"selftest: jit parity FAILED\", off, on); }"
+        "IF (a_off == a_on && g_off == g_on && s_off == s_on)"
+        " { print(\"selftest: jit parity ok\"); }"
+        " ELSE { print(\"selftest: jit parity FAILED\","
+        " a_off, a_on, g_off, g_on, s_off, s_on); }"
         "IF (st.traces_compiled >= 1) { print(\"selftest: jit native ok\"); }"
         " ELSE { print(\"selftest: jit native FAILED\"); }";
     int rc = cando_dostring(vm, src, "jit-selftest");
