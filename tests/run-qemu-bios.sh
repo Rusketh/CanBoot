@@ -78,6 +78,15 @@ if [ -n "${NVME_IMG:-}" ]; then
     NVME_ARGS="-drive if=none,id=nvm0,file=$NVME_IMG,format=raw -device nvme,serial=canvme,drive=nvm0"
 fi
 
+# Optional USB: an xHCI controller with a USB-HID boot keyboard. When
+# USB_KBD is set the kernel's xHCI driver enumerates it and feeds key
+# events; injected keystrokes arrive tagged source=usb-hid.
+USB_ARGS=""
+if [ -n "${USB_KBD:-}" ]; then
+    USB_ARGS="-device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0"
+    KBD_DEV=""   # drop the virtio keyboard so sendkey routes to usb-kbd
+fi
+
 AUDIO_WAV="${AUDIO_WAV:-build/canboot-bios-audio.wav}"
 rm -f "$AUDIO_WAV"
 qemu-system-x86_64 \
@@ -90,6 +99,7 @@ qemu-system-x86_64 \
     -netdev user,id=n0 \
     -device "${NIC_MODEL:-virtio-net-pci},netdev=n0" \
     $NVME_ARGS \
+    $USB_ARGS \
     -audiodev "wav,id=snd,path=$AUDIO_WAV" \
     -device intel-hda \
     -device hda-duplex,audiodev=snd \
@@ -274,8 +284,13 @@ PY
         }
         check 'canboot: framebuffer painted'
         check 'canboot: ps/2 input ready'
-        check 'canboot: virtio-input ready'
-        check 'canboot: rx '
+        if [ -n "${USB_KBD:-}" ]; then
+            check 'canboot: usb-hid keyboard on port'
+            check 'canboot: rx usb-hid'
+        else
+            check 'canboot: virtio-input ready'
+            check 'canboot: rx '
+        fi
         check 'selftest: self-test ok'
 
         check 'selftest: preemption ok'

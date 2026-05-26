@@ -100,6 +100,7 @@ set(CANBOOT_PORTABLE_SOURCES
     hal/display/display.c
     hal/input/input_queue.c
     hal/input/virtio_input.c
+    hal/usb/xhci.c
     hal/net/net.c
     hal/net/virtio_net.c
     hal/net/e1000.c
