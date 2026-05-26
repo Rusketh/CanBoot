@@ -1,68 +1,62 @@
 # Release artifacts
 
-CanBoot publishes prebuilt boot images on every push to `main` (rolling
-nightly) and every `v*` tag (stable release). All artifacts are produced
-by the same CI workflow that runs the smoke tests, so anything you
-download has booted at least once under QEMU before being uploaded.
+CanBoot publishes prebuilt boot images on every `v*` tag (stable release).
+All artifacts are produced by the same CI workflow that runs the smoke
+tests, so anything you download has booted at least once under QEMU before
+being uploaded.
 
 ## Where
 
 - **Stable** — <https://github.com/Rusketh/CanBoot/releases/latest>
-- **Nightly** — <https://github.com/Rusketh/CanBoot/releases/tag/nightly>
-  (overwritten on every push to `main`)
 
 ## What's in a release
 
-Each release contains the following nine files. Pick the one that
-matches your target.
+A release contains one self-contained `.zip` per architecture+firmware
+target, plus an aggregated checksum file. Pick the one that matches your
+target.
 
-| File | Architecture | Firmware | Form |
-|------|--------------|----------|------|
-| `canboot-x86_64.elf`            | x86_64  | BIOS  | Multiboot2 ELF (use with GRUB chainload) |
-| `canboot-x86_64-bios.iso`       | x86_64  | BIOS  | Bootable hybrid ISO (USB + CD) |
-| `canboot-x86_64-uefi.efi`       | x86_64  | UEFI  | PE/COFF UEFI application |
-| `canboot-x86_64-uefi.iso`       | x86_64  | UEFI  | Bootable UEFI ISO (ESP + BOOTX64.EFI) |
-| `canboot-aarch64.elf`           | aarch64 | none  | Kernel ELF (`-kernel` style) |
-| `canboot-aarch64.bin`           | aarch64 | none  | Flat binary (no ELF wrapper) |
-| `canboot-aarch64-uefi.efi`      | aarch64 | UEFI  | PE/COFF for AAVMF / EDK2 |
-| `canboot-aarch64-uefi.img`      | aarch64 | UEFI  | Raw FAT32 ESP image with BOOTAA64.EFI |
-| `SHA256SUMS.txt`                | -       | -     | SHA-256 of every file above |
+| Package | Architecture | Firmware | Boot media |
+|---------|--------------|----------|------------|
+| `canboot-x86_64-bios.zip`    | x86_64  | BIOS  | hybrid ISO (USB + CD) |
+| `canboot-x86_64-uefi.zip`    | x86_64  | UEFI  | UEFI ISO (ESP + BOOTX64.EFI) |
+| `canboot-aarch64-direct.zip` | aarch64 | none  | flat `.bin` / `.elf` (`-kernel` style) |
+| `canboot-aarch64-uefi.zip`   | aarch64 | UEFI  | raw FAT32 ESP image (BOOTAA64.EFI) |
+| `SHA256SUMS.txt`             | -       | -     | SHA-256 of every package above |
+
+Each `.zip` contains:
+
+- `tftp/` — the files a TFTP server hands a PXE client (kernel/EFI + the
+  GRUB netboot tree on BIOS) with `init.cdo` at the root.
+- the bootable ISO/image for that target (BIOS/UEFI ISO, or aarch64 UEFI
+  `.img`; the aarch64 direct package ships the flat `.bin` instead).
+- the loose kernel/EFI files for dropping onto an existing ESP or wrapping
+  yourself.
+- `dnsmasq.conf` + `PXE-README.txt` — a ready-to-edit DHCP+TFTP server
+  template and setup notes.
+- `SHA256SUMS` — checksums of everything in the package.
 
 ## Verifying
 
-The release workflow generates a `SHA256SUMS.txt` from every staged
-artifact before publishing. Drop it next to the downloaded files and:
+The release workflow generates a top-level `SHA256SUMS.txt` over the
+published zips. Drop it next to the downloaded files and:
 
 ```sh
 sha256sum -c SHA256SUMS.txt
 ```
 
-Expected output is one `OK` line per file present.
+Each package also carries its own internal `SHA256SUMS` covering the files
+inside it.
 
 ## Picking the right artifact
 
-```
-            +-- target firmware ------+
-            |                         |
-        BIOS only?               UEFI capable?
-            |                         |
-            v                         v
-   canboot-x86_64-bios.iso    +- which arch? -+
-                              |               |
-                         x86_64             aarch64
-                              |               |
-                              v               v
-                  canboot-x86_64-uefi.iso  canboot-aarch64-uefi.img
-                  (or .efi to drop on      (or .efi to drop on existing
-                   an existing ESP)         aarch64 ESP)
-```
-
-When in doubt:
-
-- **You're on a PC made after ~2012** → x86_64 UEFI.
-- **Old PC / virtual machine without OVMF** → x86_64 BIOS.
-- **Raspberry Pi 4 / Apple silicon under Asahi / aarch64 board with UEFI** → aarch64 UEFI.
-- **aarch64 dev board you boot via `-kernel` or a board-vendor wrapper** → aarch64 direct (`.bin` or `.elf`).
+- **You're on a PC made after ~2012** → `canboot-x86_64-uefi.zip`.
+- **Old PC / virtual machine without OVMF** → `canboot-x86_64-bios.zip`.
+- **Raspberry Pi 4 / Apple silicon under Asahi / aarch64 board with UEFI** →
+  `canboot-aarch64-uefi.zip`.
+- **aarch64 dev board you boot via `-kernel` or a board-vendor wrapper** →
+  `canboot-aarch64-direct.zip`.
+- **Netbooting any of the above** → use the `tftp/` tree + `dnsmasq.conf`
+  inside the matching package; see [running.md](running.md).
 
 ## Tagging a release
 
@@ -75,33 +69,26 @@ git push origin v0.1.0
 ```
 
 The CI release workflow picks up the tag, runs the full matrix
-(x86_64 BIOS, x86_64 UEFI, aarch64 direct, aarch64 UEFI), and uploads
-the nine artifacts plus `SHA256SUMS.txt` to a GitHub release named
-after the tag.
+(x86_64 BIOS, x86_64 UEFI, aarch64 direct, aarch64 UEFI), and uploads the
+four per-target zips plus `SHA256SUMS.txt` to a GitHub release named after
+the tag.
 
-For testing the release pipeline without cutting a real version, use
-the workflow's `workflow_dispatch` trigger with an explicit `tag`
-input — that pins the publish step to whatever label you pass.
-
-## Nightly
-
-Every push to `main` re-runs the release workflow and overwrites the
-`nightly` tag in place. Old nightlies are not retained; the URL stays
-stable so links don't rot, but the bytes change. Treat anything
-downloaded from `nightly` as a moving target.
+For testing the release pipeline without cutting a real version, use the
+workflow's `workflow_dispatch` trigger with an explicit `tag` input — that
+pins the publish step to whatever label you pass.
 
 ## CI matrix
 
-Each release artifact is produced by an independent matrix job. The
-table below maps each job to what it builds and tests.
+Each release package is produced by an independent matrix job. The table
+below maps each job to what it builds and tests.
 
 | Job              | Builds                                | Smoke test runner |
 |------------------|---------------------------------------|--------------------|
-| `x86_64 bios`    | `canboot-x86_64.elf`, BIOS ISO        | `tests/run-qemu-bios.sh` |
-| `x86_64 uefi`    | UEFI `.efi`, UEFI ISO                 | `tests/run-qemu-uefi.sh` |
-| `aarch64 direct` | aarch64 `.elf` + flat `.bin`          | `tests/run-qemu-aarch64.sh` |
-| `aarch64 uefi`   | aarch64 UEFI `.efi` + ESP `.img`      | `tests/run-qemu-aarch64-uefi.sh` |
+| `x86_64 bios`    | `canboot-x86_64.elf`, BIOS ISO, PXE tree | `tests/run-qemu-bios.sh` |
+| `x86_64 uefi`    | UEFI `.efi`, UEFI ISO, PXE tree       | `tests/run-qemu-uefi.sh` |
+| `aarch64 direct` | aarch64 `.elf` + flat `.bin`, PXE tree | `tests/run-qemu-aarch64.sh` |
+| `aarch64 uefi`   | aarch64 UEFI `.efi` + ESP `.img`, PXE tree | `tests/run-qemu-aarch64-uefi.sh` |
 
 A release publishes only when all four matrix jobs report green. If any
-target fails to boot or fails an assertion, the workflow's `publish`
-job never runs and the previous release stays in place.
+target fails to boot or fails an assertion, the workflow's `publish` job
+never runs and the previous release stays in place.

@@ -206,7 +206,8 @@ docs/                    documentation
   [`docs/vendoring.md`](docs/vendoring.md) — contributing.
 - **[docs/release.md](docs/release.md)** — release artifacts + verification.
 
-Prebuilt nightly and stable images are on the
+Prebuilt per-target packages (with PXE/netboot trees) are published on
+each `v*` tag on the
 [Releases page](https://github.com/Rusketh/CanBoot/releases).
 
 ## Status

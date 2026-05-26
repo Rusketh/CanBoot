@@ -71,6 +71,13 @@ unsigned int canboot_lwip_rand(void);
 /* DHCP shouldn't block - just start and check status. */
 #define LWIP_DHCP_DOES_ACD_CHECK        0
 #define LWIP_DHCP_CHECK_LINK_UP         0
+
+/* PXE/netboot: capture the TFTP server (siaddr / option 66 / option 150) from
+ * the DHCP OFFER/ACK via the parse-option hook, so a diskless client can fetch
+ * /init.cdo over TFTP. Implemented in net/lwip_port/netboot.c. */
+#define LWIP_HOOK_FILENAME              "netboot_hooks.h"
+#define LWIP_HOOK_DHCP_PARSE_OPTION(netif, dhcp, state, msg, msg_type, option, len, pbuf, offset) \
+    canboot_dhcp_parse_option((msg), (msg_type), (option), (len), (pbuf), (offset))
 #define LWIP_NETIF_STATUS_CALLBACK      1
 #define LWIP_NETIF_LINK_CALLBACK        1
 
