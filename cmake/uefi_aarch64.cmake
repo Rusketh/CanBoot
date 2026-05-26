@@ -83,12 +83,14 @@ set(EFI_AARCH64_SOURCES
     # aarch64-specific HAL: PL011 console, PCIe ECAM, virtio-gpu (no
     # firmware framebuffer on virt; we drive the scanout ourselves),
     # virtio-sound (Intel HDA isn't available on the aarch64 virt
-    # machine), JIT codegen stub (the x86_64 emitter doesn't compile
-    # under aarch64).
+    # machine), the native A64 JIT machine-code emitter (replaces the
+    # x86_64-only vendor/cando/source/jit/codegen.c, which stays
+    # excluded below), and the AHCI weak-symbol stand-in.
     hal/console/serial_aarch64.c
     hal/pci/pci_aarch64.c
     hal/display/virtio_gpu.c
     hal/audio/virtio_snd.c
+    cando_port/jit/codegen_aarch64.c
     cando_port/jit/codegen_stub_aarch64.c
 
     # aarch64 EL1 vector table + GICv2/generic-timer IRQ path (M4
