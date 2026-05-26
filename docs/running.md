@@ -144,10 +144,46 @@ sudo efibootmgr --create --disk /dev/sda --part 1 \
 
 ### PXE / netboot
 
-The pieces are in place but the netboot bundle isn't currently in the
-release. `scripts/mkpxe.sh` (planned) will produce a tarball with kernel
-+ initramfs + `dnsmasq.conf` template + `grub-netboot.cfg`. Track via
-the issue in the upstream repo.
+Every release package (`canboot-<arch>-<firmware>.zip`) carries a `tftp/`
+tree and a `dnsmasq.conf` template. CanBoot boots over the network and then
+fetches `/init.cdo` over TFTP, so a diskless client needs no local media.
+
+How it works: the kernel's DHCP exchange records the TFTP server from the
+DHCP reply (BOOTP next-server `siaddr`, or option 66 / option 150). The
+init.cdo loader then TFTP-GETs `init.cdo` from that server before falling
+back to local boot-file / FAT32 / ISO9660 media. The capture is a pure lwIP
+port hook (`net/lwip_port/netboot.c`); the client is `net/tftp.c`.
+
+Stand up a server (using the bundled template, or build the tree yourself
+with `scripts/mkpxe.sh <arch> <firmware> <binary> <out_dir>`):
+
+```sh
+unzip canboot-x86_64-uefi.zip -d canboot-pxe
+sudo mkdir -p /srv/tftp/canboot
+sudo cp -r canboot-pxe/tftp/* /srv/tftp/canboot/
+sudo dnsmasq -C canboot-pxe/dnsmasq.conf -d
+```
+
+The DHCP server hands the client the boot file (option 67 — `BOOTX64.EFI`
+for UEFI, the GRUB PXE core for BIOS) and points `siaddr` at itself, which
+is where CanBoot then fetches `init.cdo`. Drop your own script in as
+`/srv/tftp/canboot/init.cdo` to customise the boot.
+
+Try it under QEMU with SLIRP's built-in DHCP+TFTP (next-server is
+`10.0.2.2`):
+
+```sh
+mkdir -p tftproot && cp initramfs/init.cdo tftproot/
+qemu-system-x86_64 \
+    -cdrom canboot-x86_64-uefi.iso \
+    -bios /usr/share/OVMF/OVMF_CODE.fd \
+    -netdev user,id=n0,tftp=tftproot,bootfile=init.cdo \
+    -device virtio-net-pci,netdev=n0 \
+    -serial stdio -display none -no-reboot -m 256M
+```
+
+The serial log shows `canboot: init.cdo via tftp 10.0.2.2 (...)` when the
+fetch succeeds.
 
 ## Customising `/init.cdo`
 

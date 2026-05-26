@@ -14,6 +14,10 @@
 #include "fs/iso9660.h"
 #include "canboot/env.h"
 
+#include "lwip/ip_addr.h"
+#include "netboot_hooks.h"
+#include "net/tftp.h"
+
 /* Forward-declared rather than including <cando.h>; the public header
  * transitively pulls in cando's lib/sockutil.h which expects glibc's
  * <netinet/in.h> + <netdb.h> + <openssl/ssl.h>. */
@@ -53,6 +57,20 @@ void        canboot_cando_open_audiolib(CandoVM *vm);
 #include "hal/input.h"
 
 static int load_init_cdo(char *out, uint32_t out_size, uint32_t *out_len) {
+    /* PXE/netboot first: when DHCP advertised a TFTP server (siaddr /
+     * option 66 / option 150), pull /init.cdo over TFTP so a diskless client
+     * boots without any local media. Falls through to the local chain below
+     * when no server is known or the transfer fails. */
+    ip_addr_t srv;
+    if (canboot_netboot_tftp_server(&srv)) {
+        if (canboot_tftp_get(&srv, "init.cdo", out, out_size, out_len) == 0) {
+            printf("canboot: init.cdo via tftp %s (%u bytes)\n",
+                   ipaddr_ntoa(&srv), (unsigned)*out_len);
+            return 0;
+        }
+        printf("canboot: tftp init.cdo failed, trying local media\n");
+    }
+
     /* Loader-provided boot file first: the UEFI loader reads /init.cdo off
      * the boot volume into boot_info, so the runtime finds it even when the
      * boot medium isn't enumerable by the HAL disk layer (ATAPI CD-ROM

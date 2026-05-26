@@ -1,14 +1,11 @@
 name: Release
 
-# Releases fire on two triggers:
-#  - Push of any tag matching v* (e.g. v0.4.0) -> "stable" release at that tag.
-#  - Push to main -> "nightly" rolling release. Always overwritten in place at
-#    the `nightly` tag, so the URL stays stable and old artifacts are not
-#    indefinitely retained.
+# Releases fire only on version tags (v*). Each architecture+firmware target
+# is published as a self-contained .zip carrying a PXE tftp/ tree, the bootable
+# ISO/image, the loose kernel/EFI files, and per-package checksums.
 on:
   push:
-    branches: [main]
-    tags:    ['v*']
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       tag:
@@ -58,7 +55,8 @@ jobs:
             grub-pc-bin grub-common \
             gnu-efi ovmf \
             xorriso mtools dosfstools \
-            qemu-system-x86
+            qemu-system-x86 \
+            zip
 
       - name: Install build deps (aarch64)
         if: matrix.arch == 'aarch64'
@@ -71,7 +69,8 @@ jobs:
             qemu-system-arm qemu-system-misc \
             qemu-efi-aarch64 \
             mtools dosfstools \
-            ntfs-3g e2fsprogs
+            ntfs-3g e2fsprogs \
+            zip
 
       - name: Configure (x86_64)
         if: matrix.arch == 'x86_64'
@@ -84,74 +83,75 @@ jobs:
               -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-aarch64.cmake
 
       # ---- x86_64 BIOS ----------------------------------------------
-      - name: Build kernel ELF (x86_64 BIOS)
+      - name: Build + package (x86_64 BIOS)
         if: matrix.arch == 'x86_64' && matrix.firmware == 'bios'
         run: |
           cmake --build build --target canboot-x86_64 --verbose
           bash scripts/mkiso/bios.sh \
             build/canboot-x86_64.elf \
             build/canboot-x86_64-bios.iso
-
-      - name: Stage BIOS artifacts
-        if: matrix.arch == 'x86_64' && matrix.firmware == 'bios'
-        run: |
-          mkdir -p stage
-          cp build/canboot-x86_64.elf       stage/canboot-x86_64.elf
-          cp build/canboot-x86_64-bios.iso  stage/canboot-x86_64-bios.iso
-          sha256sum stage/* > stage/SHA256SUMS-x86_64-bios.txt
+          PKG=pkg
+          mkdir -p "$PKG"
+          cp build/canboot-x86_64.elf       "$PKG/canboot-x86_64.elf"
+          cp build/canboot-x86_64-bios.iso  "$PKG/canboot-x86_64-bios.iso"
+          bash scripts/mkpxe.sh x86_64 bios build/canboot-x86_64.elf "$PKG"
+          ( cd "$PKG" && sha256sum $(find . -type f | sort) > SHA256SUMS )
+          mkdir -p dist
+          ( cd "$PKG" && zip -r -q ../dist/canboot-x86_64-bios.zip . )
 
       # ---- x86_64 UEFI ----------------------------------------------
-      - name: Build UEFI binary (x86_64)
+      - name: Build + package (x86_64 UEFI)
         if: matrix.arch == 'x86_64' && matrix.firmware == 'uefi'
         run: |
           cmake --build build --target canboot-uefi --verbose
           bash scripts/mkiso/uefi.sh \
             build/canboot-x86_64-uefi.efi \
             build/canboot-x86_64-uefi.iso
-
-      - name: Stage UEFI artifacts (x86_64)
-        if: matrix.arch == 'x86_64' && matrix.firmware == 'uefi'
-        run: |
-          mkdir -p stage
-          cp build/canboot-x86_64-uefi.efi  stage/canboot-x86_64-uefi.efi
-          cp build/canboot-x86_64-uefi.iso  stage/canboot-x86_64-uefi.iso
-          sha256sum stage/* > stage/SHA256SUMS-x86_64-uefi.txt
+          PKG=pkg
+          mkdir -p "$PKG"
+          cp build/canboot-x86_64-uefi.efi  "$PKG/canboot-x86_64-uefi.efi"
+          cp build/canboot-x86_64-uefi.iso  "$PKG/canboot-x86_64-uefi.iso"
+          bash scripts/mkpxe.sh x86_64 uefi build/canboot-x86_64-uefi.efi "$PKG"
+          ( cd "$PKG" && sha256sum $(find . -type f | sort) > SHA256SUMS )
+          mkdir -p dist
+          ( cd "$PKG" && zip -r -q ../dist/canboot-x86_64-uefi.zip . )
 
       # ---- aarch64 direct (-kernel) ---------------------------------
-      - name: Build aarch64 direct (.elf + .bin)
-        if: matrix.arch == 'aarch64' && matrix.firmware == 'direct'
-        run: cmake --build build-aarch64 --target canboot-aarch64-bin --verbose
-
-      - name: Stage aarch64 direct artifacts
+      - name: Build + package (aarch64 direct)
         if: matrix.arch == 'aarch64' && matrix.firmware == 'direct'
         run: |
-          mkdir -p stage
-          cp build-aarch64/canboot-aarch64.elf  stage/canboot-aarch64.elf
-          cp build-aarch64/canboot-aarch64.bin  stage/canboot-aarch64.bin
-          sha256sum stage/* > stage/SHA256SUMS-aarch64-direct.txt
+          cmake --build build-aarch64 --target canboot-aarch64-bin --verbose
+          PKG=pkg
+          mkdir -p "$PKG"
+          cp build-aarch64/canboot-aarch64.elf  "$PKG/canboot-aarch64.elf"
+          cp build-aarch64/canboot-aarch64.bin  "$PKG/canboot-aarch64.bin"
+          bash scripts/mkpxe.sh aarch64 direct build-aarch64/canboot-aarch64.bin "$PKG"
+          ( cd "$PKG" && sha256sum $(find . -type f | sort) > SHA256SUMS )
+          mkdir -p dist
+          ( cd "$PKG" && zip -r -q ../dist/canboot-aarch64-direct.zip . )
 
       # ---- aarch64 UEFI ---------------------------------------------
-      - name: Build aarch64 UEFI binary
+      - name: Build + package (aarch64 UEFI)
         if: matrix.arch == 'aarch64' && matrix.firmware == 'uefi'
         run: |
           cmake --build build-aarch64 --target canboot-uefi --verbose
           bash scripts/mkdisk/aarch64-uefi.sh \
             build-aarch64/canboot-aarch64-uefi.efi \
             build-aarch64/canboot-aarch64-uefi.img
+          PKG=pkg
+          mkdir -p "$PKG"
+          cp build-aarch64/canboot-aarch64-uefi.efi  "$PKG/canboot-aarch64-uefi.efi"
+          cp build-aarch64/canboot-aarch64-uefi.img  "$PKG/canboot-aarch64-uefi.img"
+          bash scripts/mkpxe.sh aarch64 uefi build-aarch64/canboot-aarch64-uefi.efi "$PKG"
+          ( cd "$PKG" && sha256sum $(find . -type f | sort) > SHA256SUMS )
+          mkdir -p dist
+          ( cd "$PKG" && zip -r -q ../dist/canboot-aarch64-uefi.zip . )
 
-      - name: Stage aarch64 UEFI artifacts
-        if: matrix.arch == 'aarch64' && matrix.firmware == 'uefi'
-        run: |
-          mkdir -p stage
-          cp build-aarch64/canboot-aarch64-uefi.efi  stage/canboot-aarch64-uefi.efi
-          cp build-aarch64/canboot-aarch64-uefi.img  stage/canboot-aarch64-uefi.img
-          sha256sum stage/* > stage/SHA256SUMS-aarch64-uefi.txt
-
-      - name: Upload build artifacts
+      - name: Upload package
         uses: actions/upload-artifact@v4
         with:
           name: canboot-${{ matrix.arch }}-${{ matrix.firmware }}
-          path: stage/
+          path: dist/*.zip
           retention-days: 14
           if-no-files-found: error
 
@@ -165,7 +165,7 @@ jobs:
         with:
           fetch-depth: 0  # tag history for changelog generation
 
-      - name: Download all artifacts
+      - name: Download all packages
         uses: actions/download-artifact@v4
         with:
           path: artifacts/
@@ -173,34 +173,22 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p release
-          find artifacts/ -type f \( -name '*.elf' -o -name '*.bin' -o -name '*.efi' \
-                                  -o -name '*.iso' -o -name '*.img' \
-                                  -o -name 'SHA256SUMS-*.txt' \) \
-              -exec cp {} release/ \;
-          # Aggregate per-artifact SHA256SUMS files into one for the release.
-          ( cd release && cat SHA256SUMS-*.txt | sort -u > SHA256SUMS.txt && \
-                          rm -f SHA256SUMS-*.txt )
+          find artifacts/ -type f -name '*.zip' -exec cp {} release/ \;
+          # One aggregated checksum file over the published zips.
+          ( cd release && sha256sum *.zip > SHA256SUMS.txt )
           echo "=== Release contents ==="
           ls -la release/
 
-      - name: Decide tag + prerelease state
+      - name: Decide tag
         id: meta
         run: |
           if [ -n "${{ inputs.tag }}" ]; then
               TAG="${{ inputs.tag }}"
-              PRE=false
-          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-              TAG="${GITHUB_REF#refs/tags/}"
-              PRE=false
           else
-              TAG="nightly"
-              PRE=true
+              TAG="${GITHUB_REF#refs/tags/}"
           fi
-          {
-              echo "tag=$TAG"
-              echo "prerelease=$PRE"
-          } >>"$GITHUB_OUTPUT"
-          echo "Selected tag=$TAG prerelease=$PRE"
+          echo "tag=$TAG" >>"$GITHUB_OUTPUT"
+          echo "Selected tag=$TAG"
 
       - name: Build release notes
         id: notes
@@ -208,25 +196,21 @@ jobs:
           {
               echo "## CanBoot ${{ steps.meta.outputs.tag }}"
               echo ""
-              if [ "${{ steps.meta.outputs.prerelease }}" = "true" ]; then
-                  echo "Rolling nightly build from \`main\`. Overwritten on every push."
-              else
-                  echo "Stable release tagged \`${{ steps.meta.outputs.tag }}\`."
-              fi
+              echo "Stable release tagged \`${{ steps.meta.outputs.tag }}\`."
               echo ""
-              echo "### Artifacts"
+              echo "Each target ships as a self-contained \`.zip\`: a \`tftp/\`"
+              echo "folder for PXE/netboot, the bootable ISO/image, the loose"
+              echo "kernel/EFI files, a \`dnsmasq.conf\` template, and \`SHA256SUMS\`."
               echo ""
-              echo "| Target | File | Notes |"
-              echo "|--------|------|-------|"
-              echo "| x86_64 BIOS | canboot-x86_64-bios.iso  | Hybrid ISO, boot via GRUB / Multiboot2 |"
-              echo "| x86_64 BIOS | canboot-x86_64.elf       | Kernel ELF (Multiboot2) |"
-              echo "| x86_64 UEFI | canboot-x86_64-uefi.iso  | Bootable UEFI ISO (ESP + EFI/BOOT/BOOTX64.EFI) |"
-              echo "| x86_64 UEFI | canboot-x86_64-uefi.efi  | PE/COFF UEFI app, drop onto an ESP |"
-              echo "| aarch64 direct | canboot-aarch64.elf   | Raw ELF; \`qemu-system-aarch64 -kernel\` |"
-              echo "| aarch64 direct | canboot-aarch64.bin   | Flat binary (no ELF wrapper) |"
-              echo "| aarch64 UEFI | canboot-aarch64-uefi.efi | PE/COFF for AAVMF / EDK2 |"
-              echo "| aarch64 UEFI | canboot-aarch64-uefi.img | Raw FAT32 ESP image with BOOTAA64.EFI |"
-              echo "| any         | SHA256SUMS.txt            | sha256(asset) for each file above |"
+              echo "### Packages"
+              echo ""
+              echo "| Package | Boot media | Notes |"
+              echo "|---------|-----------|-------|"
+              echo "| canboot-x86_64-bios.zip    | canboot-x86_64-bios.iso  | BIOS: GRUB/Multiboot2 ISO + GRUB PXE tftp/ tree |"
+              echo "| canboot-x86_64-uefi.zip    | canboot-x86_64-uefi.iso  | UEFI: ESP ISO + BOOTX64.EFI tftp/ tree |"
+              echo "| canboot-aarch64-direct.zip | (none, -kernel)          | Flat .bin + .elf; tftp/ carries the flat image |"
+              echo "| canboot-aarch64-uefi.zip   | canboot-aarch64-uefi.img | UEFI: ESP image + BOOTAA64.EFI tftp/ tree |"
+              echo "| any                        | SHA256SUMS.txt           | sha256(zip) for each package |"
               echo ""
               echo "### Verify"
               echo ""
@@ -234,32 +218,16 @@ jobs:
               echo "sha256sum -c SHA256SUMS.txt"
               echo "\`\`\`"
               echo ""
-              echo "### Quick start"
+              echo "### PXE / netboot"
               echo ""
-              echo "\`\`\`"
-              echo "qemu-system-x86_64 -cdrom canboot-x86_64-uefi.iso \\"
-              echo "  -bios /usr/share/OVMF/OVMF_CODE.fd \\"
-              echo "  -serial stdio -display none"
-              echo "\`\`\`"
-              echo ""
-              echo "See [docs/](https://github.com/${{ github.repository }}/tree/main/docs)"
-              echo "for the full cando API reference and the per-platform run guides."
+              echo "Unzip a package, serve its \`tftp/\` contents from a TFTP root,"
+              echo "and start a DHCP server using the bundled \`dnsmasq.conf\`. CanBoot"
+              echo "learns the TFTP server from DHCP and pulls \`/init.cdo\` over TFTP."
+              echo "See [docs/running.md](https://github.com/${{ github.repository }}/blob/main/docs/running.md)."
           } > release-notes.md
           cat release-notes.md
 
-      - name: Publish (nightly = move tag in place)
-        if: steps.meta.outputs.prerelease == 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: nightly
-          name: "CanBoot nightly"
-          body_path: release-notes.md
-          prerelease: true
-          files: release/*
-          make_latest: false
-
-      - name: Publish (stable = pin to the tag)
-        if: steps.meta.outputs.prerelease == 'false'
+      - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
