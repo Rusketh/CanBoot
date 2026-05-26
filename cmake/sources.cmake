@@ -99,6 +99,7 @@ set(CANBOOT_PORTABLE_SOURCES
     hal/disk/nvme.c
     hal/disk/usb_storage.c
     hal/display/display.c
+    hal/display/virtio_gpu.c
     hal/input/input_queue.c
     hal/input/virtio_input.c
     hal/usb/xhci.c

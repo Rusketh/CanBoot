@@ -111,10 +111,21 @@ if [ -n "${RNG_DEV:-}" ]; then
     RNG_ARGS="-device virtio-rng-pci"
 fi
 
+# Optional virtio-gpu display. When GPU_DEV is set we drop the emulated VGA
+# (so firmware leaves no framebuffer) and attach a virtio-gpu; the kernel
+# then drives it for the scanout ("canboot: virtio-gpu fb ...").
+VGA_ARGS=""
+GPU_ARGS=""
+if [ -n "${GPU_DEV:-}" ]; then
+    VGA_ARGS="-vga none"
+    GPU_ARGS="-device virtio-gpu-pci"
+fi
+
 AUDIO_WAV="${AUDIO_WAV:-build/canboot-bios-audio.wav}"
 rm -f "$AUDIO_WAV"
 qemu-system-x86_64 \
     -machine q35 \
+    $VGA_ARGS \
     -boot order=dc \
     -cdrom "$ISO" \
     -drive "if=none,id=blk0,file=$DISK_IMG,format=raw" \
@@ -125,6 +136,7 @@ qemu-system-x86_64 \
     $NVME_ARGS \
     $USB_ARGS \
     $RNG_ARGS \
+    $GPU_ARGS \
     -audiodev "wav,id=snd,path=$AUDIO_WAV" \
     -device intel-hda \
     -device hda-duplex,audiodev=snd \
@@ -327,6 +339,9 @@ PY
             fi
         }
         check 'canboot: framebuffer painted'
+        if [ -n "${GPU_DEV:-}" ]; then
+            check 'canboot: virtio-gpu fb '
+        fi
         check 'canboot: ps/2 input ready'
         if [ -n "${USB_KBD:-}" ] || [ -n "${USB_MOUSE:-}" ]; then
             # Each attached boot device must enumerate and be classified

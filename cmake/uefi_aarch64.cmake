@@ -88,7 +88,6 @@ set(EFI_AARCH64_SOURCES
     # excluded below), and the AHCI weak-symbol stand-in.
     hal/console/serial_aarch64.c
     hal/pci/pci_aarch64.c
-    hal/display/virtio_gpu.c
     hal/audio/virtio_snd.c
     cando_port/jit/codegen_aarch64.c
     cando_port/jit/codegen_stub_aarch64.c

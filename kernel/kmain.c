@@ -201,6 +201,10 @@ static void kmain_body(struct boot_info *bi) {
      * allocates. Replaces the old fixed static arena. */
     canboot_heap_init(bi);
 
+    /* When firmware leaves us no linear framebuffer (e.g. a BIOS boot with
+     * `-vga none` but a virtio-gpu attached), defer painting until after PCI
+     * is up so we can drive virtio-gpu ourselves. */
+    bool fb_deferred = false;
     if (bi->fb.format == CANBOOT_FB_RGB) {
         hal_console_write("canboot: fb rgb addr=");
         put_hex64(bi->fb.addr);
@@ -225,6 +229,7 @@ static void kmain_body(struct boot_info *bi) {
         hal_console_write("canboot: fb = vga text mode\n");
     } else {
         hal_console_write("canboot: fb = none\n");
+        fb_deferred = true;
     }
 
     hal_console_write("canboot: mmap entries=");
@@ -278,6 +283,29 @@ static void kmain_body(struct boot_info *bi) {
     hal_console_write("canboot: pci devcount=");
     put_dec(hal_pci_devcount());
     hal_console_write("\n");
+
+    /* No firmware framebuffer? Try to drive a virtio-gpu now that PCI is up,
+     * and paint into the scanout it gives us. */
+    if (fb_deferred) {
+        extern bool canboot_virtio_gpu_init(struct canboot_fb *out_fb);
+        extern void canboot_virtio_gpu_flush(void);
+        if (canboot_virtio_gpu_init(&bi->fb)) {
+            hal_console_write("canboot: virtio-gpu fb ");
+            put_dec(bi->fb.width);
+            hal_console_write("x");
+            put_dec(bi->fb.height);
+            hal_console_write("\n");
+            canboot_display_bind(&bi->fb);
+            fb_clear(&bi->fb, 0x00202020u);
+            fb_fill_rect(&bi->fb, 16, 16, 256, 64, 0x00FFFFFFu);
+            fb_fill_rect(&bi->fb,
+                         (int32_t)bi->fb.width - 80, 16, 64, 64, 0x00FFFFFFu);
+            canboot_virtio_gpu_flush();
+            hal_console_write("canboot: framebuffer painted\n");
+        } else {
+            hal_console_write("canboot: virtio-gpu absent\n");
+        }
+    }
 
     hal_input_init();
 

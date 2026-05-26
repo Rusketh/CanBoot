@@ -82,9 +82,11 @@ can mount it - CanBoot can boot/read its `.cdo` from a USB stick.
 
 The fb painter described in [api/display.md](api/display.md). One
 implementation in `hal/display/display.c`; takes a `struct canboot_fb`
-from the loader and renders into it. The aarch64 path attaches
-virtio-gpu in `hal/display/virtio_gpu.c` when the firmware doesn't
-provide a GOP framebuffer.
+from the loader and renders into it. When firmware provides no linear
+framebuffer (aarch64 AAVMF, or a BIOS boot with no emulated VGA), the
+kernel drives virtio-gpu itself in `hal/display/virtio_gpu.c` - allocate a
+32-bit scanout, point `boot_info.fb` at it, and `RESOURCE_FLUSH` on paint.
+This runs on both x86_64 and aarch64.
 
 ## Input — `hal/include/hal/input.h`
 
