@@ -498,8 +498,11 @@ print("cando datetime.year ok =", datetime.year(dt) >= 1970);
 VAR ms = stream.memory();
 ms:write("canboot-stream");
 print("cando stream.memory ok =", true);
-// Spawn a worker thread and join it (single worker; concurrent CanDo
-// child-VMs share one TLS area, so we keep to the spawn->join shape).
+// Spawn a worker thread and join it. Concurrent CanDo child-VMs still
+// share the parent's heap / handle table / GC state, which is not yet
+// thread-safe (two VMs executing at once corrupt it), so we keep to the
+// spawn->join shape. Per-thread TLS (rt/sched) removed the current-VM
+// aliasing, but full concurrent-VM safety needs VM-level locking.
 VAR worker = thread {
     VAR s = 0; VAR i = 0;
     WHILE (i < 1000) { s = s + i; i = i + 1; }

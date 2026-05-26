@@ -76,6 +76,45 @@ static __attribute__((aligned(16)))
     unsigned char g_idle_stacks[CANBOOT_NR_CPUS][CANBOOT_IDLE_STACK];
 
 /* ------------------------------------------------------------------ */
+/* Per-thread TLS. cando keeps a handful of _Thread_local pointers (the  */
+/* current VM / thread / sort ctx / memctrl); a server that runs a child */
+/* VM per accepted connection needs each worker thread to see its own    */
+/* copy. On x86_64 the thread pointer is FS_BASE and the toolchain emits  */
+/* %fs:NEG-offset accesses, so a zeroed block with FS_BASE at its top is  */
+/* a valid per-thread TLS area (PT_TLS is .tbss-only — FileSiz 0 — so no  */
+/* init image to copy). On aarch64 _Thread_local is compiled to a plain   */
+/* global (see cmake/uefi_aarch64.cmake), so tls_base is unused there.    */
+#define CANBOOT_THREAD_TLS_SIZE 2048u
+static __attribute__((aligned(64)))
+    unsigned char g_thread_tls[CANBOOT_THREAD_POOL][CANBOOT_THREAD_TLS_SIZE];
+
+#if defined(__x86_64__)
+static inline void tls_set_base(void *p) {
+    uint64_t v = (uint64_t)(uintptr_t)p;
+    __asm__ volatile ("wrmsr" : :
+        "c"(0xC0000100u),                 /* IA32_FS_BASE */
+        "a"((uint32_t)(v & 0xFFFFFFFFu)),
+        "d"((uint32_t)(v >> 32)));
+}
+static inline void *tls_get_base(void) {
+    uint32_t lo, hi;
+    __asm__ volatile ("rdmsr" : "=a"(lo), "=d"(hi) : "c"(0xC0000100u));
+    return (void *)(uintptr_t)(((uint64_t)hi << 32) | lo);
+}
+/* x86_64 variant II: thread pointer sits at the END of the block;
+ * variables live at negative offsets below it. */
+static inline void *tls_top(unsigned char *area, size_t size) {
+    return area + size;
+}
+#else
+static inline void tls_set_base(void *p) { (void)p; }
+static inline void *tls_get_base(void) { return NULL; }
+static inline void *tls_top(unsigned char *area, size_t size) {
+    (void)size; return area;
+}
+#endif
+
+/* ------------------------------------------------------------------ */
 /* Arch context bootstrap: lay down a fake callee-saved frame so the    */
 /* first switch into a new thread "returns" into the trampoline. The    */
 /* layout MUST match the pop/ldp order in rt/sched/arch/ctx_<arch>.S.   */
@@ -173,6 +212,13 @@ static void reschedule(void) {
     next->state = CANBOOT_TH_RUNNING;
     next->cpu   = cpu;
     cpu->current = next;
+
+    /* Point the CPU's thread pointer at the incoming thread's TLS block
+     * before we resume it, so its _Thread_local accesses are private.
+     * Every switch sets the in-thread's base, so prev's is restored when
+     * something later switches back to it. */
+    if (next->tls_base)
+        tls_set_base(next->tls_base);
 
     canboot_arch_ctx_switch(&prev->ctx, &next->ctx);
     /* Resumed: 'prev' is current again. g_sched is held. */
@@ -295,6 +341,9 @@ void canboot_sched_init(void) {
     main_th->state = CANBOOT_TH_RUNNING;
     main_th->cpu   = cpu;
     main_th->stack = NULL; /* not owned */
+    /* Adopt the boot CPU's already-configured TLS area (kmain/setup_tls
+     * on x86_64; NULL elsewhere). New threads get private blocks. */
+    main_th->tls_base = tls_get_base();
     cpu->current   = main_th;
 
     /* Per-CPU idle thread (CPU 0 only in M1). */
@@ -306,6 +355,9 @@ void canboot_sched_init(void) {
     idle->cpu        = cpu;
     idle->stack      = g_idle_stacks[0];
     idle->stack_size = CANBOOT_IDLE_STACK;
+    /* Idle never runs cando, but keep a valid TLS base so a switch to it
+     * still points FS_BASE somewhere mapped. Share the boot area. */
+    idle->tls_base   = main_th->tls_base;
     arch_ctx_init(&idle->ctx, g_idle_stacks[0] + CANBOOT_IDLE_STACK);
     cpu->idle = idle;
 }
@@ -329,6 +381,7 @@ __attribute__((noreturn)) void canboot_sched_ap_online(unsigned cpu_index) {
     idle->state = CANBOOT_TH_RUNNING;
     idle->cpu   = cpu;
     idle->stack = NULL;                /* adopt the AP's startup stack  */
+    idle->tls_base = tls_get_base();   /* AP's shared boot TLS area     */
     cpu->idle    = idle;
     cpu->current = idle;
 
@@ -362,6 +415,10 @@ struct canboot_thread *canboot_thread_create(void *(*fn)(void *), void *arg) {
     t->state      = CANBOOT_TH_RUNNABLE;
     t->stack      = g_stacks[id];
     t->stack_size = CANBOOT_THREAD_STACK;
+    /* Fresh, zeroed private TLS block (re-zeroed on pool-slot reuse so a
+     * prior thread's _Thread_local values don't leak in). */
+    memset(g_thread_tls[id], 0, CANBOOT_THREAD_TLS_SIZE);
+    t->tls_base   = tls_top(g_thread_tls[id], CANBOOT_THREAD_TLS_SIZE);
     arch_ctx_init(&t->ctx, g_stacks[id] + CANBOOT_THREAD_STACK);
 
     rq_push(t);

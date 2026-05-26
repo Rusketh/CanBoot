@@ -71,6 +71,12 @@ struct canboot_thread {
 
     unsigned char              *stack;     /* owned stack base, or NULL  */
     size_t                      stack_size;
+
+    /* Per-thread TLS pointer (x86_64 FS_BASE). Each thread gets a private
+     * zeroed block so cando's _Thread_local current-VM pointer is not
+     * shared across concurrently-running threads. NULL on arches where
+     * _Thread_local is compiled to a plain global (aarch64). */
+    void                       *tls_base;
 };
 
 /* ---- Lifecycle ------------------------------------------------------- */
