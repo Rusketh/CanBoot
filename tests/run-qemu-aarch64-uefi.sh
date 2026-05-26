@@ -247,6 +247,14 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'selftest: init.cdo executed ok'
         check 'canboot: virtio-gpu fb '
         check 'selftest: display lib registered'
+        check 'cando datetime.year ok = true'
+
+        check 'cando stream.memory ok = true'
+
+        check 'cando thread.join = 499500'
+
+        check 'cando thread.state = done'
+
         check 'cando jit match = true'
 
         check 'cando gui included ok ver 1.0.0'
