@@ -35,6 +35,7 @@
 
 #include "hal/audio.h"
 #include "hal/pci.h"
+#include "audio_x86.h"
 
 #define HDA_GCAP      0x00
 #define HDA_GCTL      0x08
@@ -342,7 +343,7 @@ static bool probe_pci(struct canboot_pci_addr *out) {
     return false;
 }
 
-bool hal_audio_init(void) {
+bool canboot_hda_init(void) {
     if (g_hda.present) return true;
     struct canboot_pci_addr addr;
     if (!probe_pci(&addr)) return false;
@@ -399,13 +400,13 @@ bool hal_audio_init(void) {
     return true;
 }
 
-bool hal_audio_present(void) { return g_hda.present; }
+bool canboot_hda_present(void) { return g_hda.present; }
 
-const char *hal_audio_device_name(void) {
+const char *canboot_hda_device_name(void) {
     return g_hda.present ? g_hda.dev_name : "none";
 }
 
-uint32_t hal_audio_write(const int16_t *samples, uint32_t frames) {
+uint32_t canboot_hda_write(const int16_t *samples, uint32_t frames) {
     if (!g_hda.present) return frames;
     if (!samples || frames == 0) return 0;
     uint32_t bytes = frames * HAL_AUDIO_CHANNELS * HAL_AUDIO_BPS;
@@ -433,7 +434,7 @@ uint32_t hal_audio_write(const int16_t *samples, uint32_t frames) {
     return frames;
 }
 
-void hal_audio_flush(void) {
+void canboot_hda_flush(void) {
     if (!g_hda.present) return;
     /* Wait until the device's LPIB catches up to our write pointer
      * (or close enough). Bounded poll so a wedged device doesn't
@@ -447,7 +448,7 @@ void hal_audio_flush(void) {
     }
 }
 
-void hal_audio_stop(void) {
+void canboot_hda_stop(void) {
     if (!g_hda.present) return;
     uint32_t sd = g_hda.out_sd_off;
     uint32_t ctl = r32(sd + SD_CTL);

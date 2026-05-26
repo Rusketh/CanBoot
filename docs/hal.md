@@ -36,11 +36,15 @@ Backends:
 | File | Target | Behaviour |
 |------|--------|-----------|
 | `hal/audio/audio_stub.c`  | All        | Weak symbols only. Accepts samples, drops them. |
+| `hal/audio/audio_x86.c`   | x86_64     | Dispatcher: probes HDA then AC'97, routes the public surface to the bound one. |
 | `hal/audio/intel_hda.c`   | x86_64     | PCI class 0x04.0x03. Polled, immediate-command codec verbs. |
+| `hal/audio/ac97.c`        | x86_64     | PCI class 0x04.0x01. NAM mixer + NABM bus-master DMA, 32-entry BDL, VRA at 44.1 kHz. |
 | `hal/audio/virtio_snd.c`  | aarch64    | PCI vendor 0x1AF4 device 0x1059. Polled, 3-descriptor TX. |
 
-The stub is weak-only; whichever strong backend builds for a given
-target displaces it at link time.
+The stub is weak-only. On x86_64 the `audio_x86.c` dispatcher provides the
+strong surface and binds the first present of HDA / AC'97 (mirroring the
+pluggable NIC layer); on aarch64 `virtio_snd.c` is the strong backend.
+Either displaces the stub at link time.
 
 ## Disk — `hal/include/hal/disk.h`
 

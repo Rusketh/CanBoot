@@ -312,6 +312,56 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # Exercise the AC'97 audio backend: boot the BIOS smoke image with an
+  # AC97 device instead of Intel HDA. The kernel's audio backend probes
+  # HDA then AC'97 and binds the latter; the cando audio selftest then
+  # plays a tone and the captured WAV must contain non-silent samples.
+  audio-ac97-x86_64:
+    name: x86_64 audio ac97
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build gcc binutils \
+            meson python3 \
+            grub-pc-bin grub-common \
+            gnu-efi ovmf \
+            xorriso mtools dosfstools \
+            qemu-system-x86
+
+      - name: Configure
+        run: cmake -B build -G Ninja -DCANBOOT_ARCH=x86_64
+
+      - name: Build kernel ELF
+        run: cmake --build build --target canboot-x86_64 --verbose
+
+      - name: Build BIOS ISO
+        run: bash scripts/mkiso/bios.sh
+              build/canboot-x86_64.elf
+              build/canboot-x86_64-bios.iso
+
+      - name: QEMU smoke test (AC'97 audio)
+        env:
+          AUDIO: ac97
+          TIMEOUT: "280"
+        run: bash tests/run-qemu-bios.sh build/canboot-x86_64-bios.iso
+
+      - name: Upload serial log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-ac97-log
+          path: build/qemu-bios.log
+          if-no-files-found: ignore
+          retention-days: 7
+
   build-aarch64:
     name: aarch64 ${{ matrix.firmware }}
     runs-on: ubuntu-latest

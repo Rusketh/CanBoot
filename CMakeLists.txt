@@ -52,7 +52,9 @@ if(CANBOOT_ARCH STREQUAL "x86_64")
         ${CANBOOT_NTFS3G_SOURCES}
         ${CANBOOT_NTFS3G_MKFS_SOURCES}
         ${CANBOOT_LWEXT4_SOURCES}
+        hal/audio/audio_x86.c
         hal/audio/intel_hda.c
+        hal/audio/ac97.c
     )
 elseif(CANBOOT_ARCH STREQUAL "aarch64")
     # aarch64 direct-kernel build: bootstrap + entry trampoline + PL011
