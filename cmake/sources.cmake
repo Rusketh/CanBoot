@@ -115,6 +115,12 @@ set(CANBOOT_PORTABLE_SOURCES
     net/mbedtls_port/inet_pton.c
     net/mbedtls_port/lwip_bio.c
 
+    # BSD-socket surface over lwIP's raw API + the OpenSSL surface cando's
+    # lib/sockutil.c links against. These back the vendored socket /
+    # secure_socket / http libraries (added to CANBOOT_CANDO_SOURCES).
+    cando_port/net_posix/sockets.c
+    cando_port/net_posix/openssl_stub.c
+
     # Freestanding runtime: picolibc syscall shims, the preemptive-capable
     # thread scheduler core (rt/sched), and the POSIX pthread shim layered
     # over it. The arch-specific context-switch asm (rt/sched/arch/ctx_*.S)
@@ -213,6 +219,10 @@ set(CANBOOT_CANDO_SOURCES
     ${CANDO_DIR}/source/lib/object.c
     ${CANDO_DIR}/source/lib/meta.c
     ${CANDO_DIR}/source/lib/stream.c
+    # Real upstream TCP socket library, on the canboot BSD-socket +
+    # OpenSSL shims (cando_port/net_posix, cando_port/shims/openssl).
+    ${CANDO_DIR}/source/lib/sockutil.c
+    ${CANDO_DIR}/source/lib/socket.c
 )
 
 # ntfs-3g library sources. Vendored under vendor/ntfs-3g, compiled

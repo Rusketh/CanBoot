@@ -455,7 +455,16 @@ ssize_t read(int fd, void *buf, size_t count) {
 
 /* ---- Trivial / ENOSYS stubs ------------------------------------------- */
 
+/* Socket fds live in a dedicated high range and are owned by the
+ * BSD-socket-over-lwIP layer (cando_port/net_posix/sockets.c). When that
+ * layer is linked its strong definitions override these weak no-ops;
+ * targets without it (the minimal aarch64 direct-kernel) keep the
+ * historical "not a socket" behaviour. */
+__attribute__((weak)) int canboot_socket_is(int fd)    { (void)fd; return 0; }
+__attribute__((weak)) int canboot_socket_close(int fd) { (void)fd; return 0; }
+
 int close(int fd) {
+    if (canboot_socket_is(fd)) return canboot_socket_close(fd);
     struct canboot_openfile *f = file_for_fd(fd);
     if (f) {
         canboot_preempt_disable();

@@ -364,6 +364,8 @@ PY
 
         check 'cando tls.version = TLSv1.3'
 
+        check 'cando socket http ok = true'
+        check 'cando socket.resolve ok = true'
         check 'cando sys libs end'
         check 'selftest: crypto libs registered'
         check 'cando hex.encode(canboot) = 63616e626f6f74'

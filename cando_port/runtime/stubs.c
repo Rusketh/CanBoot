@@ -38,7 +38,8 @@ void cando_lib_crypto_register(struct CandoVM *vm)         { (void)vm; }
  * cando_port/lib/os.c. CanDo's upstream os.c uses POSIX getenv,
  * system(), gethostname, sysinfo, etc. — none available on canboot. */
 void cando_lib_os_register(struct CandoVM *vm)             { (void)vm; }
-void cando_lib_socket_register(struct CandoVM *vm)         { (void)vm; }
+/* cando_lib_socket_register is the real vendored lib/socket.c now,
+ * backed by the BSD-socket-over-lwIP layer in cando_port/net_posix. */
 void cando_lib_secure_socket_register(struct CandoVM *vm)  { (void)vm; }
 void cando_lib_httputil_register(struct CandoVM *vm)       { (void)vm; }
 /* http / https built-ins replaced by canboot_cando_open_httplib /
@@ -186,11 +187,7 @@ int mprotect(void *addr, size_t len, int prot) { (void)addr; (void)len; (void)pr
 
 /* ---- Networking + DNS ------------------------------------------------- */
 
-const char *inet_ntop(int af, const void *src, char *dst, socklen_t size) {
-    (void)af; (void)src;
-    if (dst && size > 0) { dst[0] = '\0'; }
-    return dst;
-}
+/* inet_ntop is provided by cando_port/net_posix/sockets.c (v4 + v6). */
 struct hostent *gethostbyname(const char *name) { (void)name; return NULL; }
 
 /* ---- User / system info ---------------------------------------------- */

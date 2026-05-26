@@ -113,6 +113,31 @@ print("cando net.lookup(canboot.test) =", net.lookup("canboot.test"));
 print("cando tls via dns =", tls.httpsGet("canboot.test", 8443, "/"));
 print("cando tls.version =", tls.version());
 
+// socket.* - the real upstream CanDo socket library (vendor/cando/source/
+// lib/socket.c) running on the canboot BSD-socket-over-lwIP layer
+// (cando_port/net_posix/sockets.c). Raw TCP client against the same
+// http_hello sidecar net.httpGet hits; proves connect/sendAll/recvAll/
+// close end-to-end. socket.resolve drives getaddrinfo over the lwIP DNS
+// resolver (canboot.test -> 10.0.2.2 via the fixed-answer sidecar).
+// CanDo string literals do not process backslash escapes, so build the
+// CRLF bytes the HTTP request needs from their hex codes.
+VAR CRLF = hex.decode("0d0a");
+print("cando socket libs begin");
+TRY {
+    VAR sk = socket.connect("10.0.2.2", 8080);
+    sk:sendAll("GET / HTTP/1.0" + CRLF + "Host: 10.0.2.2" + CRLF
+             + "Connection: close" + CRLF + CRLF);
+    VAR sresp = sk:recvAll();
+    sk:close();
+    print("cando socket http ok =", string.contains(sresp, "canboot-hello"));
+    VAR saddrs = socket.resolve("canboot.test");
+    print("cando socket.resolve ok =", string.contains(saddrs[0], "10.0.2.2"));
+} CATCH (e) {
+    print("cando socket http ok = false");
+    print("cando socket error:", e);
+}
+print("cando socket libs end");
+
 print("cando sys libs end");
 
 // ---- Milestone 14: crypto libs (random / crypto / hex / base64) -----
