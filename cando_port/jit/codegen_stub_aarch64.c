@@ -1,19 +1,13 @@
 /*
  * aarch64 stand-ins for x86-only modules referenced by the shared
  * kmain / cando / disk code.
+ *
+ * The cando JIT machine-code emitter is now implemented natively for
+ * aarch64 in cando_port/jit/codegen_aarch64.c (cando_jit_codegen_trace).
+ * This file keeps only the unrelated AHCI weak-symbol stand-in.
  */
 
 #include <stdbool.h>
-
-/* cando JIT: emits raw x86_64 machine code from IR. aarch64 needs its
- * own emitter; until then return false so the JIT falls back to the
- * interpreter for every hot trace. Correct semantics, no speed-up. */
-struct CandoVM;
-struct CandoTrace;
-bool cando_jit_codegen_trace(struct CandoVM *vm, struct CandoTrace *t) {
-    (void)vm; (void)t;
-    return false;
-}
 
 /* AHCI driver: hal/disk/ahci.c uses x86 port I/O for the legacy SATA
  * IDE-compat path and has never been ported to aarch64. We don't
