@@ -34,7 +34,11 @@
 #include "sched/percpu.h"
 
 #define CANBOOT_THREAD_POOL   16u
-#define CANBOOT_THREAD_STACK  (32u * 1024u)
+/* Worker threads run full CanDo VMs (a child VM lives on the worker stack)
+ * and, for secure_socket servers, Mbed TLS handshakes (>150 KiB of
+ * frames). 32 KiB overflowed into adjacent TLS blocks; 256 KiB matches the
+ * boot thread's stack. */
+#define CANBOOT_THREAD_STACK  (256u * 1024u)
 #define CANBOOT_IDLE_STACK    (8u * 1024u)  /* idle does almost nothing */
 
 struct canboot_cpu canboot_cpus[CANBOOT_NR_CPUS];

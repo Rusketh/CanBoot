@@ -602,3 +602,27 @@ display.fillRect(300, 100, 100, 100, 255);        // 0x0000FF blue
 fb.flush();
 print("cando gui dashboard painted");
 print("cando display showcase end");
+
+// ---- HTTP server: the real upstream CanDo socket server -------------
+// socket.createServer (vendor/cando/source/lib/socket.c) spawns a
+// background accept thread; each accepted connection runs the callback in
+// its own child VM. That per-connection concurrency is what the VM GIL
+// (rt/sched) makes safe. The host-side runner connects through a SLIRP
+// hostfwd (127.0.0.1:18080 -> guest :9090) and sends a request; we serve
+// one HTTP response and app.quit() to stop the accept loop so init.cdo
+// can finish. Placed last so the main thread blocks on the server's
+// lifeline (dropping the GIL) right after listen, leaving the accept and
+// handler threads free to run.
+print("cando server libs begin");
+VAR httpsrv = socket.createServer(FUNCTION(conn) {
+    VAR reqline = conn:recvLine();
+    print("cando server got connection");
+    conn:sendAll("HTTP/1.0 200 OK" + CRLF + "Content-Type: text/plain" + CRLF
+               + "Content-Length: 13" + CRLF + "Connection: close" + CRLF + CRLF
+               + "canboot-serve");
+    print("cando server sent response");
+    conn:close();
+    app.quit();
+});
+httpsrv:listen(9090);
+print("cando server listening");

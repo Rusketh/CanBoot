@@ -59,8 +59,9 @@ struct nsock {
     int               nonblock;
     int               timeout_ms;
     int               domain;
-    /* listener accept backlog (newly-accepted pcbs awaiting accept()).      */
-    struct tcp_pcb   *backlog[BACKLOG_MAX];
+    /* listener accept backlog: indices of fully-wired connection slots
+     * (recv_cb already attached in accept_cb) awaiting accept().            */
+    int               backlog[BACKLOG_MAX];
     volatile int      bl_count;
     uint16_t          local_port;
     uint16_t          peer_port;
@@ -140,12 +141,28 @@ static err_t recv_cb(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t e) {
     return ERR_OK;
 }
 
+/* Runs inside hal_net_pump with the netcore lock already held (a pump is
+ * always entered via net_enter), so it touches g_socks directly. We wire
+ * the connection's recv/err callbacks HERE, the instant lwIP hands us the
+ * pcb, rather than in accept(): a client that sends immediately after the
+ * handshake would otherwise have its first segment arrive before accept()
+ * attached recv_cb, and lwIP would refuse/stall it. */
 static err_t accept_cb(void *arg, struct tcp_pcb *newpcb, err_t e) {
     struct nsock *ls = (struct nsock *)arg;
     if (!ls || e != ERR_OK || !newpcb) return ERR_VAL;
     if (ls->bl_count >= BACKLOG_MAX) return ERR_MEM;   /* drop: backlog full */
-    ls->backlog[ls->bl_count++] = newpcb;
-    tcp_backlog_delayed(newpcb);                       /* defer until accept */
+    int idx = -1;
+    for (int i = 0; i < NSOCK; i++) if (!g_socks[i].used) { idx = i; break; }
+    if (idx < 0) return ERR_MEM;                       /* pool full: refuse */
+    struct nsock *c = &g_socks[idx];
+    memset(c, 0, sizeof(*c));
+    c->used = 1; c->state = ST_CONNECTED; c->pcb = newpcb; c->domain = AF_INET;
+    c->peer_port = newpcb->remote_port;
+    c->peer_ip   = newpcb->remote_ip;
+    tcp_arg(newpcb, c);
+    tcp_recv(newpcb, recv_cb);
+    tcp_err(newpcb, err_cb);
+    ls->backlog[ls->bl_count++] = idx;
     return ERR_OK;
 }
 
@@ -332,25 +349,16 @@ int accept(int fd, struct sockaddr *addr, socklen_t *alen) {
     for (;;) {
         net_enter();
         if (s->bl_count > 0) {
-            struct tcp_pcb *np = s->backlog[0];
+            int idx = s->backlog[0];          /* slot already wired in accept_cb */
             for (int i = 1; i < s->bl_count; i++) s->backlog[i - 1] = s->backlog[i];
             s->bl_count--;
-            int idx = -1;
-            for (int i = 0; i < NSOCK; i++) if (!g_socks[i].used) { idx = i; break; }
-            if (idx < 0) { tcp_abort(np); net_leave(); errno = EMFILE; return -1; }
             struct nsock *c = &g_socks[idx];
-            memset(c, 0, sizeof(*c));
-            c->used = 1; c->state = ST_CONNECTED; c->pcb = np; c->domain = AF_INET;
-            tcp_arg(np, c);
-            tcp_recv(np, recv_cb);
-            tcp_err(np, err_cb);
-            tcp_backlog_accepted(np);
             if (addr && alen && *alen >= sizeof(struct sockaddr_in)) {
                 struct sockaddr_in *sin = (struct sockaddr_in *)addr;
                 memset(sin, 0, sizeof(*sin));
                 sin->sin_family = AF_INET;
-                sin->sin_port = htons(np->remote_port);
-                sin->sin_addr.s_addr = ip_addr_get_ip4_u32(&np->remote_ip);
+                sin->sin_port = htons(c->peer_port);
+                sin->sin_addr.s_addr = ip_addr_get_ip4_u32(&c->peer_ip);
                 *alen = sizeof(*sin);
             }
             net_leave();
