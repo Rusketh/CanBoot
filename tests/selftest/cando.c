@@ -96,6 +96,35 @@ static int load_init_cdo(char *out, uint32_t out_size, uint32_t *out_len) {
     return -1;
 }
 
+/* Focused JIT self-test, run from the C harness independently of
+ * init.cdo so the tracing JIT is exercised on every boot path.  A hot
+ * loop mixing integer scaling, f64 division and a comparison/branch
+ * must produce bit-identical results with jit.off() vs jit.on(), and
+ * the trace must compile to native machine code (traces_compiled>=1)
+ * on every supported arch -- x86_64 via vendor codegen.c, aarch64 via
+ * cando_port/jit/codegen_aarch64.c. */
+static void cando_jit_selftest(CandoVM *vm) {
+    static const char *src =
+        "VAR f = FUNCTION(n){ VAR a = 0; VAR i = 0;"
+        " WHILE (i < n) { a = a + (i * 7) - (i / 3); i = i + 1; } RETURN a; };"
+        "jit.reset(); jit.off(); VAR off = f(40000);"
+        "jit.on(); VAR k = 0; VAR on = 0;"
+        " WHILE (k < 12) { on = f(40000); k = k + 1; }"
+        "VAR st = jit.stats(); jit.off();"
+        "IF (off == on) { print(\"selftest: jit parity ok\"); }"
+        " ELSE { print(\"selftest: jit parity FAILED\", off, on); }"
+        "IF (st.traces_compiled >= 1) { print(\"selftest: jit native ok\"); }"
+        " ELSE { print(\"selftest: jit native FAILED\"); }";
+    int rc = cando_dostring(vm, src, "jit-selftest");
+    if (rc != 0) {
+        const char *err = cando_errmsg(vm);
+        printf("selftest: jit test FAILED dostring rc=%d err=%s\n",
+               rc, err ? err : "(none)");
+    } else {
+        printf("selftest: jit test ok\n");
+    }
+}
+
 void cando_selftest(void) {
     printf("selftest: starting cando link test\n");
 
@@ -174,6 +203,11 @@ void cando_selftest(void) {
     canboot_cando_open_imagelib(vm);
     canboot_cando_open_audiolib(vm);
     printf("selftest: image+audio libs registered\n");
+
+    /* Tracing-JIT self-test (correctness + native compilation) before
+     * the full init.cdo run, so the JIT is covered even if a later
+     * init.cdo stage changes. */
+    cando_jit_selftest(vm);
 
     /* Milestone 10: load /init.cdo from disk and run it through cando_dostring. */
     static char init_src[32768];

@@ -243,11 +243,18 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'selftest: cando_openlibs ok'
         check 'selftest: cando_close ok'
         check 'selftest: cando link test ok'
+        # Focused tracing-JIT self-test (tests/selftest/cando.c).
+        check 'selftest: jit parity ok'
+        check 'selftest: jit native ok'
+        check 'selftest: jit test ok'
         check 'selftest: cando_dostring ok'
         check 'selftest: init.cdo executed ok'
         check 'canboot: virtio-gpu fb '
         check 'selftest: display lib registered'
         check 'cando jit match = true'
+        # The native A64 JIT emitter must compile the hot loop trace
+        # (codegen_aarch64.c); traces_compiled>=1 prints this marker.
+        check 'cando jit compiled ok'
 
         check 'cando gui included ok ver 1.0.0'
 
