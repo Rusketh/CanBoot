@@ -2,6 +2,7 @@
  * cando time module - exposes the kernel monotonic clock as
  *   time.ms()       -> milliseconds since boot (u32)
  *   time.us()       -> microseconds since boot (u64 as f64)
+ *   time.now()      -> wall-clock seconds since the Unix epoch (RTC; 0 if none)
  *   time.ticks()    -> raw counter ticks (u64 as f64)
  *   time.ticksHz()  -> counter frequency in Hz (u64 as f64)
  *   time.sleep(ms)  -> busy-wait, pumps net/input devices while waiting
@@ -28,6 +29,11 @@ extern void canboot_audio_pump_default(void);
 #include "lib/object.h"
 
 extern uint64_t canboot_tsc_hz(void);
+
+/* Wall-clock seconds since the Unix epoch. Weak default returns 0 (no
+ * wall-clock source); x86_64's CMOS RTC driver (arch/x86_64/rtc.c)
+ * overrides it. */
+__attribute__((weak)) uint64_t canboot_wall_epoch(void) { return 0; }
 
 static inline uint64_t arch_now(void) {
 #if defined(__x86_64__)
@@ -68,6 +74,13 @@ static int t_ticks_hz(CandoVM *vm, int argc, CandoValue *args) {
     return 1;
 }
 
+/* Wall-clock seconds since the Unix epoch (0 if no RTC). */
+static int t_now(CandoVM *vm, int argc, CandoValue *args) {
+    (void)argc; (void)args;
+    cando_vm_push(vm, cando_number((f64)canboot_wall_epoch()));
+    return 1;
+}
+
 static int t_sleep(CandoVM *vm, int argc, CandoValue *args) {
     (void)vm;
     uint32_t ms = (uint32_t)libutil_arg_num_at(args, argc, 0, 0);
@@ -88,6 +101,7 @@ static int t_sleep(CandoVM *vm, int argc, CandoValue *args) {
 static const LibutilMethodEntry time_methods[] = {
     { "ms",       t_ms       },
     { "us",       t_us       },
+    { "now",      t_now      },
     { "ticks",    t_ticks    },
     { "ticksHz",  t_ticks_hz },
     { "sleep",    t_sleep    },

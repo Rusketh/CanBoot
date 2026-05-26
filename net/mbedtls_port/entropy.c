@@ -19,6 +19,7 @@
 #include <string.h>
 
 #include "mbedtls/entropy.h"
+#include "hal/rng.h"
 
 #if defined(__x86_64__)
 
@@ -133,6 +134,23 @@ int mbedtls_hardware_poll(void *data, unsigned char *output,
         memcpy(output + produced, &v, chunk);
         produced += chunk;
     }
+
+    /* If a hardware RNG (virtio-rng) is present, fold its bytes into the
+     * output. XOR can only add entropy, so this never weakens the CPU/jitter
+     * source above, and a missing device is a no-op. */
+    if (canboot_rng_present() || canboot_rng_init()) {
+        unsigned char hw[64];
+        size_t off = 0;
+        while (off < produced) {
+            size_t want = produced - off;
+            if (want > sizeof(hw)) want = sizeof(hw);
+            int got = canboot_rng_read(hw, (uint32_t)want);
+            if (got <= 0) break;
+            for (int i = 0; i < got; i++) output[off + (size_t)i] ^= hw[i];
+            off += (size_t)got;
+        }
+    }
+
     *olen = produced;
     return 0;
 }

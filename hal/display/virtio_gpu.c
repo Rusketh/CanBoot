@@ -23,6 +23,18 @@
 #include "canboot/boot_info.h"
 #include "hal/virtio.h"
 #include "hal/console.h"
+#include "sync/cpu.h"
+
+/* DMA ordering barrier: aarch64 needs an explicit dmb; x86 is strongly
+ * ordered so a compiler barrier suffices (matches the virtio-pci transport
+ * helpers). */
+static inline void gpu_barrier(void) {
+#if defined(__aarch64__)
+    __asm__ volatile ("dmb sy" ::: "memory");
+#else
+    __asm__ volatile ("" ::: "memory");
+#endif
+}
 
 #define VIRTIO_PCI_GPU 0x1050u
 
@@ -146,9 +158,9 @@ static int submit_cmd(uint32_t cmd_len, uint32_t resp_len) {
 
     uint16_t avail_idx = g_avail.idx;
     g_avail.ring[avail_idx % g_ctrlq.size] = 0;   /* head desc id */
-    __asm__ volatile ("dmb sy" ::: "memory");
+    gpu_barrier();
     g_avail.idx = avail_idx + 1;
-    __asm__ volatile ("dmb sy" ::: "memory");
+    gpu_barrier();
 
     canboot_virtq_kick(&g_ctrlq, CTRLQ_IDX);
 
@@ -156,12 +168,12 @@ static int submit_cmd(uint32_t cmd_len, uint32_t resp_len) {
      * via a generous spin count; virtio-gpu commands are tiny so
      * this should resolve in microseconds. */
     for (uint64_t spins = 0; spins < 10ull * 1000ull * 1000ull; spins++) {
-        __asm__ volatile ("dmb sy" ::: "memory");
+        gpu_barrier();
         if (g_used.idx != g_ctrlq.last_used_idx) {
             g_ctrlq.last_used_idx = g_used.idx;
             return 0;
         }
-        __asm__ volatile ("yield");
+        canboot_cpu_relax();
     }
     hal_console_write("virtio-gpu: command timeout\n");
     return -1;

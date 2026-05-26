@@ -29,7 +29,8 @@ VAR c = input.waitKey(5000);  // up to 5 seconds
 ## `input.mouse() -> object`
 
 Pumps the input devices, then returns the current pointer state from any
-attached pointing device (PS/2 mouse or virtio pointer/tablet):
+attached pointing device (PS/2 mouse/touchpad, virtio pointer/tablet, or
+USB-HID boot mouse over xHCI):
 
 ```cdo
 VAR m = input.mouse();
@@ -44,13 +45,16 @@ print(m.x, m.y, m.left, m.wheel);
 | `wheel` | Accumulated wheel notches since the last call (read-and-clear; `+`=up). |
 | `present` | `1` once any pointing device has reported, else `0`. |
 
-Motion may arrive relative (PS/2, virtio `EV_REL`) or absolute (virtio
-tablet `EV_ABS`); both accumulate into the same clamped position. There
+Motion may arrive relative (PS/2, USB-HID boot mouse, virtio `EV_REL`) or
+absolute (virtio tablet `EV_ABS`); both accumulate into the same clamped
+position. There
 is no separate button-event queue — poll this each frame and edge-detect
 button changes yourself (the [`gui`](../../modules/gui/gui.md) module does exactly this).
 
-**Platform support.** The PS/2 mouse rides the x86 i8042 (`hal/input/ps2.c`,
-folded into the keyboard driver) and is x86-only. virtio-input pointer
+**Platform support.** The PS/2 mouse/touchpad rides the x86 i8042
+(`hal/input/ps2.c`, folded into the keyboard driver) and is x86-only. The
+universal USB-HID boot mouse rides the xHCI driver (`hal/usb/xhci.c`) and
+binds alongside a USB keyboard on the same controller. virtio-input pointer
 devices (`hal/input/virtio_input.c`) work on any arch that compiles the
 portable HAL. The current aarch64 target is a minimal bring-up that stubs
 input entirely, so pointer support there lands once it compiles the

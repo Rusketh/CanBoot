@@ -11,6 +11,7 @@
 /* MMIO drivers: available on every arch. */
 extern const struct canboot_nic canboot_nic_virtio;
 extern const struct canboot_nic canboot_nic_e1000;
+extern const struct canboot_nic canboot_nic_e1000e;
 
 /* Port-I/O drivers: x86_64 only (legacy PIO BARs). */
 #if defined(__x86_64__)
@@ -21,6 +22,7 @@ extern const struct canboot_nic canboot_nic_pcnet;
 static const struct canboot_nic *const g_drivers[] = {
     &canboot_nic_virtio,
     &canboot_nic_e1000,
+    &canboot_nic_e1000e,
 #if defined(__x86_64__)
     &canboot_nic_rtl8139,
     &canboot_nic_pcnet,

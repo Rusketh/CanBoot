@@ -97,15 +97,19 @@ set(CANBOOT_PORTABLE_SOURCES
     hal/disk/disk.c
     hal/disk/virtio_blk.c
     hal/disk/nvme.c
+    hal/disk/usb_storage.c
     hal/display/display.c
+    hal/display/virtio_gpu.c
     hal/input/input_queue.c
     hal/input/virtio_input.c
     hal/usb/xhci.c
     hal/net/net.c
     hal/net/virtio_net.c
     hal/net/e1000.c
+    hal/net/e1000e.c
     hal/net/rtl8139.c
     hal/net/pcnet.c
+    hal/rng/virtio_rng.c
     hal/virtio/virtio_pci.c
 
     # Networking + TLS port shims.
@@ -148,6 +152,8 @@ set(CANBOOT_KERNEL_COMMON
     hal/input/ps2.c
     hal/disk/ahci.c
     hal/pci/pci_x86.c
+    arch/x86_64/rtc.c
+    arch/x86_64/power.c
 
     ${CANBOOT_PORTABLE_SOURCES}
 )

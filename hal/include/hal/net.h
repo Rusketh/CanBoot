@@ -16,8 +16,8 @@
  * hal_net_pump() from their main loop to drain the NIC and dispatch frames
  * into lwIP.
  *
- * Drivers today: virtio-net (MMIO, all arches), Intel e1000 (MMIO, all
- * arches), RTL8139 and AMD PCnet (port I/O, x86_64 only).
+ * Drivers today: virtio-net (MMIO, all arches), Intel e1000 / e1000e
+ * (MMIO, all arches), RTL8139 and AMD PCnet (port I/O, x86_64 only).
  */
 
 #define CANBOOT_NET_MAC_LEN 6

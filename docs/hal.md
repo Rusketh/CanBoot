@@ -66,16 +66,27 @@ Backends register via `hal_disk_register`. Currently:
 
 | File | Driver |
 |------|--------|
-| `hal/disk/virtio_blk.c` | virtio-blk-pci |
-| `hal/disk/ahci.c`       | AHCI SATA |
+| `hal/disk/virtio_blk.c`  | virtio-blk-pci |
+| `hal/disk/ahci.c`        | AHCI SATA |
+| `hal/disk/nvme.c`        | NVMe |
+| `hal/disk/usb_storage.c` | USB mass storage (SCSI Bulk-Only Transport over xHCI) |
+
+The USB mass-storage backend is the universal USB-disk driver: the
+class/subclass/protocol (`0x08` / `0x06` / `0x50`) every USB flash drive and
+external disk implements. It layers SCSI transparent commands
+(INQUIRY / READ CAPACITY / READ(10) / WRITE(10)) on the xHCI core's bulk
+primitive and registers each device as `usb0`, `usb1`, ... so the FS layer
+can mount it - CanBoot can boot/read its `.cdo` from a USB stick.
 
 ## Display — `hal/include/hal/display.h`
 
 The fb painter described in [api/display.md](api/display.md). One
 implementation in `hal/display/display.c`; takes a `struct canboot_fb`
-from the loader and renders into it. The aarch64 path attaches
-virtio-gpu in `hal/display/virtio_gpu.c` when the firmware doesn't
-provide a GOP framebuffer.
+from the loader and renders into it. When firmware provides no linear
+framebuffer (aarch64 AAVMF, or a BIOS boot with no emulated VGA), the
+kernel drives virtio-gpu itself in `hal/display/virtio_gpu.c` - allocate a
+32-bit scanout, point `boot_info.fb` at it, and `RESOURCE_FLUSH` on paint.
+This runs on both x86_64 and aarch64.
 
 ## Input — `hal/include/hal/input.h`
 
@@ -91,9 +102,17 @@ Backends:
 
 | File | Driver |
 |------|--------|
-| `hal/input/ps2.c`          | x86_64 i8042 |
-| `hal/input/virtio_input.c` | virtio-input modern PCI |
+| `hal/input/ps2.c`          | x86_64 i8042 keyboard + mouse/touchpad (aux port) |
+| `hal/input/virtio_input.c` | virtio-input modern PCI (keyboard, mouse, tablet) |
+| `hal/usb/xhci.c`           | xHCI + universal USB-HID boot keyboard **and** mouse/pointer; binds several devices at once |
 | `hal/input/input_stub_aarch64.c` | aarch64 only-keyboard-via-virtio stub |
+
+The USB-HID layer uses the HID *boot protocol* (`SET_PROTOCOL=0`) and
+classifies each device from its interface protocol (1 = keyboard,
+2 = mouse), so any boot-compliant keyboard or pointing device binds
+through one code path — the same "works on anything" contract a basic
+firmware/OS HID driver relies on. Keyboards push key events into the ring;
+pointers feed the shared `canboot_input_mouse_*` state.
 
 ## Console — `hal/include/hal/console.h`
 
@@ -119,6 +138,10 @@ lwIP `netif`-shaped surface for `hal_net_pump` (run lwIP's input loop
 | File | Driver |
 |------|--------|
 | `hal/net/virtio_net.c` | virtio-net-pci |
+| `hal/net/e1000.c`      | Intel 8254x (e1000) |
+| `hal/net/e1000e.c`     | Intel 8257x PCIe (e1000e, incl. QEMU 82574L) |
+| `hal/net/rtl8139.c`    | Realtek RTL8139 (x86_64) |
+| `hal/net/pcnet.c`      | AMD PCnet (x86_64) |
 
 ## PCI — `hal/include/hal/pci.h`
 
@@ -135,9 +158,11 @@ CF8/CFC; the aarch64 path is ECAM at the firmware-provided MMIO base.
 
 | Surface | Files | Notes |
 |---------|-------|-------|
-| `hal/time` | `tests/selftest/net.c` calibration | TSC + i8254 PIT; no separate file yet |
+| `hal/time` | `tests/selftest/net.c` calibration | monotonic TSC + i8254 PIT; no separate file yet |
+| Wall clock (`hal/rtc.h`) | `arch/x86_64/rtc.c` | CMOS RTC (0x70/0x71); `canboot_rtc_read` + `canboot_wall_epoch`; exposed to scripts as `time.now()`. Weak default returns 0 on arches without an RTC |
+| RNG (`hal/rng.h`) | `hal/rng/virtio_rng.c` | virtio-rng entropy device; `canboot_rng_read`. Mixed (XOR) into the Mbed TLS entropy poll when present, ignored when absent |
 | IDT / IRQ vectors | `arch/x86_64/idt.{c,h}`, `arch/x86_64/idt_stubs.S` | x86_64 trap frame dump on exception |
-| Power off | (not implemented) | ACPI S5 / PSCI bring-up deferred |
+| Power (`hal/power.h`) | `arch/x86_64/power.c` | ACPI poweroff (S5) + reboot, parsed from FADT/DSDT (PM1a control, \_S5 SLP_TYP, reset register) with 8042 / triple-fault reboot fallback; scripts call `os.poweroff()` / `os.reboot()`. Weak default halts on arches without it |
 
 ## Adding a new HAL driver
 

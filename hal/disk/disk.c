@@ -47,5 +47,6 @@ bool hal_disk_init(void) {
     canboot_virtio_blk_init();
     canboot_ahci_init();
     canboot_nvme_init();
+    canboot_usb_storage_init();
     return true;
 }

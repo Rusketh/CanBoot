@@ -5,10 +5,11 @@
 #include <stdint.h>
 
 /*
- * HAL input surface. Polling-only for now: every input device
- * driver (PS/2 today, virtio-input today, USB-HID later) pushes events
- * into a single shared ring buffer; consumers drain it via
- * hal_input_poll() or hal_input_getc().
+ * HAL input surface. Polling-only for now: every input device driver
+ * (PS/2, virtio-input, USB-HID over xHCI) pushes keyboard events into a
+ * single shared ring buffer and pointer motion/buttons into the shared
+ * mouse state; consumers drain the ring via hal_input_poll() /
+ * hal_input_getc() and read the pointer via canboot_input_mouse_state().
  *
  * Mirrors enough of CanDo's `console` module event shape to bind to it
  * with a thin wrapper later. Mouse fields are present so we can wire
@@ -124,7 +125,8 @@ bool canboot_ps2_init(void);
 bool canboot_virtio_input_init(void);
 bool canboot_virtio_input_present(void);
 
-/* USB-HID boot keyboard over xHCI (call after hal_pci_init()). */
+/* Universal USB-HID boot keyboard + mouse/pointer over xHCI; binds every
+ * connected HID device (call after hal_pci_init()). */
 bool canboot_usb_hid_init(void);
 bool canboot_usb_hid_present(void);
 

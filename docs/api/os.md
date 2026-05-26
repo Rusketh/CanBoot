@@ -25,9 +25,21 @@ rather than a missing-method crash.
 Halt. There's no parent process to return `code` to — the machine
 stops.
 
+## `os.poweroff() -> never`
+
+Power the machine off via ACPI (S5), parsed from the firmware ACPI tables
+(x86_64). Does not return. Falls back to halting on platforms without a
+poweroff path.
+
+## `os.reboot() -> never`
+
+Reset the machine — ACPI reset register, else an 8042 controller pulse,
+else a triple fault (x86_64). Does not return.
+
 ## `os.time() -> number`
 
-Seconds since boot. CanBoot has no RTC, so this is **not** a Unix
+Seconds since boot. For absolute wall-clock time use `time.now()`. This is
+**not** a Unix
 epoch — it's monotonic uptime. Treat it as "seconds since power-on".
 
 ## `os.clock() -> number`

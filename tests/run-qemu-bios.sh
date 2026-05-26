@@ -70,7 +70,7 @@ fi
 
 # Optional NVMe device. When NVME_IMG is set the kernel's NVMe driver
 # binds it and the disk selftest does a raw read/write round-trip
-# ("selftest: nvme read/write ok"). Off by default so the standard BIOS
+# ("selftest: nvme0 read/write ok"). Off by default so the standard BIOS
 # run is unchanged.
 NVME_ARGS=""
 if [ -n "${NVME_IMG:-}" ]; then
@@ -78,19 +78,54 @@ if [ -n "${NVME_IMG:-}" ]; then
     NVME_ARGS="-drive if=none,id=nvm0,file=$NVME_IMG,format=raw -device nvme,serial=canvme,drive=nvm0"
 fi
 
-# Optional USB: an xHCI controller with a USB-HID boot keyboard. When
-# USB_KBD is set the kernel's xHCI driver enumerates it and feeds key
-# events; injected keystrokes arrive tagged source=usb-hid.
+# Optional USB: an xHCI controller with USB-HID boot devices and/or a USB
+# mass-storage disk. When USB_KBD is set the kernel's xHCI driver enumerates
+# a boot keyboard and feeds key events; injected keystrokes arrive tagged
+# source=usb-hid. When USB_MOUSE is set a boot mouse is attached too, so the
+# driver binds both devices simultaneously (universal-HID class detection +
+# multi-device) and the pointer probe is driven through the USB mouse. When
+# USB_DISK is set a usb-storage device is attached and the disk selftest does
+# a raw read/write round-trip against it (universal SCSI Bulk-Only Transport).
 USB_ARGS=""
-if [ -n "${USB_KBD:-}" ]; then
-    USB_ARGS="-device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0"
-    KBD_DEV=""   # drop the virtio keyboard so sendkey routes to usb-kbd
+if [ -n "${USB_KBD:-}" ] || [ -n "${USB_MOUSE:-}" ] || [ -n "${USB_DISK:-}" ]; then
+    USB_ARGS="-device qemu-xhci,id=xhci"
+    if [ -n "${USB_KBD:-}" ]; then
+        USB_ARGS="$USB_ARGS -device usb-kbd,bus=xhci.0"
+        KBD_DEV=""   # drop the virtio keyboard so sendkey routes to usb-kbd
+    fi
+    if [ -n "${USB_MOUSE:-}" ]; then
+        USB_ARGS="$USB_ARGS -device usb-mouse,bus=xhci.0"
+    fi
+    if [ -n "${USB_DISK:-}" ]; then
+        USB_DISK_IMG="${USB_DISK_IMG:-build/canboot-usbdisk.img}"
+        [ -f "$USB_DISK_IMG" ] || truncate -s 16M "$USB_DISK_IMG"
+        USB_ARGS="$USB_ARGS -drive if=none,id=usbstick,file=$USB_DISK_IMG,format=raw"
+        USB_ARGS="$USB_ARGS -device usb-storage,drive=usbstick,bus=xhci.0"
+    fi
+fi
+
+# Optional virtio-rng entropy device. When RNG_DEV is set the kernel brings
+# it up and the boot selftest pulls bytes from it ("selftest: virtio-rng ok").
+RNG_ARGS=""
+if [ -n "${RNG_DEV:-}" ]; then
+    RNG_ARGS="-device virtio-rng-pci"
+fi
+
+# Optional virtio-gpu display. When GPU_DEV is set we drop the emulated VGA
+# (so firmware leaves no framebuffer) and attach a virtio-gpu; the kernel
+# then drives it for the scanout ("canboot: virtio-gpu fb ...").
+VGA_ARGS=""
+GPU_ARGS=""
+if [ -n "${GPU_DEV:-}" ]; then
+    VGA_ARGS="-vga none"
+    GPU_ARGS="-device virtio-gpu-pci"
 fi
 
 AUDIO_WAV="${AUDIO_WAV:-build/canboot-bios-audio.wav}"
 rm -f "$AUDIO_WAV"
 qemu-system-x86_64 \
     -machine q35 \
+    $VGA_ARGS \
     -boot order=dc \
     -cdrom "$ISO" \
     -drive "if=none,id=blk0,file=$DISK_IMG,format=raw" \
@@ -100,6 +135,8 @@ qemu-system-x86_64 \
     -device "${NIC_MODEL:-virtio-net-pci},netdev=n0" \
     $NVME_ARGS \
     $USB_ARGS \
+    $RNG_ARGS \
+    $GPU_ARGS \
     -audiodev "wav,id=snd,path=$AUDIO_WAV" \
     -device intel-hda \
     -device hda-duplex,audiodev=snd \
@@ -302,10 +339,18 @@ PY
             fi
         }
         check 'canboot: framebuffer painted'
+        if [ -n "${GPU_DEV:-}" ]; then
+            check 'canboot: virtio-gpu fb '
+        fi
         check 'canboot: ps/2 input ready'
-        if [ -n "${USB_KBD:-}" ]; then
-            check 'canboot: usb-hid keyboard on port'
-            check 'canboot: rx usb-hid'
+        if [ -n "${USB_KBD:-}" ] || [ -n "${USB_MOUSE:-}" ]; then
+            # Each attached boot device must enumerate and be classified
+            # correctly (proves universal-HID class detection + binding
+            # more than one device on the same controller).
+            [ -n "${USB_KBD:-}" ]   && check 'canboot: usb-hid keyboard on port'
+            [ -n "${USB_MOUSE:-}" ] && check 'canboot: usb-hid mouse on port'
+            # Injected keystrokes arrive tagged source=usb-hid.
+            [ -n "${USB_KBD:-}" ]   && check 'canboot: rx usb-hid'
         else
             check 'canboot: virtio-input ready'
             check 'canboot: rx '
@@ -338,9 +383,18 @@ PY
 
 
         if [ -n "${NVME_IMG:-}" ]; then
-            check 'selftest: nvme read/write ok'
+            check 'selftest: nvme0 read/write ok'
+        fi
+        if [ -n "${USB_DISK:-}" ]; then
+            check 'canboot: usb-storage usb0'
+            check 'selftest: usb0 read/write ok'
         fi
         check 'selftest: disk test ok'
+        check 'selftest: rtc ok year='
+        check 'selftest: acpi power ok'
+        if [ -n "${RNG_DEV:-}" ]; then
+            check 'selftest: virtio-rng ok'
+        fi
         check 'selftest: cando_open ok'
         check 'selftest: cando_openlibs ok'
         check 'selftest: cando_close ok'
