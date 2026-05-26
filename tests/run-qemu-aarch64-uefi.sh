@@ -251,6 +251,14 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         check 'selftest: init.cdo executed ok'
         check 'canboot: virtio-gpu fb '
         check 'selftest: display lib registered'
+        check 'cando datetime.year ok = true'
+
+        check 'cando stream.memory ok = true'
+
+        check 'cando thread.join = 499500'
+
+        check 'cando thread.state = done'
+
         check 'cando jit match = true'
         # The native A64 JIT emitter must compile the hot loop trace
         # (codegen_aarch64.c); traces_compiled>=1 prints this marker.

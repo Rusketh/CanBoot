@@ -437,6 +437,30 @@ IF (TS_fail == 0) {
 }
 print("cando test suite end");
 
+// ---- CanDo real stdlib on bare metal (thread / stream / datetime) ----
+// These are the upstream CanDo libraries (vendor/cando/source/lib/*),
+// not thin canboot bindings: thread spawns real OS threads via the
+// `thread {}` keyword onto the rt/sched scheduler (depends on the M4
+// preemption work); stream is the vtable adapter pool; datetime is the
+// calendar lib (epoch 0 here - no RTC, gettimeofday returns 0).
+print("cando stdlib begin");
+VAR dt = datetime.now();
+print("cando datetime.year ok =", datetime.year(dt) >= 1970);
+VAR ms = stream.memory();
+ms:write("canboot-stream");
+print("cando stream.memory ok =", true);
+// Spawn a worker thread and join it (single worker; concurrent CanDo
+// child-VMs share one TLS area, so we keep to the spawn->join shape).
+VAR worker = thread {
+    VAR s = 0; VAR i = 0;
+    WHILE (i < 1000) { s = s + i; i = i + 1; }
+    RETURN s;
+};
+VAR wr = thread.join(worker);
+print("cando thread.join =", wr);
+print("cando thread.state =", thread.state(worker));
+print("cando stdlib end");
+
 // ---- JIT: profile a compute-heavy loop, compile it, verify parity ----
 // The vendored CanDo codegen (vendor/cando/source/jit/codegen.c on
 // x86_64, cando_port/jit/codegen_aarch64.c on aarch64) emits real
