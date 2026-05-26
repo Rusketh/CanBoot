@@ -243,11 +243,12 @@ jobs:
               build/canboot-x86_64.elf
               build/canboot-x86_64-bios.iso
 
-      - name: QEMU smoke test (usb-kbd + usb-mouse + usb-storage)
+      - name: QEMU smoke test (usb-kbd + usb-mouse + usb-storage + virtio-rng)
         env:
           USB_KBD: "1"
           USB_MOUSE: "1"
           USB_DISK: "1"
+          RNG_DEV: "1"
           TIMEOUT: "280"
         run: bash tests/run-qemu-bios.sh build/canboot-x86_64-bios.iso
 

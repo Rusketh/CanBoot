@@ -13,10 +13,13 @@
 
 #include "canboot/boot_info.h"
 #include "canboot/env.h"
+#include <string.h>
+
 #include "hal/console.h"
 #include "hal/input.h"
 #include "hal/pci.h"
 #include "hal/rtc.h"
+#include "hal/rng.h"
 #include "sync/cpu.h"
 
 void fb_clear(const struct canboot_fb *fb, uint32_t pixel);
@@ -397,6 +400,22 @@ static void kmain_body(struct boot_info *bi) {
         hal_console_write("\n");
     } else {
         hal_console_write("selftest: rtc unavailable\n");
+    }
+
+    /* virtio-rng: pull two buffers and confirm the device delivers bytes
+     * that differ between draws (a stuck/constant source would repeat). */
+    if (canboot_rng_init()) {
+        uint8_t a[16] = {0}, b[16] = {0};
+        int ra = canboot_rng_read(a, sizeof(a));
+        int rb = canboot_rng_read(b, sizeof(b));
+        if (ra == (int)sizeof(a) && rb == (int)sizeof(b) &&
+            memcmp(a, b, sizeof(a)) != 0) {
+            hal_console_write("selftest: virtio-rng ok\n");
+        } else {
+            hal_console_write("selftest: FAIL virtio-rng\n");
+        }
+    } else {
+        hal_console_write("selftest: virtio-rng absent\n");
     }
 
     /* Milestone 18: Intel HDA audio probe. Best-effort; the cando

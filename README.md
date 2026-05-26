@@ -143,7 +143,8 @@ aarch64 ~8x under QEMU).
 
 **Network + TLS** — lwIP 2.2.1 in NO_SYS mode over virtio-net (DHCP /
 UDP / TCP / HTTP); Mbed TLS 3.6.x LTS with hardware entropy
-(RDSEED/RDRAND + TSC jitter fallback), session tickets, and a
+(RDSEED/RDRAND + TSC jitter fallback, plus virtio-rng when present),
+session tickets, and a
 cooperative BIO over lwIP's raw API.
 
 **Media** — stb_image (PNG/JPG/BMP decode), minimp3 (MP3 decode), a

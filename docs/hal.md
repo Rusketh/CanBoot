@@ -158,6 +158,7 @@ CF8/CFC; the aarch64 path is ECAM at the firmware-provided MMIO base.
 |---------|-------|-------|
 | `hal/time` | `tests/selftest/net.c` calibration | monotonic TSC + i8254 PIT; no separate file yet |
 | Wall clock (`hal/rtc.h`) | `arch/x86_64/rtc.c` | CMOS RTC (0x70/0x71); `canboot_rtc_read` + `canboot_wall_epoch`; exposed to scripts as `time.now()`. Weak default returns 0 on arches without an RTC |
+| RNG (`hal/rng.h`) | `hal/rng/virtio_rng.c` | virtio-rng entropy device; `canboot_rng_read`. Mixed (XOR) into the Mbed TLS entropy poll when present, ignored when absent |
 | IDT / IRQ vectors | `arch/x86_64/idt.{c,h}`, `arch/x86_64/idt_stubs.S` | x86_64 trap frame dump on exception |
 | Power off | (not implemented) | ACPI S5 / PSCI bring-up deferred |
 

@@ -104,6 +104,13 @@ if [ -n "${USB_KBD:-}" ] || [ -n "${USB_MOUSE:-}" ] || [ -n "${USB_DISK:-}" ]; t
     fi
 fi
 
+# Optional virtio-rng entropy device. When RNG_DEV is set the kernel brings
+# it up and the boot selftest pulls bytes from it ("selftest: virtio-rng ok").
+RNG_ARGS=""
+if [ -n "${RNG_DEV:-}" ]; then
+    RNG_ARGS="-device virtio-rng-pci"
+fi
+
 AUDIO_WAV="${AUDIO_WAV:-build/canboot-bios-audio.wav}"
 rm -f "$AUDIO_WAV"
 qemu-system-x86_64 \
@@ -117,6 +124,7 @@ qemu-system-x86_64 \
     -device "${NIC_MODEL:-virtio-net-pci},netdev=n0" \
     $NVME_ARGS \
     $USB_ARGS \
+    $RNG_ARGS \
     -audiodev "wav,id=snd,path=$AUDIO_WAV" \
     -device intel-hda \
     -device hda-duplex,audiodev=snd \
@@ -368,6 +376,9 @@ PY
         fi
         check 'selftest: disk test ok'
         check 'selftest: rtc ok year='
+        if [ -n "${RNG_DEV:-}" ]; then
+            check 'selftest: virtio-rng ok'
+        fi
         check 'selftest: cando_open ok'
         check 'selftest: cando_openlibs ok'
         check 'selftest: cando_close ok'

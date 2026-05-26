@@ -108,6 +108,7 @@ set(CANBOOT_PORTABLE_SOURCES
     hal/net/e1000e.c
     hal/net/rtl8139.c
     hal/net/pcnet.c
+    hal/rng/virtio_rng.c
     hal/virtio/virtio_pci.c
 
     # Networking + TLS port shims.
