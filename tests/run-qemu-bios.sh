@@ -70,7 +70,7 @@ fi
 
 # Optional NVMe device. When NVME_IMG is set the kernel's NVMe driver
 # binds it and the disk selftest does a raw read/write round-trip
-# ("selftest: nvme read/write ok"). Off by default so the standard BIOS
+# ("selftest: nvme0 read/write ok"). Off by default so the standard BIOS
 # run is unchanged.
 NVME_ARGS=""
 if [ -n "${NVME_IMG:-}" ]; then
@@ -360,7 +360,7 @@ PY
 
 
         if [ -n "${NVME_IMG:-}" ]; then
-            check 'selftest: nvme read/write ok'
+            check 'selftest: nvme0 read/write ok'
         fi
         if [ -n "${USB_DISK:-}" ]; then
             check 'canboot: usb-storage usb0'
